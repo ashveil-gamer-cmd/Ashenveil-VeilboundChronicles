@@ -52,6 +52,17 @@
   <div class="kill-counter" id="killCount">☠ 0 Slain</div>
 </div>
 
+<!-- VOLUME CONTROL -->
+<div id="volumeControl">
+  <button id="volumeBtn" title="Volume" onclick="toggleVolumePanel()">🔊</button>
+  <div id="volumePanel" style="display:none">
+    <div class="vol-label">Volume</div>
+    <input type="range" id="volumeSlider" min="0" max="100" value="60" oninput="handleVolumeChange(this.value)">
+    <div class="vol-value" id="volumeValue">60%</div>
+    <button class="vol-mute-btn" onclick="handleMuteToggle()">Mute</button>
+  </div>
+</div>
+
 <div id="spiritPanel"></div>
 <div id="musicLabel" id="musicLabel">♪ —</div>
 
