@@ -361,3 +361,101 @@ canvas#c{display:block;position:fixed;top:0;left:0}
   letter-spacing:2px;text-transform:uppercase;
   color:#b8a8d0
 }
+
+/* ─── ABANDON RUN BUTTON (inside dungeon) ─── */
+#abandonRunBtn{
+  font-family:'Cinzel',serif;
+  font-size:clamp(9px,1vw,11px);
+  letter-spacing:1.5px;text-transform:uppercase;font-weight:600;
+  color:#b8a8d0;
+  background:rgba(0,0,0,0.75);
+  border:1px solid rgba(192,132,252,0.3);
+  border-radius:4px;
+  padding:clamp(5px,0.7vw,8px) clamp(10px,1.2vw,16px);
+  cursor:pointer;
+  margin-top:clamp(6px,0.8vw,10px);
+  transition:all 0.2s;
+  pointer-events:auto; /* parent has pointer-events:none */
+}
+#abandonRunBtn:hover{color:#ef4444;border-color:#ef4444;background:rgba(239,68,68,0.15)}
+
+/* Dungeon status overlay needs to allow pointer events on its button */
+#dungeonStatus{pointer-events:none}
+
+/* ─── BOSS HP BAR ─── */
+#bossHpBar{
+  position:fixed;top:clamp(170px,18vh,200px);left:50%;transform:translateX(-50%);
+  z-index:48;pointer-events:none;
+  display:none;flex-direction:column;gap:5px;
+  width:clamp(280px,40vw,460px);
+  background:rgba(0,0,0,0.75);
+  padding:clamp(8px,1vw,12px) clamp(14px,1.6vw,22px);
+  border:1px solid rgba(239,68,68,0.4);
+  border-radius:6px;
+  box-shadow:0 4px 16px rgba(0,0,0,0.6),0 0 24px rgba(239,68,68,0.2)
+}
+.boss-hp-name{
+  font-family:'Cinzel',serif;
+  font-size:clamp(12px,1.3vw,15px);
+  letter-spacing:3px;text-transform:uppercase;font-weight:700;
+  color:#ef4444;text-shadow:0 0 10px currentColor;text-align:center
+}
+.boss-hp-track{
+  height:clamp(10px,1.2vw,14px);
+  background:rgba(80,20,20,0.6);
+  border-radius:3px;overflow:hidden;
+  border:1px solid rgba(239,68,68,0.3)
+}
+.boss-hp-fill{
+  height:100%;
+  background:linear-gradient(90deg,#ef4444 0%,#dc2626 50%,#991b1b 100%);
+  transition:width 0.15s ease-out;
+  box-shadow:0 0 8px rgba(239,68,68,0.5) inset
+}
+
+/* ─── PORTAL ENTRY PROMPT ─── */
+#portalPrompt{
+  position:fixed;bottom:clamp(100px,14vh,140px);left:50%;transform:translateX(-50%);
+  z-index:55;
+  display:none;flex-direction:column;align-items:center;gap:clamp(6px,0.8vw,10px);
+  background:rgba(0,0,0,0.88);
+  padding:clamp(12px,1.4vw,18px) clamp(20px,2vw,32px);
+  border:2px solid rgba(192,132,252,0.5);
+  border-radius:8px;
+  box-shadow:0 6px 20px rgba(0,0,0,0.7),0 0 32px rgba(192,132,252,0.25);
+  animation:portalPromptPulse 2s ease-in-out infinite
+}
+@keyframes portalPromptPulse{
+  0%,100%{box-shadow:0 6px 20px rgba(0,0,0,0.7),0 0 24px rgba(192,132,252,0.2)}
+  50%{box-shadow:0 6px 20px rgba(0,0,0,0.7),0 0 40px rgba(192,132,252,0.45)}
+}
+.portal-prompt-label{
+  font-family:'Cinzel',serif;
+  font-size:clamp(10px,1vw,12px);
+  letter-spacing:2px;text-transform:uppercase;
+  color:#9a7abe
+}
+.portal-prompt-name{
+  font-family:'Cinzel',serif;
+  font-size:clamp(16px,1.6vw,22px);
+  letter-spacing:3px;text-transform:uppercase;font-weight:700;
+  color:#c084fc;text-shadow:0 0 12px currentColor
+}
+.portal-prompt-btn{
+  font-family:'Cinzel',serif;
+  font-size:clamp(13px,1.3vw,16px);
+  letter-spacing:3px;text-transform:uppercase;font-weight:700;
+  color:#fff;
+  background:linear-gradient(135deg,rgba(192,132,252,0.35),rgba(192,132,252,0.1));
+  border:1px solid rgba(192,132,252,0.7);
+  padding:clamp(10px,1.2vw,14px) clamp(28px,3vw,44px);
+  cursor:pointer;border-radius:6px;
+  transition:all 0.15s;
+  margin-top:4px
+}
+.portal-prompt-btn:hover{
+  background:linear-gradient(135deg,rgba(192,132,252,0.55),rgba(192,132,252,0.2));
+  border-color:#c084fc;
+  box-shadow:0 0 18px rgba(192,132,252,0.45);
+  transform:translateY(-1px)
+}
