@@ -724,3 +724,114 @@ canvas#c{display:block;position:fixed;top:0;left:0}
   #shopGearGrid{grid-template-columns:repeat(2,1fr)}
   #shopRefreshRow{flex-direction:column;align-items:stretch;text-align:center}
 }
+
+/* ─── BAG DEPTH UPDATES ─── */
+/* Upgrade chevron in top-left of each bag slot */
+.bag-slot-mark{
+  position:absolute;top:3px;left:5px;
+  font-size:clamp(11px,1.2vw,14px);font-weight:700;
+  line-height:1;letter-spacing:0;
+  pointer-events:none;
+}
+/* Verdict banner in tooltip */
+.bag-tt-verdict{
+  font-family:'Cinzel',serif;
+  font-size:clamp(10px,1.05vw,12px);
+  letter-spacing:2.5px;font-weight:700;
+  padding:clamp(6px,0.8vw,9px) clamp(10px,1.2vw,14px);
+  border:1px solid;border-radius:4px;
+  text-align:center;text-transform:uppercase;
+}
+/* Salvage preview section in tooltip */
+.bag-tt-salvage-preview .bag-stat-line{
+  font-size:clamp(10px,1vw,12px);
+  letter-spacing:0.5px;
+}
+/* Salvage button — purple/magical to differentiate from equip/discard */
+.bag-btn-salvage{
+  color:#a78bfa;
+  background:transparent;
+  border:1px solid rgba(167,139,250,0.45);
+}
+.bag-btn-salvage:hover{
+  background:rgba(167,139,250,0.15);
+  border-color:#a78bfa;
+  box-shadow:0 0 14px rgba(167,139,250,0.3);
+}
+/* When tooltip has 3 buttons, make them stack vertically on narrow screens */
+@media (max-width:520px){
+  .bag-tt-actions{flex-direction:column}
+}
+
+/* ─── PROFESSION PANEL DEPTH ─── */
+.prof-xp-row{
+  display:flex;align-items:center;gap:8px;margin-bottom:6px;
+}
+.prof-xp-text{
+  font-family:'Cinzel',serif;font-size:clamp(8px,0.85vw,10px);
+  color:#b8a8d0;letter-spacing:1px;white-space:nowrap;
+}
+.mat-row{
+  display:flex;flex-wrap:wrap;gap:8px;
+  padding:clamp(6px,0.8vw,10px);
+  background:rgba(255,255,255,0.03);
+  border-radius:4px;margin-bottom:8px;
+}
+.mat{
+  font-family:'Cinzel',serif;font-size:clamp(9px,0.9vw,11px);
+  letter-spacing:0.5px;
+}
+.recipe-list{display:flex;flex-direction:column;gap:6px}
+.recipe{
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:10px;align-items:center;
+  padding:clamp(8px,1vw,12px);
+  background:rgba(255,255,255,0.02);
+  border:1px solid rgba(255,255,255,0.07);
+  border-radius:5px;
+}
+.recipe-head{
+  display:flex;align-items:center;gap:8px;
+}
+.recipe-icon{font-size:clamp(14px,1.4vw,17px);font-weight:700;line-height:1}
+.recipe-name{
+  font-family:'Cinzel',serif;font-size:clamp(11px,1.1vw,13px);
+  letter-spacing:1px;font-weight:600;
+}
+.recipe-rarity{
+  font-family:'Cinzel',serif;font-size:clamp(8px,0.8vw,10px);
+  padding:2px 7px;border-radius:3px;letter-spacing:1.5px;font-weight:600;
+}
+.recipe-stats{
+  grid-column:1 / -1;
+  font-size:clamp(10px,1vw,12px);color:#b8a8d0;
+  margin-top:2px;
+}
+.recipe-cost{
+  grid-column:1 / -1;
+  font-size:clamp(10px,1vw,12px);
+}
+.recipe-block{
+  grid-column:1 / -1;
+  font-size:clamp(9px,0.9vw,11px);
+  color:#ef4444;font-style:italic;
+}
+.craft-btn{
+  grid-row:1;grid-column:2;
+  font-family:'Cinzel',serif;font-size:clamp(10px,1vw,12px);
+  letter-spacing:1.5px;font-weight:700;
+  color:#9DC4B0;background:linear-gradient(135deg,rgba(157,196,176,0.15),rgba(157,196,176,0.05));
+  border:1px solid rgba(157,196,176,0.45);
+  padding:clamp(6px,0.8vw,9px) clamp(10px,1.2vw,14px);
+  border-radius:4px;cursor:pointer;
+  transition:all 0.15s;
+}
+.craft-btn:hover:not([disabled]){
+  background:linear-gradient(135deg,rgba(157,196,176,0.3),rgba(157,196,176,0.12));
+  border-color:#9DC4B0;box-shadow:0 0 12px rgba(157,196,176,0.3);
+}
+.craft-btn[disabled]{
+  opacity:0.4;cursor:not-allowed;color:#4a5a50;border-color:rgba(74,90,80,0.4);
+  background:transparent;
+}
