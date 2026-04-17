@@ -119,7 +119,7 @@ canvas#c{display:block;position:fixed;top:0;left:0}
 .ab canvas{border-radius:6px;pointer-events:none}
 .ab-hotkey{font-family:'Cinzel',serif;font-size:7px;color:#443355;position:absolute;top:3px;left:5px;letter-spacing:0.5px}
 .ab-name{font-size:6.5px;color:#6b4d8a;letter-spacing:0.5px;position:absolute;bottom:4px;text-transform:uppercase;pointer-events:none}
-.ab-cd{position:absolute;inset:0;background:rgba(0,0,0,0.82);display:flex;align-items:center;justify-content:center;font-family:'Cinzel',serif;font-size:15px;font-weight:700;color:#fff;pointer-events:none;transition:opacity 0.2s;border-radius:12px}
+.ab-cd{position:absolute;inset:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;font-family:'Cinzel',serif;font-size:15px;font-weight:700;color:#fff;pointer-events:none;transition:opacity 0.2s;border-radius:12px;text-shadow:0 1px 4px rgba(0,0,0,0.95),0 0 8px rgba(0,0,0,0.8)}
 .ab-ov{position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.6);transition:height 0.05s;pointer-events:none;border-radius:0 0 12px 12px}
 
 /* ─── MENU BTNS (RIGHT COLUMN above ability bar, clear of play area) ─── */
@@ -179,14 +179,26 @@ canvas#c{display:block;position:fixed;top:0;left:0}
 .panel-close{font-family:'Cinzel',serif;font-size:7.5px;color:#6b4d8a;background:transparent;border:1px solid #6b4d8a40;padding:6px 16px;cursor:pointer;border-radius:4px;letter-spacing:2px;transition:all 0.2s}
 .panel-close:hover{color:#c084fc;border-color:#c084fc50}
 .gear-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:14px}
-.gear-slot{background:rgba(255,255,255,0.025);border:1px solid rgba(192,132,252,0.1);border-radius:8px;padding:10px;transition:border-color 0.2s}
-.gear-slot:hover{border-color:rgba(192,132,252,0.2)}
-.gear-slot-name{font-family:'Cinzel',serif;font-size:8px;color:#443355;letter-spacing:2px;text-transform:uppercase;margin-bottom:5px}
-.gear-item{font-family:'Crimson Text',serif;font-size:13px;font-weight:600}
-.gear-item.common{color:#9ca3af}.gear-item.uncommon{color:#22c55e}.gear-item.rare{color:#60a5fa}.gear-item.epic{color:#c084fc}.gear-item.legendary{color:#f59e0b;text-shadow:0 0 8px #f59e0b44}
+.gear-slot{background:rgba(255,255,255,0.025);border:1px solid rgba(192,132,252,0.1);border-radius:8px;padding:12px;transition:border-color 0.2s;border-left:3px solid rgba(255,255,255,0.06)}
+.gear-slot:hover{border-color:rgba(192,132,252,0.25)}
+.gear-slot.has-item{background:rgba(192,132,252,0.035)}
+.gear-slot-header{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.gear-slot-icon{font-size:15px;color:#c084fc;width:18px;text-align:center;opacity:0.85}
+.gear-slot-icon-empty{opacity:0.25}
+.gear-slot-name{font-family:'Cinzel',serif;font-size:8px;color:#7a5a9a;letter-spacing:2px;text-transform:uppercase;flex:1}
+.gear-rarity-tag{font-family:'Cinzel',serif;font-size:7px;letter-spacing:1.5px;padding:2px 6px;border:1px solid;border-radius:3px;text-transform:uppercase}
+.gear-item{font-family:'Crimson Text',serif;font-size:13px;font-weight:600;margin-bottom:6px;letter-spacing:0.5px}
+.gear-item.common{color:#9ca3af}
+.gear-item.uncommon{color:#22c55e}
+.gear-item.rare{color:#60a5fa;text-shadow:0 0 6px rgba(96,165,250,0.3)}
+.gear-item.epic{color:#c084fc;text-shadow:0 0 8px rgba(192,132,252,0.4)}
+.gear-item.legendary{color:#f59e0b;text-shadow:0 0 10px rgba(245,158,11,0.5)}
 .gear-item.mythic{color:#ff6b6b;text-shadow:0 0 12px rgba(255,107,107,0.5)}
-.gear-stat{display:block;font-size:9px;color:#4a3666;margin-top:3px;letter-spacing:0.5px}
-.gear-empty{color:#2a1a3a;font-style:italic;font-size:12px}
+.gear-stats-block{display:flex;flex-direction:column;gap:2px;margin-top:4px}
+.gear-stat-row{font-size:10px;color:#a99bc0;letter-spacing:0.3px;padding:1px 0}
+.gear-stat{display:block;font-size:9px;color:#4a3666;margin-top:3px;letter-spacing:0.5px} /* legacy, kept for safety */
+.gear-empty{color:#2a1a3a;font-style:italic;font-size:11px;padding:4px 0}
+.gear-set-line{font-size:9px;color:#f59e0baa;margin-top:6px;font-family:'Cinzel',serif;letter-spacing:1px;padding-top:5px;border-top:1px solid rgba(245,158,11,0.15)}
 .set-badge-line{font-size:8px;color:#f59e0b88;margin-top:2px;font-family:'Cinzel',serif;letter-spacing:1px}
 
 /* ─── PROF PANEL (full-screen modal) ─── */
