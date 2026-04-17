@@ -1106,3 +1106,68 @@ canvas#c{display:block;position:fixed;top:0;left:0}
   border-radius:4px;cursor:pointer;
 }
 #classSelectCancelBtn:hover{color:#c084fc;border-color:#c084fc66}
+
+/* ─── VOLUME CONTROL ─── */
+#volumeControl{
+  position:fixed;top:clamp(8px,1vw,14px);right:clamp(100px,12vw,180px);
+  z-index:200;display:flex;flex-direction:column;align-items:flex-end;gap:6px;
+}
+#volumeBtn{
+  width:36px;height:36px;
+  background:rgba(0,0,0,0.55);
+  border:1px solid rgba(192,132,252,0.35);
+  border-radius:6px;cursor:pointer;
+  font-size:16px;color:#c084fc;
+  display:flex;align-items:center;justify-content:center;
+  transition:all 0.15s;
+}
+#volumeBtn:hover{
+  background:rgba(192,132,252,0.15);border-color:#c084fc;
+  box-shadow:0 0 10px rgba(192,132,252,0.4);
+}
+#volumePanel{
+  display:flex;flex-direction:column;gap:8px;
+  padding:12px 14px;min-width:160px;
+  background:rgba(15,8,30,0.95);
+  border:1px solid rgba(192,132,252,0.35);
+  border-radius:6px;
+  box-shadow:0 8px 24px rgba(0,0,0,0.6);
+}
+.vol-label{
+  font-family:'Cinzel',serif;font-size:9px;
+  letter-spacing:2.5px;color:#c084fc;text-transform:uppercase;
+}
+#volumeSlider{
+  width:100%;height:4px;-webkit-appearance:none;appearance:none;
+  background:linear-gradient(to right,#c084fc,#6b4d8a);
+  border-radius:2px;outline:none;cursor:pointer;
+}
+#volumeSlider::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;
+  width:14px;height:14px;border-radius:50%;
+  background:#e8dfc8;cursor:pointer;
+  box-shadow:0 0 6px rgba(192,132,252,0.8);
+}
+#volumeSlider::-moz-range-thumb{
+  width:14px;height:14px;border-radius:50%;border:0;
+  background:#e8dfc8;cursor:pointer;
+  box-shadow:0 0 6px rgba(192,132,252,0.8);
+}
+.vol-value{
+  font-family:'Cinzel',serif;font-size:10px;
+  color:#b8a8d0;letter-spacing:1px;text-align:center;
+}
+.vol-mute-btn{
+  font-family:'Cinzel',serif;font-size:9px;
+  letter-spacing:2px;text-transform:uppercase;
+  padding:6px 10px;cursor:pointer;
+  background:transparent;color:#c084fc;
+  border:1px solid rgba(192,132,252,0.4);border-radius:3px;
+  transition:all 0.15s;
+}
+.vol-mute-btn:hover{
+  background:rgba(192,132,252,0.15);border-color:#c084fc;
+}
+.vol-mute-btn.muted{
+  color:#ef4444;border-color:rgba(239,68,68,0.4);
+}
