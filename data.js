@@ -8,7 +8,7 @@ const ATTACK_CD=480;
 const AFK_IDLE=2800;
 const MAX_SPIRITS=5;
 const MAX_LEVEL=100;
-const ABILITY_CDS=[4000,3000,6000,12000];
+const ABILITY_CDS=[4000,3000,6000,12000,25000];
 const MAX_ENEMIES=20;
 
 // ═══════ LANDMARKS ════════════════════════════════════════
@@ -113,8 +113,23 @@ let curZone=ZONES[0],zoneTransiting=false;
 
 
 // ═══════ FORMULAS ════════════════════════════════════════
-function computeMaxHp(lv){return Math.round(800+lv*45+lv*lv*0.8);}
-function computeAttack(lv){return 12+lv*2.2+lv*lv*0.04;}
+function computeMaxHp(lv){
+  // Base formula scaled by class baseHp as a multiplier vs 1000 (Hollowcaller baseline)
+  const base = Math.round(800+lv*45+lv*lv*0.8);
+  if(typeof player!=='undefined' && player && player.classId && typeof CLASS_DEFS!=='undefined'){
+    const cls = CLASS_DEFS[player.classId] || CLASS_DEFS.hollowcaller;
+    return Math.round(base * (cls.baseHp/1000));
+  }
+  return base;
+}
+function computeAttack(lv){
+  const base = 12+lv*2.2+lv*lv*0.04;
+  if(typeof player!=='undefined' && player && player.classId && typeof CLASS_DEFS!=='undefined'){
+    const cls = CLASS_DEFS[player.classId] || CLASS_DEFS.hollowcaller;
+    return base * (cls.baseAtk/15);
+  }
+  return base;
+}
 function xpForLevel(lv){return Math.floor(100*Math.pow(lv,1.65));}
 function enemyHpScale(lv){return lv<=5?0.72:lv<=10?0.88:lv<=20?1.05:1.4;}
 function enemyDmgScale(lv){return lv<=5?0.65:lv<=10?0.82:lv<=20?0.98:1.25;}
