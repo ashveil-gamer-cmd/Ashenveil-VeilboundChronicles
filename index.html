@@ -14,24 +14,35 @@
 <div id="titleScreen">
   <div class="title-eyebrow">Veilbound Chronicles</div>
   <div class="title-main">ASHENVEIL</div>
-  <div class="title-sub">The Hollowcaller · Chapter I</div>
+  <div class="title-sub">Chapter I</div>
   <div class="title-divider"></div>
   <button id="startBtn">⚡ Enter the Veil</button>
   <button id="continueBtn" style="display:none">⚡ Continue</button>
   <button id="newGameBtn" class="title-secondary" style="display:none">New Game</button>
-  <div class="title-lore">The veil between worlds grows thin. You are the last Hollowcaller — master of bound spirits, walker between life and death. The Ashen Wastes hunger for a champion.</div>
+  <div class="title-lore">The veil between worlds grows thin. You must choose your path and walk into the Ashen Wastes as its champion.</div>
+</div>
+
+<!-- CLASS SELECT SCREEN — shown after title "Enter the Veil" when no save exists OR on New Game -->
+<div id="classSelectScreen" style="display:none">
+  <div class="class-select-header">
+    <div class="title-eyebrow">Choose Your Path</div>
+    <div class="title-main class-select-title">THE VEIL CALLS</div>
+  </div>
+  <div id="classSelectGrid"></div>
+  <button id="classSelectCancelBtn" class="title-secondary">← Back</button>
 </div>
 
 <canvas id="c"></canvas>
 
 <!-- HUD -->
 <div id="hud">
-  <div class="hud-portrait">🔮</div>
+  <div class="hud-portrait" id="hudPortrait">🔮</div>
   <div class="hud-info">
-    <div class="hud-name"><span class="hud-level-badge" id="levelBadge">LV 1</span>HOLLOWCALLER</div>
+    <div class="hud-name"><span class="hud-level-badge" id="levelBadge">LV 1</span><span id="hudClassName">HOLLOWCALLER</span></div>
     <div class="hud-bar-row"><span class="hud-bar-lbl">HP</span><div class="hud-bar-bg"><div class="hud-bar-fill" id="hpFill" style="width:100%"></div></div><span id="hpNum" style="font-size:7px;color:#ef4444;margin-left:4px;font-family:'Cinzel',serif"></span></div>
     <div class="hud-bar-row"><span class="hud-bar-lbl">XP</span><div class="hud-bar-bg"><div class="hud-bar-fill" id="xpFill" style="width:0%"></div></div></div>
-    <div class="hud-bar-row"><span class="hud-bar-lbl" style="color:#9DC4B0">SP</span><div class="hud-bar-bg"><div class="hud-bar-fill" id="spFill" style="width:0%"></div></div></div>
+    <div class="hud-bar-row" id="spRow"><span class="hud-bar-lbl" style="color:#9DC4B0">SP</span><div class="hud-bar-bg"><div class="hud-bar-fill" id="spFill" style="width:0%"></div></div></div>
+    <div class="hud-bar-row" id="wrathRow" style="display:none"><span class="hud-bar-lbl" style="color:#ef4444">WR</span><div class="hud-bar-bg"><div class="hud-bar-fill" id="wrathFill" style="width:0%;background:linear-gradient(to right,#7f1d1d,#ef4444,#fbbf24)"></div></div></div>
     <div class="hud-gold" id="goldLabel">💰 0 G</div>
   </div>
 </div>
@@ -50,35 +61,35 @@
     <span class="ab-hotkey">Q</span>
     <div class="ab-ov" id="ov0" style="height:0%"></div>
     <canvas id="ic0" width="52" height="52"></canvas>
-    <div class="ab-name">Raise</div>
+    <div class="ab-name" id="abName0">Raise</div>
     <div class="ab-cd" id="cd0" style="opacity:0"></div>
   </div>
   <div class="ab ready" id="ab1" onclick="playerCast(1)">
     <span class="ab-hotkey">W</span>
     <div class="ab-ov" id="ov1" style="height:0%"></div>
     <canvas id="ic1" width="52" height="52"></canvas>
-    <div class="ab-name">Veilmark</div>
+    <div class="ab-name" id="abName1">Veilmark</div>
     <div class="ab-cd" id="cd1" style="opacity:0"></div>
   </div>
   <div class="ab ready" id="ab2" onclick="playerCast(2)">
     <span class="ab-hotkey">E</span>
     <div class="ab-ov" id="ov2" style="height:0%"></div>
     <canvas id="ic2" width="52" height="52"></canvas>
-    <div class="ab-name">Detonate</div>
+    <div class="ab-name" id="abName2">Detonate</div>
     <div class="ab-cd" id="cd2" style="opacity:0"></div>
   </div>
   <div class="ab ready" id="ab3" onclick="playerCast(3)"><span class="ab-key" style="position:absolute;top:3px;left:5px;font-family:Cinzel,serif;font-size:7px;color:#3a2450">R</span>
     <span class="ab-hotkey">R</span>
     <div class="ab-ov" id="ov3" style="height:0%"></div>
     <canvas id="ic3" width="52" height="52"></canvas>
-    <div class="ab-name">Wrath Tide</div>
+    <div class="ab-name" id="abName3">Wrath Tide</div>
     <div class="ab-cd" id="cd3" style="opacity:0"></div>
   </div>
   <div class="ab ready" id="ab4" onclick="playerCast(4)">
     <span class="ab-key" style="position:absolute;top:3px;left:5px;font-family:Cinzel,serif;font-size:7px;color:#3a2450">F</span>
     <div class="ab-ov" id="ov4" style="height:0%"></div>
     <canvas id="ic4" width="52" height="52"></canvas>
-    <div class="ab-name">Soul Nova</div>
+    <div class="ab-name" id="abName4">Soul Nova</div>
     <div class="ab-cd" id="cd4" style="opacity:0"></div>
   </div>
 </div>
