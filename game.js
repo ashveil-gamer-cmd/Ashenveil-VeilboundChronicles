@@ -3007,6 +3007,7 @@ function applySave(data){
     shopState.lastRefresh=data.shopState.lastRefresh||0;
     shopState.buyback=data.shopState.buyback||null;
     shopState.buybackPrice=data.shopState.buybackPrice||0;
+    shopState.materials=data.shopState.materials||[];
   }
   // Professions
   if(data.professions){
