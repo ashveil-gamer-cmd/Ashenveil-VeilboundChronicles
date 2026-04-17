@@ -1018,3 +1018,91 @@ canvas#c{display:block;position:fixed;top:0;left:0}
 .shop-material-row .shop-consumable-icon{
   font-weight:700;
 }
+
+/* ─── CLASS SELECT SCREEN ─── */
+#classSelectScreen{
+  position:fixed;inset:0;z-index:500;
+  display:none;flex-direction:column;align-items:center;justify-content:center;
+  padding:clamp(16px,3vw,40px);
+  background:radial-gradient(ellipse at center,#1a0d2e 0%,#06001a 70%,#000 100%);
+  overflow-y:auto;
+}
+.class-select-header{text-align:center;margin-bottom:clamp(20px,3vw,40px)}
+.class-select-title{
+  font-size:clamp(22px,4vw,38px);letter-spacing:6px;
+  color:#e8dfc8;text-shadow:0 0 22px rgba(192,132,252,0.3);margin-top:8px;
+}
+#classSelectGrid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+  gap:clamp(14px,2vw,24px);
+  max-width:800px;width:100%;
+  margin-bottom:clamp(18px,2vw,28px);
+}
+.class-card{
+  display:flex;flex-direction:column;align-items:center;gap:10px;
+  padding:clamp(20px,2.5vw,32px) clamp(16px,2vw,24px);
+  background:linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.01));
+  border:2px solid;border-radius:10px;
+  transition:all 0.2s ease;
+}
+.class-card:hover{
+  transform:translateY(-3px);
+  box-shadow:0 10px 32px rgba(0,0,0,0.6);
+}
+.class-card-icon{
+  font-size:clamp(48px,6vw,72px);line-height:1;font-weight:700;
+  margin-bottom:4px;
+}
+.class-card-name{
+  font-family:'Cinzel',serif;
+  font-size:clamp(18px,2.2vw,24px);
+  letter-spacing:4px;font-weight:700;
+  text-align:center;
+}
+.class-card-tagline{
+  font-family:'Cinzel',serif;
+  font-size:clamp(9px,1vw,12px);
+  letter-spacing:3px;color:#b8a8d0;text-transform:uppercase;
+  margin-bottom:6px;
+}
+.class-card-desc{
+  font-size:clamp(11px,1.1vw,13px);
+  color:#d4c896;line-height:1.5;text-align:center;
+  padding:0 clamp(4px,1vw,12px);
+}
+.class-card-stats{
+  display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;
+  width:100%;
+  margin-top:10px;padding:12px 8px;
+  background:rgba(0,0,0,0.3);border-radius:6px;
+  border:1px solid rgba(255,255,255,0.05);
+}
+.class-stat{display:flex;justify-content:space-between;font-size:clamp(10px,1vw,12px)}
+.class-stat-label{
+  font-family:'Cinzel',serif;color:#8a7aa8;letter-spacing:1.5px;text-transform:uppercase;
+}
+.class-stat-val{
+  font-family:'Cinzel',serif;color:#e8dfc8;font-weight:700;
+}
+.class-card-choose{
+  font-family:'Cinzel',serif;
+  font-size:clamp(11px,1.1vw,13px);
+  letter-spacing:3px;font-weight:700;
+  padding:clamp(10px,1.3vw,14px) clamp(18px,2vw,24px);
+  margin-top:10px;width:100%;
+  background:transparent;border:1.5px solid;border-radius:5px;cursor:pointer;
+  transition:all 0.15s;
+}
+.class-card-choose:hover{
+  background:rgba(255,255,255,0.05);
+  box-shadow:0 0 18px currentColor;
+}
+#classSelectCancelBtn{
+  font-family:'Cinzel',serif;
+  font-size:clamp(10px,1vw,12px);
+  padding:10px 24px;letter-spacing:2.5px;
+  color:#6b4d8a;background:transparent;border:1px solid #6b4d8a40;
+  border-radius:4px;cursor:pointer;
+}
+#classSelectCancelBtn:hover{color:#c084fc;border-color:#c084fc66}
