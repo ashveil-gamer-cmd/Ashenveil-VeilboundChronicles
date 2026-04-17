@@ -386,3 +386,90 @@ const TALENT_TREE={
     ],
   },
 };
+
+
+// ═══════ DUNGEON DEFINITIONS ═══════════════════════════════
+// Each dungeon is a sealed arena run. Waves spawn in order; when all enemies
+// die the next wave begins. Final wave is the boss — a beefed-up elite with
+// inflated HP and a unique name. On boss kill, guaranteed loot of at least
+// the specified minimum rarity.
+const DUNGEONS=[
+  {
+    id:'hollow_crypt',
+    name:'Hollow Crypt',
+    desc:'A forgotten burial site where the restless dead stir beneath cracked flagstones.',
+    minLevel:3,
+    tier:1,
+    color:'#9ca3af',
+    enemyTypes:['skeleton','crawler','wraith'],
+    waves:[
+      {count:6,elites:0,types:['skeleton','crawler']},
+      {count:8,elites:1,types:['skeleton','wraith']},
+      {count:10,elites:1,types:['crawler','wraith','skeleton']},
+    ],
+    boss:{
+      name:'Bone Revenant',
+      baseType:'skeleton',
+      hpMult:12,  // 12x normal enemy HP of that type
+      atkMult:1.8,
+      sizeMult:2.2,
+    },
+    reward:{
+      minRarity:'rare',
+      bonusGold:200,
+      bonusXP:300,
+    },
+  },
+  {
+    id:'wraith_sanctum',
+    name:'Wraith Sanctum',
+    desc:'An echoing temple where spirits scream louder than the living ever did.',
+    minLevel:8,
+    tier:2,
+    color:'#60a5fa',
+    enemyTypes:['wraith','shade','specter'],
+    waves:[
+      {count:7,elites:0,types:['wraith','shade']},
+      {count:9,elites:2,types:['wraith','shade','specter']},
+      {count:11,elites:2,types:['shade','specter']},
+    ],
+    boss:{
+      name:'Sorrowed Specter',
+      baseType:'specter',
+      hpMult:16,
+      atkMult:2.1,
+      sizeMult:2.4,
+    },
+    reward:{
+      minRarity:'epic',
+      bonusGold:500,
+      bonusXP:750,
+    },
+  },
+  {
+    id:'ashen_cathedral',
+    name:'Ashen Cathedral',
+    desc:'A ruined cathedral where ancient wardens refuse to accept their death.',
+    minLevel:15,
+    tier:3,
+    color:'#f59e0b',
+    enemyTypes:['golem','abomination','specter'],
+    waves:[
+      {count:6,elites:1,types:['golem','abomination']},
+      {count:8,elites:2,types:['golem','specter']},
+      {count:10,elites:3,types:['golem','abomination','specter']},
+    ],
+    boss:{
+      name:'Cathedral Warden',
+      baseType:'golem',
+      hpMult:22,
+      atkMult:2.5,
+      sizeMult:2.8,
+    },
+    reward:{
+      minRarity:'legendary',
+      bonusGold:1200,
+      bonusXP:1800,
+    },
+  },
+];
