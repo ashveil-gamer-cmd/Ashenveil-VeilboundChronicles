@@ -86,7 +86,17 @@
 <!-- MENU BUTTONS -->
 <div id="menuBar">
   <div class="menu-btn" onclick="openGear()">⚔ GEAR</div>
-  <div class="menu-btn" onclick="openProf()">✦ PROF</div>
+  <div class="menu-btn" data-menu="talents" onclick="openTalents()">✦ TALENTS</div>
+  <div class="menu-btn" onclick="openProf()">♆ PROF</div>
+</div>
+
+<!-- TALENT PANEL -->
+<div id="talentPanel">
+  <div class="panel-header">
+    <h2>✦ TALENTS</h2>
+    <button class="panel-close" onclick="closeTalents()">← BACK</button>
+  </div>
+  <div id="talentTree"></div>
 </div>
 
 <div id="setProgress"></div>
