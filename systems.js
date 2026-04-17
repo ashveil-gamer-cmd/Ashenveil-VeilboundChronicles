@@ -309,34 +309,207 @@ function formatStat(k,v){
   return `${sign}${v}${suffix} ${label}`;
 }
 
+// ═══════ GEAR PANEL ═══════════════════════════════════════════════
+// Interactive gear panel — shows all equipped items with rich tooltips,
+// tap-to-interact buttons (MOVE TO BAG / SALVAGE), live set bonus tracking,
+// and an aggregated stats summary. Matches the bag panel in polish.
+let _gearSelectedSlot=null;
+
 function openGear(){
-  const slots=document.getElementById('gearSlots'); slots.innerHTML='';
+  _gearSelectedSlot=null;
+  renderGearPanel();
+  document.getElementById('gearPanel').style.display='flex';
+}
+function closeGear(){
+  _gearSelectedSlot=null;
+  document.getElementById('gearPanel').style.display='none';
+}
+
+// Unequip an item into the bag. If bag is full and it's a rare+, warn.
+function unequipToBag(slot){
+  const item=equipped[slot];
+  if(!item)return;
+  if(inventory.length>=INVENTORY_MAX){
+    addFeed(`⚠ Bag full — can't unequip ${item.name}`,'#ef4444');
+    return;
+  }
+  inventory.push(item);
+  equipped[slot]=null;
+  recalcStats();
+  checkSetBonuses();
+  addFeed(`◇ ${item.name} → bag`,'#6b9acf');
+  updateInventoryBadge();
+  if(typeof writeSave==='function')writeSave();
+  _gearSelectedSlot=null;
+  renderGearPanel();
+}
+
+// Salvage a piece directly from equipped slots. Same rules/yields as bag salvage.
+function salvageFromGear(slot){
+  const item=equipped[slot];
+  if(!item)return;
+  const rarityTier={common:0,uncommon:1,rare:2,epic:3,legendary:4,mythic:5}[item.rarity]||0;
+  if(rarityTier>=2){
+    const yields=salvageYieldFor(item);
+    const yieldSummary=Object.entries(yields).map(([k,v])=>`${v} ${MATERIAL_LABELS[k]}`).join(', ');
+    if(!confirm(`Salvage equipped ${item.name}?\n\nYou will UNEQUIP and break down this ${RARITY_LABELS[item.rarity]||'item'} into: ${yieldSummary}`))return;
+  }
+  const yields=salvageYieldFor(item);
+  Object.entries(yields).forEach(([mat,qty])=>creditMaterial(mat,qty));
+  const salvageXP={common:5,uncommon:10,rare:25,epic:60,legendary:150,mythic:300}[item.rarity]||5;
+  Object.keys(professions).forEach(p=>addProfXP(p,salvageXP));
+  equipped[slot]=null;
+  recalcStats();
+  checkSetBonuses();
+  const gained=Object.entries(yields).map(([k,v])=>`+${v} ${MATERIAL_LABELS[k]}`).join(' · ');
+  addFeed(`⚒ Salvaged equipped ${item.name} → ${gained}`,'#a78bfa');
+  if(typeof writeSave==='function')writeSave();
+  _gearSelectedSlot=null;
+  renderGearPanel();
+}
+
+// Computes a summary of aggregated stats from all equipped gear.
+// Returns an array of {label, value, color} lines for rendering.
+function computeEquippedStatsSummary(){
+  const totals={};
+  Object.values(equipped).forEach(item=>{
+    if(!item||!item.stats)return;
+    Object.entries(item.stats).forEach(([k,v])=>{
+      totals[k]=(totals[k]||0)+v;
+    });
+  });
+  return Object.entries(totals).map(([k,v])=>{
+    const label=(typeof STAT_LABELS!=='undefined'?STAT_LABELS[k]:null)||k;
+    const suffix=(typeof STAT_SUFFIX!=='undefined'?STAT_SUFFIX[k]:null)||'';
+    return {label,value:`+${v}${suffix}`,color:'#d4c896'};
+  });
+}
+
+// Computes active set bonus info — which sets are in progress, what bonuses
+// are currently applying, and what the next tier would give.
+function computeActiveSets(){
+  const sets={};
+  Object.values(equipped).forEach(item=>{
+    if(!item||!item.setName)return;
+    sets[item.setName]=(sets[item.setName]||0)+1;
+  });
+  return Object.entries(sets).map(([name,count])=>{
+    const tiers=SET_BONUSES[name]||{};
+    // Find active tier (highest tier <= count) and next tier
+    const tierKeys=Object.keys(tiers).map(Number).sort((a,b)=>a-b);
+    let activeTier=null, nextTier=null;
+    tierKeys.forEach(t=>{
+      if(t<=count)activeTier=t;
+      else if(nextTier===null)nextTier=t;
+    });
+    return {
+      name,
+      count,
+      maxPieces:5, // hardcoded for now — all sets are 5-piece
+      activeTier,
+      activeDesc:activeTier?tiers[activeTier].desc:null,
+      nextTier,
+      nextDesc:nextTier?tiers[nextTier].desc:null,
+    };
+  });
+}
+
+function renderGearPanel(){
+  const slots=document.getElementById('gearSlots');
+  if(!slots)return;
+  slots.innerHTML='';
+
+  // ── ACTIVE STATS SUMMARY ──
+  const summary=computeEquippedStatsSummary();
+  if(summary.length){
+    const summaryCard=document.createElement('div');
+    summaryCard.className='gear-summary';
+    summaryCard.innerHTML=`
+      <div class="gear-summary-label">TOTAL BONUSES FROM EQUIPMENT</div>
+      <div class="gear-summary-grid">
+        ${summary.map(s=>`
+          <div class="gear-summary-stat">
+            <span class="gear-summary-val" style="color:${s.color}">${s.value}</span>
+            <span class="gear-summary-key">${s.label}</span>
+          </div>
+        `).join('')}
+      </div>
+    `;
+    slots.appendChild(summaryCard);
+  }
+
+  // ── ACTIVE SET BONUSES ──
+  const activeSets=computeActiveSets();
+  if(activeSets.length){
+    const setsCard=document.createElement('div');
+    setsCard.className='gear-sets-card';
+    setsCard.innerHTML=`
+      <div class="gear-summary-label">SET BONUSES</div>
+      ${activeSets.map(s=>`
+        <div class="gear-set-row">
+          <div class="gear-set-header">
+            <span class="gear-set-name">◆ ${s.name}</span>
+            <span class="gear-set-count">${s.count} / ${s.maxPieces}</span>
+          </div>
+          ${s.activeDesc?`<div class="gear-set-active">✓ ${s.activeTier}PC: ${s.activeDesc}</div>`:''}
+          ${s.nextDesc?`<div class="gear-set-next">◇ ${s.nextTier}PC: ${s.nextDesc}</div>`:''}
+        </div>
+      `).join('')}
+    `;
+    slots.appendChild(setsCard);
+  }
+
+  // ── EQUIPMENT SLOTS ──
+  const equipmentWrap=document.createElement('div');
+  equipmentWrap.className='gear-slot-grid';
   GEAR_SLOTS.forEach(slot=>{
     const item=equipped[slot];
-    const div=document.createElement('div');div.className='gear-slot';
+    const div=document.createElement('div');
+    div.className='gear-slot';
     const slotIcon=SLOT_ICONS[slot]||'◇';
     if(item){
       const rarityCol=RARITY_COLORS[item.rarity]||'#9ca3af';
       const rarityLabel=RARITY_LABELS[item.rarity]||'';
-      // Apply rarity color as a left-border band via inline style
-      div.style.borderLeft=`3px solid ${rarityCol}`;
       div.classList.add('has-item');
-      const statsHtml=Object.entries(item.stats)
-        .map(([k,v])=>`<span class="gear-stat-row">${formatStat(k,v)}</span>`)
+      div.style.borderLeft=`3px solid ${rarityCol}`;
+      const statsHtml=Object.entries(item.stats||{})
+        .map(([k,v])=>{
+          const label=(typeof STAT_LABELS!=='undefined'?STAT_LABELS[k]:null)||k;
+          const suffix=(typeof STAT_SUFFIX!=='undefined'?STAT_SUFFIX[k]:null)||'';
+          return `<span class="gear-stat-row" style="color:#d4c896">+${v}${suffix} ${label}</span>`;
+        })
         .join('');
       const setLine=item.setName
-        ? `<div class="gear-set-line">◆ Set: ${item.setName} (${item.setPiece||'?'}/5)</div>`
+        ? `<div class="gear-set-line">◆ Part of ${item.setName} set</div>`
         : '';
+      const craftedBadge=item.crafted?`<span class="gear-crafted-badge">⚒ CRAFTED</span>`:'';
       div.innerHTML=`
         <div class="gear-slot-header">
-          <span class="gear-slot-icon">${slotIcon}</span>
+          <span class="gear-slot-icon" style="color:${rarityCol}">${slotIcon}</span>
           <span class="gear-slot-name">${slot}</span>
-          <span class="gear-rarity-tag" style="color:${rarityCol};border-color:${rarityCol}66">${rarityLabel}</span>
+          <span class="gear-rarity-tag" style="color:${rarityCol};border-color:${rarityCol}66;background:${rarityCol}22">${rarityLabel}</span>
         </div>
-        <div class="gear-item ${item.rarity}">${item.name}</div>
+        <div class="gear-item-name" style="color:${rarityCol};text-shadow:0 0 8px ${rarityCol}44">${item.name} ${craftedBadge}</div>
         <div class="gear-stats-block">${statsHtml}</div>
         ${setLine}
       `;
+      // Click-to-select to reveal actions
+      if(_gearSelectedSlot===slot){
+        div.classList.add('selected');
+        const actions=document.createElement('div');
+        actions.className='gear-actions';
+        actions.innerHTML=`
+          <button class="gear-action-btn gear-action-move">◇ MOVE TO BAG</button>
+          <button class="gear-action-btn gear-action-salvage">⚒ SALVAGE</button>
+        `;
+        actions.querySelector('.gear-action-move').addEventListener('click',e=>{e.stopPropagation();unequipToBag(slot);});
+        actions.querySelector('.gear-action-salvage').addEventListener('click',e=>{e.stopPropagation();salvageFromGear(slot);});
+        div.appendChild(actions);
+      }
+      div.addEventListener('click',()=>{
+        _gearSelectedSlot=(_gearSelectedSlot===slot)?null:slot;
+        renderGearPanel();
+      });
     } else {
       div.innerHTML=`
         <div class="gear-slot-header">
@@ -346,11 +519,10 @@ function openGear(){
         <div class="gear-empty">— Empty —</div>
       `;
     }
-    slots.appendChild(div);
+    equipmentWrap.appendChild(div);
   });
-  document.getElementById('gearPanel').style.display='flex';
+  slots.appendChild(equipmentWrap);
 }
-function closeGear(){document.getElementById('gearPanel').style.display='none';}
 
 // ═══════ PROFESSION SYSTEM ═══════════════════════════════
 // ═══════ PROFESSIONS ═══════════════════════════════════════════════
