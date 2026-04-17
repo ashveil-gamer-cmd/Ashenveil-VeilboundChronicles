@@ -2678,6 +2678,7 @@ function buildSave(){
     stats:{kills},
     zoneId:curZone?.id||1,
     equipped:JSON.parse(JSON.stringify(equipped)), // deep clone so mutations don't corrupt save
+    inventory:typeof inventory!=='undefined'?JSON.parse(JSON.stringify(inventory)):[],
     professions:JSON.parse(JSON.stringify(professions)),
     talents:typeof talentState!=='undefined'?JSON.parse(JSON.stringify(talentState)):null,
   };
@@ -2738,6 +2739,14 @@ function applySave(data){
     Object.keys(equipped).forEach(slot=>{
       equipped[slot]=data.equipped[slot]||null;
     });
+  }
+  // Inventory (bag)
+  if(typeof inventory!=='undefined'){
+    inventory.length=0;
+    if(Array.isArray(data.inventory)){
+      data.inventory.forEach(item=>inventory.push(item));
+    }
+    if(typeof updateInventoryBadge==='function')updateInventoryBadge();
   }
   // Professions
   if(data.professions){
