@@ -650,55 +650,94 @@ function setAfkWaypoint(){
 }
 
 // ═══════ ABILITY CASTS ══════════════════════════════════
+// Helper: shortcut to talent bonus lookup with safe fallback
+function _tb(k){return typeof getTalentBonus==='function'?getTalentBonus(k):0;}
+
+// Compute effective cooldown for an ability after all CDR talents.
+// idx 0 = Raise (also gets raiseCdrPct bonus), others just get generic cdrPct.
+function effectiveCD(idx){
+  let base=ABILITY_CDS[idx]||16000;
+  let cdrPct=_tb('cdrPct');
+  if(idx===0)cdrPct+=_tb('raiseCdrPct');
+  return base*(1-Math.min(cdrPct,70)/100); // cap CDR at 70% to prevent infinite loops
+}
+
+// Damage multiplier applied to every ability. Stacks with per-spirit bonus.
+function damageMult(){
+  let mult=1+_tb('dmgPct')/100;
+  // Per-spirit damage: each living permanent spirit adds perSpiritDmgPct%
+  const perSpiritPct=_tb('perSpiritDmgPct');
+  if(perSpiritPct>0){
+    const alive=spirits.filter(s=>!s.dead&&!s.isTemp).length;
+    mult+=(alive*perSpiritPct)/100;
+  }
+  return mult;
+}
+
 function playerCast(idx){
   const now=performance.now();
   if(now<abilityCDs[idx]||player.isDead)return;
   if(idx===0){
-    if(spawnSpirit()){
-      abilityCDs[0]=now+ABILITY_CDS[0];SFX.spiritSummon();addFeed('✦ SPIRIT RAISED','#9DC4B0');
+    // Raise — summon one spirit, or two with Echoing Call talent
+    const doubles=_tb('raiseDoubles')>0;
+    const summoned=spawnSpirit();
+    if(summoned){
+      if(doubles)spawnSpirit(); // second summon if the talent is learned (silent failure if cap)
+      abilityCDs[0]=now+effectiveCD(0);SFX.spiritSummon();
+      addFeed(doubles?'✦✦ SPIRITS RAISED':'✦ SPIRIT RAISED','#9DC4B0');
       emitSpiritBurst(player.x,player.y);
-      // Summoning circle: expanding teal ring + lingering scorch
       pushGroundFX({type:'ring',x:player.x,y:player.y,maxR:110,r:10,color:'#9DC4B0',life:0.55,maxLife:0.55,expand:true});
       pushGroundFX({type:'scorch',x:player.x,y:player.y,r:90,maxR:90,color:'#9DC4B0',life:0.9,maxLife:0.9});
     }
   } else if(idx===1){
     const t=getNearestEnemy(950);
     if(t){
-      t.veilmarkStacks=Math.min(t.veilmarkStacks+1,10);t.veilmarkExpiry=now+8000;
-      abilityCDs[1]=now+ABILITY_CDS[1];SFX.veilmark();addFeed(`VEILMARK ×${t.veilmarkStacks}`,'#f43f5e');
-      // Brief red bloom at the target to telegraph the mark
+      const vmMax=10+_tb('veilmarkMax');
+      t.veilmarkStacks=Math.min(t.veilmarkStacks+1,vmMax);t.veilmarkExpiry=now+8000;
+      abilityCDs[1]=now+effectiveCD(1);SFX.veilmark();addFeed(`VEILMARK ×${t.veilmarkStacks}`,'#f43f5e');
       pushGroundFX({type:'bloom',x:t.x,y:t.y,r:80,maxR:80,color:'#f43f5e',life:0.35,maxLife:0.35});
     }
   } else if(idx===2){
     const t=getNearestMarkedEnemy();
     if(t&&t.veilmarkStacks>=3){
-      const dmg=player.attack*2*t.veilmarkStacks;let hits=0;
-      enemies.forEach(e=>{if(!e.dead&&dist2(t.x,t.y,e.x,e.y)<240){hitEnemy(e,dmg,false,t.x,t.y);hits++;}});
-      t.veilmarkStacks=0;abilityCDs[2]=now+ABILITY_CDS[2];SFX.detonate();
+      const detoDmgMult=1+_tb('detoDmgPct')/100;
+      const radius=240+_tb('detoRadius');
+      const dmg=player.attack*2*t.veilmarkStacks*damageMult()*detoDmgMult;
+      let hits=0;
+      enemies.forEach(e=>{if(!e.dead&&dist2(t.x,t.y,e.x,e.y)<radius){hitEnemy(e,dmg,false,t.x,t.y);hits++;}});
+      t.veilmarkStacks=0;abilityCDs[2]=now+effectiveCD(2);SFX.detonate();
       screenShake(14,320);emitExplosion(t.x,t.y,'#ff6b35');
-      // Detonate signature: bright expanding orange ring + lingering scorch
-      pushGroundFX({type:'ring',x:t.x,y:t.y,maxR:240,r:20,color:'#ff6b35',life:0.5,maxLife:0.5,expand:true});
-      pushGroundFX({type:'scorch',x:t.x,y:t.y,r:200,maxR:200,color:'#ff6b35',life:1.8,maxLife:1.8});
-      pushGroundFX({type:'bloom',x:t.x,y:t.y,r:180,maxR:180,color:'#fff4a0',life:0.25,maxLife:0.25});
+      pushGroundFX({type:'ring',x:t.x,y:t.y,maxR:radius,r:20,color:'#ff6b35',life:0.5,maxLife:0.5,expand:true});
+      pushGroundFX({type:'scorch',x:t.x,y:t.y,r:radius-40,maxR:radius-40,color:'#ff6b35',life:1.8,maxLife:1.8});
+      pushGroundFX({type:'bloom',x:t.x,y:t.y,r:radius-60,maxR:radius-60,color:'#fff4a0',life:0.25,maxLife:0.25});
       addFeed(`💥 DETONATE! ${hits} HIT · ${Math.round(dmg)}`,'#ff6b35');
+      // Cataclysm talent: 30% chance to echo the detonation
+      if(_tb('detoEcho')>0&&Math.random()<0.3){
+        setTimeout(()=>{
+          let hits2=0;
+          enemies.forEach(e=>{if(!e.dead&&dist2(t.x,t.y,e.x,e.y)<radius){hitEnemy(e,dmg*0.7,false,t.x,t.y);hits2++;}});
+          pushGroundFX({type:'ring',x:t.x,y:t.y,maxR:radius,r:20,color:'#fff4a0',life:0.4,maxLife:0.4,expand:true});
+          if(hits2>0)addFeed(`  ↳ CATACLYSM ECHO · ${hits2}`,'#fff4a0');
+        },180);
+      }
     }
   } else if(idx===3){
-    let hits=0;const dmg=player.attack*1.6;
-    enemies.forEach(e=>{if(!e.dead&&dist2(player.x,player.y,e.x,e.y)<340){hitEnemy(e,dmg,false,player.x,player.y);e.veilmarkStacks=Math.min(e.veilmarkStacks+1,10);e.veilmarkExpiry=now+8000;hits++;}});
-    abilityCDs[3]=now+ABILITY_CDS[3];SFX.wrathTide();
+    const radius=340+_tb('wrathRadius');
+    const dmg=player.attack*1.6*damageMult();
+    let hits=0;
+    const vmMax=10+_tb('veilmarkMax');
+    enemies.forEach(e=>{if(!e.dead&&dist2(player.x,player.y,e.x,e.y)<radius){hitEnemy(e,dmg,false,player.x,player.y);e.veilmarkStacks=Math.min(e.veilmarkStacks+1,vmMax);e.veilmarkExpiry=now+8000;hits++;}});
+    abilityCDs[3]=now+effectiveCD(3);SFX.wrathTide();
     emitWave(player.x,player.y);
-    // Wrath Tide signature: expanding purple shockwave ring + lingering purple scorch
-    pushGroundFX({type:'ring',x:player.x,y:player.y,maxR:340,r:20,color:'#a855f7',life:0.6,maxLife:0.6,expand:true});
-    pushGroundFX({type:'scorch',x:player.x,y:player.y,r:320,maxR:320,color:'#a855f7',life:1.5,maxLife:1.5});
+    pushGroundFX({type:'ring',x:player.x,y:player.y,maxR:radius,r:20,color:'#a855f7',life:0.6,maxLife:0.6,expand:true});
+    pushGroundFX({type:'scorch',x:player.x,y:player.y,r:radius-20,maxR:radius-20,color:'#a855f7',life:1.5,maxLife:1.5});
     addFeed(`⚡ WRATH TIDE — ${hits} MARKED`,'#a855f7');
   } else if(idx===4){
-    // Soul Nova — ultimate AoE (was previously unbound!)
-    const dmg=player.attack*3.2;let hits=0;
+    const dmg=player.attack*3.2*damageMult();let hits=0;
     enemies.forEach(e=>{if(!e.dead&&dist2(player.x,player.y,e.x,e.y)<460){hitEnemy(e,dmg,false,player.x,player.y);hits++;}});
-    abilityCDs[4]=now+(ABILITY_CDS[4]||16000);
+    abilityCDs[4]=now+effectiveCD(4);
     if(SFX.eliteDeath)SFX.eliteDeath();
     screenShake(20,500);
-    // Soul Nova signature: gold bloom + huge expanding ring + long-linger gold scorch
     pushGroundFX({type:'bloom',x:player.x,y:player.y,r:300,maxR:300,color:'#fbbf24',life:0.5,maxLife:0.5});
     pushGroundFX({type:'ring',x:player.x,y:player.y,maxR:460,r:30,color:'#fbbf24',life:0.8,maxLife:0.8,expand:true});
     pushGroundFX({type:'scorch',x:player.x,y:player.y,r:440,maxR:440,color:'#fbbf24',life:2.2,maxLife:2.2});
@@ -712,7 +751,8 @@ function getNearestMarkedEnemy(){const now=performance.now();let b=null,bd=Infin
 
 function hitEnemy(e,dmg,isCrit=false,fromX,fromY){
   if(e.dead)return;
-  const critRoll=Math.random()<0.12;
+  const critChance=0.12+_tb('critPct')/100;
+  const critRoll=Math.random()<critChance;
   const finalDmg=critRoll?dmg*2.2:dmg;
   e.hp-=finalDmg;e.hitFlash=0.18;
   spawnDmgText(e.x,e.y-e.size,Math.round(finalDmg),critRoll?'#fde68a':'#fff',critRoll);
@@ -737,6 +777,15 @@ function killEnemy(e){
   addXP(xpG);player.gold+=goldG;
   SFX[e.isElite?'eliteDeath':'enemyDeath']();
   spawnDmgText(e.x,e.y-40,`+${xpG}XP`,'#8b5cf6',false);
+  // Pale Vitality talent: heal on kill
+  const heal=_tb('lifeOnHit');
+  if(heal>0&&!player.isDead){
+    const actualHeal=Math.min(heal,player.maxHp-player.hp);
+    if(actualHeal>0){
+      player.hp+=actualHeal;
+      spawnDmgText(player.x,player.y-30,`+${actualHeal}`,'#22c55e',false);
+    }
+  }
   // Materials
   if(Math.random()<0.09){professions.Spiritweaving.materials.soulWisps++;addProfXP('Spiritweaving',2);addFeed('+Soul Wisp','#9DC4B048');}
   if(e.isElite&&Math.random()<0.28){professions.Spiritweaving.materials.veilCloth++;addProfXP('Spiritweaving',6);}
@@ -777,8 +826,12 @@ function addXP(amt){
   let leveledUp=false;
   while(player.xp>=player.xpToNext&&player.level<MAX_LEVEL){
     player.xp-=player.xpToNext;player.level++;player.xpToNext=xpForLevel(player.level);
-    player.maxHp=computeMaxHp(player.level);player.hp=Math.min(player.hp+player.maxHp*0.3,player.maxHp);
-    player.attack=computeAttack(player.level)+player.soulMastery*0.5;
+    // Award a talent point starting at level 2 (first level up)
+    if(typeof awardTalentPoint==='function'&&player.level>=2)awardTalentPoint();
+    // Recalc stats so talent bonuses (like hpPct) apply to the new level's maxHp
+    if(typeof recalcStats==='function')recalcStats();
+    else{player.maxHp=computeMaxHp(player.level);player.attack=computeAttack(player.level)+player.soulMastery*0.5;}
+    player.hp=Math.min(player.hp+player.maxHp*0.3,player.maxHp);
     SFX.levelUp();showLevelUp();checkZone();
     if(player.level%5===0){professions.Spiritweaving.materials.hollowShards++;addProfXP('Spiritweaving',10);}
     leveledUp=true;
@@ -943,7 +996,7 @@ function showLevelUp(){
   setTimeout(()=>b.style.display='none',2600);
   addFeed(`✦ LEVEL ${player.level} ✦`,'#c084fc');
 }
-function respawn(){player.hp=player.maxHp;player.isDead=false;player.iframes=3000;player.x=WORLD_W/2;player.y=WORLD_H/2;enemies=[];spirits=[];document.getElementById('deathScreen').style.display='none';addFeed('RISEN FROM THE VEIL','#9DC4B0');}
+function respawn(){player.hp=player.maxHp;player.isDead=false;player.iframes=3000;player.x=WORLD_W/2;player.y=WORLD_H/2;enemies=[];spirits=[];player._cheatDeathUsed=false;document.getElementById('deathScreen').style.display='none';addFeed('RISEN FROM THE VEIL','#9DC4B0');}
 
 // ═══════ UPDATE ═════════════════════════════════════════
 function update(dt,now){
@@ -962,7 +1015,8 @@ function update(dt,now){
 
   if(ix!==0||iy!==0){
     const m=Math.sqrt(ix*ix+iy*iy)||1;
-    player.vx=(ix/m)*PLAYER_SPEED;player.vy=(iy/m)*PLAYER_SPEED;
+    const spdMult=1+_tb('moveSpdPct')/100;
+    player.vx=(ix/m)*PLAYER_SPEED*spdMult;player.vy=(iy/m)*PLAYER_SPEED*spdMult;
     player.facing=Math.atan2(iy,ix);
   } else if(isAfk){
     player.afkTimer+=dt*1000;
@@ -971,7 +1025,8 @@ function update(dt,now){
     let mx=tx,my=ty,md=d;
     if(ne){mx=ne.x-player.x;my=ne.y-player.y;md=Math.sqrt(mx*mx+my*my)||1;}
     if(d<80||player.afkTimer>player.afkCommit){player.visitedSectors[player.sector]=true;setAfkWaypoint();}
-    const spd=ne&&md<320?PLAYER_SPEED*0.9:PLAYER_SPEED*0.72;
+    const spdMult=1+_tb('moveSpdPct')/100;
+    const spd=(ne&&md<320?PLAYER_SPEED*0.9:PLAYER_SPEED*0.72)*spdMult;
     player.vx=(mx/md)*spd;player.vy=(my/md)*spd;
     player.facing=Math.atan2(my,mx);
   } else{player.vx*=0.78;player.vy*=0.78;}
@@ -1014,7 +1069,7 @@ function update(dt,now){
       if(ne2&&nd<340){
         const sdx=ne2.x-s.x,sdy=ne2.y-s.y,sd=Math.sqrt(sdx*sdx+sdy*sdy)||1;
         s.x+=sdx/sd*260*dt;s.y+=sdy/sd*260*dt;
-        if(now-s.lastAttack>950&&sd<70){s.lastAttack=now;s.attackCount++;hitEnemy(ne2,player.attack*1.15);}
+        if(now-s.lastAttack>950&&sd<70){s.lastAttack=now;s.attackCount++;hitEnemy(ne2,player.attack*1.15*(1+_tb('spiritDmgPct')/100));}
       } else {
         s.orbitAngle+=dt*2.4;
         const tx=player.x+Math.cos(s.orbitAngle)*or,ty=player.y+Math.sin(s.orbitAngle)*or;
@@ -1053,15 +1108,26 @@ function update(dt,now){
       // Recompute distance now — player may have dodged out of range
       const ndx=player.x-e.x,ndy=player.y-e.y,nd=Math.sqrt(ndx*ndx+ndy*ndy)||1;
       if(nd<=e.attackRange&&player.iframes<=0){
-        player.hp-=e.attack;player.hitFlash=0.18;player.iframes=220;
+        // Apply damage reduction talent
+        const dmgReducePct=_tb('dmgReducePct');
+        const incomingDmg=e.attack*(1-Math.min(dmgReducePct,80)/100);
+        player.hp-=incomingDmg;
+        player.hitFlash=0.18;player.iframes=220;
         screenShake(e.isElite?10:6,e.isElite?180:130);SFX.playerHit();
-        // Impact bloom at player location for hit feedback
         pushGroundFX({type:'bloom',x:player.x,y:player.y,r:60,maxR:60,color:'#ef4444',life:0.3,maxLife:0.3});
         if(player.hp<=0){
-          player.hp=0;player.isDead=true;
-          document.getElementById('deathStats').textContent=`${kills} slain · Level ${player.level}`;
-          document.getElementById('deathScreen').style.display='flex';
-          if(typeof writeSave==='function')writeSave();
+          // Everlasting talent: first fatal hit per life is reduced to 1 HP
+          if(_tb('cheatDeath')>0&&!player._cheatDeathUsed){
+            player._cheatDeathUsed=true;
+            player.hp=1;
+            addFeed('✦ EVERLASTING','#fff4a0');
+            pushGroundFX({type:'ring',x:player.x,y:player.y,maxR:120,r:10,color:'#fff4a0',life:0.8,maxLife:0.8,expand:true});
+          } else {
+            player.hp=0;player.isDead=true;
+            document.getElementById('deathStats').textContent=`${kills} slain · Level ${player.level}`;
+            document.getElementById('deathScreen').style.display='flex';
+            if(typeof writeSave==='function')writeSave();
+          }
         }
       }
     }
@@ -1248,6 +1314,7 @@ function buildSave(){
     zoneId:curZone?.id||1,
     equipped:JSON.parse(JSON.stringify(equipped)), // deep clone so mutations don't corrupt save
     professions:JSON.parse(JSON.stringify(professions)),
+    talents:typeof talentState!=='undefined'?JSON.parse(JSON.stringify(talentState)):null,
   };
 }
 
@@ -1323,6 +1390,12 @@ function applySave(data){
       }
     });
   }
+  // Talents
+  if(data.talents&&typeof talentState!=='undefined'){
+    talentState.points=data.talents.points??0;
+    talentState.pointsEarned=data.talents.pointsEarned??0;
+    talentState.learned=data.talents.learned||{};
+  }
   // Recalc derived stats after equipping gear
   recalcStats();
   checkSetBonuses();
@@ -1371,8 +1444,20 @@ function startGame(continueFromSave=false){
     else {continueFromSave=false;} // save mysteriously gone — fall through to new game
   }
   if(!continueFromSave){
-    player.maxHp=computeMaxHp(1);player.hp=player.maxHp;
-    player.attack=computeAttack(1);player.maxBonds=MAX_SPIRITS;
+    // Full reset to level 1 baseline
+    player.level=1;player.xp=0;player.xpToNext=xpForLevel(1);player.gold=0;
+    player.soulMastery=0;player._cheatDeathUsed=false;
+    kills=0;
+    // Wipe equipped gear
+    Object.keys(equipped).forEach(k=>{equipped[k]=null;});
+    // Wipe talents
+    if(typeof talentState!=='undefined'){
+      talentState.points=0;talentState.pointsEarned=0;talentState.learned={};
+    }
+    // Recalc baseline so HP/attack are set correctly from level 1 (and talents are zero)
+    if(typeof recalcStats==='function')recalcStats();
+    else{player.maxHp=computeMaxHp(1);player.attack=computeAttack(1);player.maxBonds=MAX_SPIRITS;}
+    player.hp=player.maxHp;
   }
   setAfkWaypoint();
   generateEnvironment();
