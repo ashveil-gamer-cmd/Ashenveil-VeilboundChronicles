@@ -1010,3 +1010,11 @@ canvas#c{display:block;position:fixed;top:0;left:0}
   opacity:0.35;cursor:not-allowed;
   color:#4a3d5f;border-color:rgba(74,61,95,0.4);
 }
+
+/* ─── SHOP MATERIALS ─── */
+.shop-material-row{
+  border-left-width:2px;
+}
+.shop-material-row .shop-consumable-icon{
+  font-weight:700;
+}
