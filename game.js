@@ -13,62 +13,219 @@ resize(); window.addEventListener('resize',resize);
 
 
 // ═══════ ABILITY ICONS ════════════════════════════════
+// Icons render to 52x52 canvases. Each ability has a distinct visual identity
+// with layered effects: background glow + rune/sigil + foreground detail.
 function drawAbilityIcons(){
+  const S=52; // canvas size — must match width/height in index.html
+  const CX=S/2, CY=S/2;
+
+  // shared helper: draws a soft background glow and subtle outer ring
+  function iconBG(x,color,bgInner='#1a0a30',bgOuter='#05000d'){
+    // outer darkening vignette
+    const bg=x.createRadialGradient(CX,CY,S*0.2,CX,CY,S*0.55);
+    bg.addColorStop(0,bgInner);bg.addColorStop(1,bgOuter);
+    x.fillStyle=bg;x.fillRect(0,0,S,S);
+    // colored inner glow
+    const g=x.createRadialGradient(CX,CY,0,CX,CY,S*0.5);
+    g.addColorStop(0,color+'66');g.addColorStop(0.5,color+'22');g.addColorStop(1,color+'00');
+    x.fillStyle=g;x.beginPath();x.arc(CX,CY,S*0.48,0,Math.PI*2);x.fill();
+    // thin outer frame ring
+    x.strokeStyle=color+'44';x.lineWidth=1;
+    x.beginPath();x.arc(CX,CY,S*0.47,0,Math.PI*2);x.stroke();
+  }
+
+  // five ability icons — each draws onto a canvas 2d context
   const icons=[
-    (c,x)=>{
-      x.clearRect(0,0,38,38);
-      // Ghost with glow
-      const g=x.createRadialGradient(19,19,0,19,19,16);
-      g.addColorStop(0,'#c4b5fd');g.addColorStop(1,'rgba(196,181,253,0)');
-      x.fillStyle=g;x.beginPath();x.arc(19,19,16,0,Math.PI*2);x.fill();
-      x.shadowColor='#9DC4B0';x.shadowBlur=10;
-      x.fillStyle='#9DC4B0';x.beginPath();x.arc(19,13,9,Math.PI,0);
-      x.lineTo(28,25);for(let i=0;i<3;i++)x.arc(25-i*4.5,25,2.2,0,Math.PI,true);
-      x.lineTo(10,25);x.closePath();x.fill();
-      x.fillStyle='#0a0020';x.beginPath();x.arc(16,12,2.5,0,Math.PI*2);x.fill();
-      x.beginPath();x.arc(22,12,2.5,0,Math.PI*2);x.fill();
+    // ═══ Q: RAISE — ghost rising from soul-flame ═══
+    (x)=>{
+      x.clearRect(0,0,S,S);
+      iconBG(x,'#9DC4B0');
+      // soul-flame base (three flickering licks)
+      x.shadowColor='#9DC4B0';x.shadowBlur=6;
+      x.fillStyle='#9DC4B0';
+      [[CX-8,40,5],[CX,42,7],[CX+8,40,5]].forEach(([fx,fy,fr])=>{
+        x.beginPath();x.moveTo(fx-fr,fy);
+        x.quadraticCurveTo(fx-fr,fy-fr*2,fx,fy-fr*2.5);
+        x.quadraticCurveTo(fx+fr,fy-fr*2,fx+fr,fy);x.closePath();x.fill();
+      });
+      // ghost body (classic hovering wraith silhouette)
+      x.shadowBlur=10;
+      x.fillStyle='#e8d5ff';
+      x.beginPath();
+      x.arc(CX,CY-2,10,Math.PI,0);         // rounded head
+      x.lineTo(CX+10,CY+10);                // right side down
+      // wavy bottom edge
+      x.quadraticCurveTo(CX+6,CY+14,CX+2,CY+10);
+      x.quadraticCurveTo(CX-2,CY+14,CX-6,CY+10);
+      x.quadraticCurveTo(CX-10,CY+14,CX-10,CY+10);
+      x.closePath();x.fill();
+      // hollow eyes
+      x.shadowBlur=0;
+      x.fillStyle='#1a0a30';
+      x.beginPath();x.arc(CX-3.5,CY-3,1.8,0,Math.PI*2);x.fill();
+      x.beginPath();x.arc(CX+3.5,CY-3,1.8,0,Math.PI*2);x.fill();
+      // eye glow
+      x.fillStyle='#9DC4B0';
+      x.beginPath();x.arc(CX-3.5,CY-3,0.8,0,Math.PI*2);x.fill();
+      x.beginPath();x.arc(CX+3.5,CY-3,0.8,0,Math.PI*2);x.fill();
     },
-    (c,x)=>{
-      x.clearRect(0,0,38,38);
-      // Veilmark — concentric rings
-      x.shadowColor='#f43f5e';x.shadowBlur=10;
-      x.strokeStyle='#f43f5e';x.lineWidth=2;
-      for(let r of[13,8,4]){x.globalAlpha=r/13;x.beginPath();x.arc(19,19,r,0,Math.PI*2);x.stroke();}
+
+    // ═══ W: VEILMARK — occult targeting sigil ═══
+    (x)=>{
+      x.clearRect(0,0,S,S);
+      iconBG(x,'#f43f5e');
+      x.translate(CX,CY);
+      // concentric targeting rings
+      x.shadowColor='#f43f5e';x.shadowBlur=8;
+      x.strokeStyle='#f43f5e';
+      [16,11,6].forEach((r,i)=>{
+        x.globalAlpha=0.4+i*0.25;x.lineWidth=1+i*0.3;
+        x.beginPath();x.arc(0,0,r,0,Math.PI*2);x.stroke();
+      });
       x.globalAlpha=1;
-      x.fillStyle='#f43f5e';x.beginPath();x.arc(19,19,3.5,0,Math.PI*2);x.fill();
-      x.strokeStyle='#f43f5e88';x.lineWidth=1.5;
-      x.beginPath();x.moveTo(19,3);x.lineTo(19,7);x.moveTo(19,31);x.lineTo(19,35);
-      x.moveTo(3,19);x.lineTo(7,19);x.moveTo(31,19);x.lineTo(35,19);x.stroke();
-    },
-    (c,x)=>{
-      x.clearRect(0,0,38,38);
-      // Detonate — explosion star
-      x.shadowColor='#ff6b35';x.shadowBlur=12;
-      x.fillStyle='#ff6b35';
+      // four crosshair ticks pointing inward
+      x.lineWidth=1.5;
+      for(let i=0;i<4;i++){
+        x.rotate(Math.PI/2);
+        x.beginPath();x.moveTo(0,-22);x.lineTo(0,-18);x.stroke();
+      }
+      // rotating runic marks between rings (small cross ticks)
+      x.strokeStyle='#fda4af';x.lineWidth=0.8;
       for(let i=0;i<8;i++){
-        const a=(i/8)*Math.PI*2,r1=14,r2=7;
-        x.beginPath();x.moveTo(19+Math.cos(a)*r1,19+Math.sin(a)*r1);
-        x.lineTo(19+Math.cos(a+Math.PI/8)*r2,19+Math.sin(a+Math.PI/8)*r2);
-        x.lineTo(19+Math.cos(a+Math.PI/4)*r1,19+Math.sin(a+Math.PI/4)*r1);
+        const a=(i/8)*Math.PI*2, rr=13;
+        const ex=Math.cos(a)*rr, ey=Math.sin(a)*rr;
+        x.beginPath();x.moveTo(ex-1.5,ey);x.lineTo(ex+1.5,ey);x.moveTo(ex,ey-1.5);x.lineTo(ex,ey+1.5);x.stroke();
+      }
+      // bleeding-red core
+      x.shadowBlur=10;
+      const core=x.createRadialGradient(0,0,0,0,0,5);
+      core.addColorStop(0,'#fff');core.addColorStop(0.3,'#fda4af');core.addColorStop(1,'#f43f5e');
+      x.fillStyle=core;x.beginPath();x.arc(0,0,4,0,Math.PI*2);x.fill();
+      x.translate(-CX,-CY);
+    },
+
+    // ═══ E: DETONATE — bursting fracture sigil ═══
+    (x)=>{
+      x.clearRect(0,0,S,S);
+      iconBG(x,'#ff6b35');
+      x.translate(CX,CY);
+      // outer explosion star (8 long shards)
+      x.shadowColor='#ff6b35';x.shadowBlur=10;
+      const grad=x.createLinearGradient(0,-20,0,20);
+      grad.addColorStop(0,'#fff4a0');grad.addColorStop(0.5,'#ff6b35');grad.addColorStop(1,'#8b1a00');
+      x.fillStyle=grad;
+      for(let i=0;i<8;i++){
+        const a=(i/8)*Math.PI*2;
+        x.beginPath();
+        x.moveTo(Math.cos(a)*20,Math.sin(a)*20);
+        x.lineTo(Math.cos(a+Math.PI/8)*6,Math.sin(a+Math.PI/8)*6);
+        x.lineTo(Math.cos(a+Math.PI/4)*20,Math.sin(a+Math.PI/4)*20);
+        x.lineTo(Math.cos(a+Math.PI/8)*9,Math.sin(a+Math.PI/8)*9);
         x.closePath();x.fill();
       }
-      x.fillStyle='#fff8';x.beginPath();x.arc(19,19,4.5,0,Math.PI*2);x.fill();
-    },
-    (c,x)=>{
-      x.clearRect(0,0,38,38);
-      // Wrath tide — wave lines
-      x.shadowColor='#a855f7';x.shadowBlur=10;
-      x.strokeStyle='#a855f7';x.lineWidth=2.5;
+      // inner flash
+      x.shadowBlur=14;
+      const flash=x.createRadialGradient(0,0,0,0,0,8);
+      flash.addColorStop(0,'#fff');flash.addColorStop(0.4,'#fff4a0');flash.addColorStop(1,'#ff6b3500');
+      x.fillStyle=flash;x.beginPath();x.arc(0,0,8,0,Math.PI*2);x.fill();
+      // crack lines radiating out (fractures)
+      x.strokeStyle='#1a0a30';x.lineWidth=0.8;x.shadowBlur=0;
       for(let i=0;i<4;i++){
-        x.globalAlpha=1-i*0.2;x.beginPath();
-        x.moveTo(4,12+i*4);x.quadraticCurveTo(19,5+i*4,34,12+i*4);x.stroke();
+        const a=(i/4)*Math.PI*2+Math.PI/8;
+        x.beginPath();x.moveTo(Math.cos(a)*3,Math.sin(a)*3);
+        x.lineTo(Math.cos(a)*14,Math.sin(a)*14);x.stroke();
       }
+      x.translate(-CX,-CY);
+    },
+
+    // ═══ R: WRATH TIDE — skull in concentric shockwaves ═══
+    (x)=>{
+      x.clearRect(0,0,S,S);
+      iconBG(x,'#a855f7');
+      x.translate(CX,CY);
+      // expanding shockwave rings
+      x.shadowColor='#a855f7';x.shadowBlur=8;
+      x.strokeStyle='#a855f7';
+      [22,17,12].forEach((r,i)=>{
+        x.globalAlpha=0.3+i*0.2;x.lineWidth=1.5-i*0.3;
+        x.beginPath();x.arc(0,0,r,0,Math.PI*2);x.stroke();
+      });
       x.globalAlpha=1;
+      // skull core (simplified but recognizable)
+      x.shadowBlur=6;
+      x.fillStyle='#e8d5ff';
+      // skull dome
+      x.beginPath();x.arc(0,-2,7,Math.PI,0);
+      // jaw
+      x.lineTo(5,5);x.lineTo(3,7);x.lineTo(1,5);x.lineTo(-1,7);x.lineTo(-3,5);x.lineTo(-5,5);
+      x.closePath();x.fill();
+      // eye sockets
+      x.shadowBlur=0;x.fillStyle='#1a0a30';
+      x.beginPath();x.arc(-2.5,-2,1.8,0,Math.PI*2);x.fill();
+      x.beginPath();x.arc(2.5,-2,1.8,0,Math.PI*2);x.fill();
+      // nose
+      x.beginPath();x.moveTo(0,0);x.lineTo(-1,2.5);x.lineTo(1,2.5);x.closePath();x.fill();
+      // glowing eye pinpricks
+      x.fillStyle='#a855f7';x.shadowColor='#a855f7';x.shadowBlur=4;
+      x.beginPath();x.arc(-2.5,-2,0.7,0,Math.PI*2);x.fill();
+      x.beginPath();x.arc(2.5,-2,0.7,0,Math.PI*2);x.fill();
+      x.translate(-CX,-CY);
+    },
+
+    // ═══ F: SOUL NOVA — radiant star with orbiting souls ═══
+    (x)=>{
+      x.clearRect(0,0,S,S);
+      iconBG(x,'#fbbf24');
+      x.translate(CX,CY);
+      // 8-pointed radiant star (four long + four short rays)
+      x.shadowColor='#fbbf24';x.shadowBlur=12;
+      const starGrad=x.createRadialGradient(0,0,0,0,0,20);
+      starGrad.addColorStop(0,'#fff');starGrad.addColorStop(0.5,'#fbbf24');starGrad.addColorStop(1,'#7c2d12');
+      x.fillStyle=starGrad;
+      // long cardinal rays
+      for(let i=0;i<4;i++){
+        const a=(i/4)*Math.PI*2;
+        x.beginPath();
+        x.moveTo(Math.cos(a)*20,Math.sin(a)*20);
+        x.lineTo(Math.cos(a+0.2)*4,Math.sin(a+0.2)*4);
+        x.lineTo(Math.cos(a-0.2)*4,Math.sin(a-0.2)*4);
+        x.closePath();x.fill();
+      }
+      // short diagonal rays
+      for(let i=0;i<4;i++){
+        const a=(i/4)*Math.PI*2+Math.PI/4;
+        x.beginPath();
+        x.moveTo(Math.cos(a)*12,Math.sin(a)*12);
+        x.lineTo(Math.cos(a+0.3)*3,Math.sin(a+0.3)*3);
+        x.lineTo(Math.cos(a-0.3)*3,Math.sin(a-0.3)*3);
+        x.closePath();x.fill();
+      }
+      // brilliant inner core
+      x.shadowBlur=16;
+      const core=x.createRadialGradient(0,0,0,0,0,6);
+      core.addColorStop(0,'#fff');core.addColorStop(0.6,'#fff4a0');core.addColorStop(1,'#fbbf2400');
+      x.fillStyle=core;x.beginPath();x.arc(0,0,6,0,Math.PI*2);x.fill();
+      // three orbiting soul-wisps (teal, for thematic tie to spirit mechanic)
+      x.shadowColor='#9DC4B0';x.shadowBlur=5;
+      x.fillStyle='#9DC4B0';
+      for(let i=0;i<3;i++){
+        const a=(i/3)*Math.PI*2;
+        const ox=Math.cos(a)*16, oy=Math.sin(a)*16;
+        x.beginPath();x.arc(ox,oy,2.2,0,Math.PI*2);x.fill();
+      }
+      x.translate(-CX,-CY);
     },
   ];
-  for(let i=0;i<4;i++){
+
+  for(let i=0;i<5;i++){
     const c=document.getElementById('ic'+i);
-    if(c)icons[i](c,c.getContext('2d'));
+    if(c){
+      const x=c.getContext('2d');
+      // reset any inherited state from previous frame
+      x.setTransform(1,0,0,1,0,0);
+      x.globalAlpha=1;x.shadowBlur=0;
+      icons[i](x);
+    }
   }
 }
 
