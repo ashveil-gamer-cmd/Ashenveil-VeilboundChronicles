@@ -598,3 +598,129 @@ canvas#c{display:block;position:fixed;top:0;left:0}
 @media (max-width:500px){
   #bagGrid{grid-template-columns:repeat(4,1fr)}
 }
+
+/* ─── SHOP PANEL ─── */
+#shopPanel{position:fixed;inset:0;z-index:400;display:none;flex-direction:column;background:linear-gradient(160deg,#1a0f08,#080400);overflow-y:auto}
+#shopLayout{
+  display:flex;flex-direction:column;gap:clamp(14px,1.8vw,22px);
+  max-width:940px;width:100%;margin:0 auto;
+  padding:clamp(12px,1.5vw,20px);
+}
+.shop-gold{
+  font-family:'Cinzel',serif;font-size:clamp(11px,1vw,14px);
+  color:#f59e0b;letter-spacing:2px;margin-left:14px;font-weight:600;
+  text-shadow:0 0 10px rgba(245,158,11,0.4);
+}
+#shopRefreshRow{
+  display:flex;justify-content:space-between;align-items:center;gap:14px;
+  padding:clamp(8px,1vw,14px) clamp(10px,1.2vw,16px);
+  background:rgba(245,158,11,0.06);
+  border:1px solid rgba(245,158,11,0.18);
+  border-radius:6px;
+}
+#shopRefreshTimer{
+  font-family:'Cinzel',serif;font-size:clamp(9px,0.95vw,11px);
+  color:#b8a08a;letter-spacing:1.5px;
+}
+#shopRefreshBtn{
+  font-family:'Cinzel',serif;font-size:clamp(10px,1vw,12px);letter-spacing:2px;
+  color:#f59e0b;background:transparent;
+  border:1px solid rgba(245,158,11,0.45);
+  padding:8px 16px;border-radius:4px;cursor:pointer;font-weight:600;
+  transition:all 0.15s;
+}
+#shopRefreshBtn:hover{background:rgba(245,158,11,0.12);border-color:#f59e0b;box-shadow:0 0 12px rgba(245,158,11,0.3)}
+.shop-section-label{
+  font-family:'Cinzel',serif;font-size:clamp(10px,1vw,12px);
+  letter-spacing:3px;color:#6b4d8a;text-transform:uppercase;
+  padding-bottom:4px;border-bottom:1px solid rgba(255,255,255,0.06);
+  margin-top:6px;
+}
+/* Gear grid */
+#shopGearGrid{
+  display:grid;grid-template-columns:repeat(3,1fr);
+  gap:clamp(8px,1vw,14px);
+}
+.shop-gear-card{
+  display:flex;flex-direction:column;gap:6px;
+  padding:clamp(10px,1.2vw,14px);
+  background:rgba(255,255,255,0.03);
+  border:1.5px solid rgba(255,255,255,0.1);
+  border-radius:6px;
+  transition:all 0.15s;
+}
+.shop-gear-card.disabled{opacity:0.5}
+.shop-gear-card:not(.disabled):hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(0,0,0,0.5)}
+.shop-gear-top{display:flex;justify-content:space-between;align-items:center}
+.shop-gear-icon{font-size:clamp(20px,2.4vw,28px);line-height:1;font-weight:700}
+.shop-gear-rarity{
+  font-family:'Cinzel',serif;font-size:clamp(8px,0.8vw,10px);
+  padding:2px 8px;border-radius:3px;letter-spacing:1.5px;font-weight:600;
+}
+.shop-gear-name{
+  font-family:'Cinzel',serif;font-size:clamp(11px,1.1vw,13px);
+  letter-spacing:1px;font-weight:700;
+}
+.shop-gear-slot{
+  font-family:'Cinzel',serif;font-size:clamp(8px,0.85vw,10px);
+  color:#8a7aa8;letter-spacing:2px;
+}
+.shop-gear-stats{
+  font-size:clamp(10px,1vw,12px);color:#b8a8d0;
+  line-height:1.4;flex:1;
+}
+/* Consumables + buyback shared row style */
+.shop-consumable{
+  display:flex;align-items:center;gap:clamp(10px,1.2vw,14px);
+  padding:clamp(10px,1.2vw,14px);
+  background:rgba(255,255,255,0.02);
+  border:1px solid rgba(255,255,255,0.08);
+  border-radius:6px;
+  margin-bottom:8px;
+}
+.shop-consumable.disabled{opacity:0.5}
+.shop-consumable-icon{
+  font-size:clamp(22px,2.6vw,30px);line-height:1;
+  width:44px;height:44px;display:flex;align-items:center;justify-content:center;
+  color:#f59e0b;text-shadow:0 0 10px rgba(245,158,11,0.4);
+  background:rgba(245,158,11,0.1);border-radius:6px;flex-shrink:0;
+}
+.shop-consumable-info{flex:1;display:flex;flex-direction:column;gap:3px}
+.shop-consumable-name{
+  font-family:'Cinzel',serif;font-size:clamp(11px,1.1vw,13px);
+  color:#e8dfc8;letter-spacing:1px;font-weight:600;
+}
+.shop-consumable-desc{
+  font-size:clamp(9px,0.95vw,11px);color:#8a7aa8;line-height:1.4;
+}
+.shop-mystery .shop-consumable-icon{
+  color:#c084fc;background:rgba(192,132,252,0.12);
+  text-shadow:0 0 12px rgba(192,132,252,0.5);
+}
+.shop-buy-btn{
+  font-family:'Cinzel',serif;font-size:clamp(11px,1.1vw,13px);
+  letter-spacing:1.5px;font-weight:700;
+  color:#f59e0b;background:linear-gradient(135deg,rgba(245,158,11,0.15),rgba(245,158,11,0.05));
+  border:1px solid rgba(245,158,11,0.45);
+  padding:clamp(8px,1vw,11px) clamp(12px,1.4vw,18px);
+  border-radius:4px;cursor:pointer;
+  transition:all 0.15s;flex-shrink:0;
+}
+.shop-buy-btn:hover:not([disabled]){
+  background:linear-gradient(135deg,rgba(245,158,11,0.3),rgba(245,158,11,0.12));
+  border-color:#f59e0b;box-shadow:0 0 14px rgba(245,158,11,0.3);
+}
+.shop-buy-btn[disabled]{
+  opacity:0.4;cursor:not-allowed;
+  color:#6b4d3a;border-color:rgba(107,77,58,0.4);background:transparent;
+}
+.shop-empty{
+  font-style:italic;color:#6b4d8a;
+  font-size:clamp(10px,1vw,12px);
+  padding:18px;text-align:center;
+}
+/* Responsive: narrower gear grid on phones */
+@media (max-width:620px){
+  #shopGearGrid{grid-template-columns:repeat(2,1fr)}
+  #shopRefreshRow{flex-direction:column;align-items:stretch;text-align:center}
+}
