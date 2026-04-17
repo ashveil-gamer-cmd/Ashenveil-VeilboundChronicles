@@ -86,8 +86,21 @@
 <!-- MENU BUTTONS -->
 <div id="menuBar">
   <div class="menu-btn" onclick="openGear()">⚔ GEAR</div>
+  <div class="menu-btn" data-menu="bag" onclick="openInventory()">⚕ BAG</div>
   <div class="menu-btn" data-menu="talents" onclick="openTalents()">✦ TALENTS</div>
   <div class="menu-btn" onclick="openProf()">♆ PROF</div>
+</div>
+
+<!-- INVENTORY (BAG) PANEL -->
+<div id="inventoryPanel">
+  <div class="panel-header">
+    <h2>⚕ BAG <span id="bagCountText" class="bag-count">0 / 24</span></h2>
+    <button class="panel-close" onclick="closeInventory()">← BACK</button>
+  </div>
+  <div id="bagLayout">
+    <div id="bagGrid"></div>
+    <div id="bagTooltip" style="display:none"></div>
+  </div>
 </div>
 
 <!-- TALENT PANEL -->
