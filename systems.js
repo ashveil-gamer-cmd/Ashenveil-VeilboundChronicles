@@ -41,20 +41,121 @@ const RARITY_LABELS={common:'COMMON',uncommon:'UNCOMMON',rare:'RARE',epic:'EPIC'
 // Icon for each gear slot — used in gear panel and drop notifications
 const SLOT_ICONS={Weapon:'⚔',Helmet:'🜲',Chest:'🛡',Gloves:'✋',Boots:'👞',Belt:'᎓',Ring:'○',Amulet:'◈'};
 
-function tryEquip(item){
-  const oldItem=equipped[item.slot];
-  equipped[item.slot]=item;
-  recalcStats();
+// ═══════ INVENTORY SYSTEM ═══════════════════════════════════
+// 24-slot bag that receives drops when the equipment slot is already filled.
+// - First-drop auto-equip: if the equip slot is empty, item goes straight to gear.
+// - Subsequent drops accumulate in the bag until the player reviews them.
+// - Rare+ discards require confirmation so legendaries can't be accidentally trashed.
+// - Inventory persists through save/load (handled by buildSave/applySave in game.js).
+const INVENTORY_MAX=24;
+let inventory=[]; // array of full item objects
+
+// Called by combat drop logic. Decides: auto-equip if slot empty, else route to bag.
+function acquireLoot(item){
+  const current=equipped[item.slot];
   const col=RARITY_COLORS[item.rarity]||'#9ca3af';
   const label=RARITY_LABELS[item.rarity]||'ITEM';
   const icon=SLOT_ICONS[item.slot]||'✦';
-  // Rich drop notification: icon + rarity + name + replaced status
-  addFeed(`${icon} [${label}] ${item.name}`,col);
-  if(oldItem){
-    // Show what was replaced, dimmed
-    addFeed(`  └ replaced ${oldItem.name}`,'#5a4a7a');
+  if(!current){
+    // Slot empty — auto-equip for frictionless early game / first drops
+    equipped[item.slot]=item;
+    recalcStats();
+    addFeed(`${icon} [${label}] ${item.name}`,col);
+    addFeed(`  └ auto-equipped (${item.slot} was empty)`,'#5a7aa0');
+    checkSetBonuses();
+  } else if(inventory.length<INVENTORY_MAX){
+    // Slot filled — goes to bag for player to decide
+    inventory.push(item);
+    addFeed(`${icon} ${label} ${item.name} → bag (${inventory.length}/${INVENTORY_MAX})`,col);
+    updateInventoryBadge();
+  } else {
+    // Bag full — warn player. Item is lost unless they clear space.
+    addFeed(`⚠ BAG FULL — ${item.name} lost!`,'#ef4444');
   }
+}
+
+// Tapping EQUIP in the tooltip: swap bag item into slot, move old equipped to bag.
+function equipFromBag(invIndex){
+  const item=inventory[invIndex];
+  if(!item)return;
+  const oldItem=equipped[item.slot];
+  equipped[item.slot]=item;
+  inventory.splice(invIndex,1);
+  if(oldItem&&inventory.length<INVENTORY_MAX){
+    inventory.push(oldItem);
+  }
+  recalcStats();
   checkSetBonuses();
+  const col=RARITY_COLORS[item.rarity]||'#9ca3af';
+  addFeed(`✦ Equipped ${item.name}`,col);
+  if(typeof writeSave==='function')writeSave();
+  updateInventoryBadge();
+  renderInventory();
+}
+
+// Tapping DISCARD in the tooltip: remove from bag permanently.
+// Rare+ items trigger a confirmation so legendaries aren't accidentally trashed.
+function discardFromBag(invIndex){
+  const item=inventory[invIndex];
+  if(!item)return;
+  const rarityTier={common:0,uncommon:1,rare:2,epic:3,legendary:4,mythic:5}[item.rarity]||0;
+  if(rarityTier>=2){
+    if(!confirm(`Discard ${item.name}?\n\nThis ${RARITY_LABELS[item.rarity]||'item'} cannot be recovered.`))return;
+  }
+  inventory.splice(invIndex,1);
+  addFeed(`✗ Discarded ${item.name}`,'#6b4d8a');
+  if(typeof writeSave==='function')writeSave();
+  updateInventoryBadge();
+  renderInventory();
+}
+
+// Legacy entry point — existing code (loot drops, dungeon rewards) calls tryEquip.
+// Route it through the new acquireLoot so everything respects inventory rules.
+function tryEquip(item){acquireLoot(item);}
+
+// Updates the "X" count badge on the BAG menu button.
+function updateInventoryBadge(){
+  const btn=document.querySelector('[data-menu="bag"]');
+  if(!btn)return;
+  const existing=btn.querySelector('.menu-btn-badge');
+  if(inventory.length>0){
+    if(existing){
+      existing.textContent=inventory.length;
+    } else {
+      const b=document.createElement('span');
+      b.className='menu-btn-badge';
+      b.textContent=inventory.length;
+      btn.appendChild(b);
+    }
+  } else if(existing){
+    existing.remove();
+  }
+}
+
+// Compute a stat-diff line for the tooltip: "+15 HP" in green, "-4 Crit" in red.
+// Compares the bag item's stats against whatever is currently equipped in the same slot.
+function computeStatDiff(item){
+  const current=equipped[item.slot];
+  const statLabels={sm:'Soul Mastery',atk:'Attack',hp:'HP',crit:'Crit',
+                    cdr:'CDR',res:'Resist',lifeOnHit:'Life/Hit',spiritBonus:'Spirit'};
+  const lines=[];
+  const allKeys=new Set([...Object.keys(item.stats||{}),...(current?Object.keys(current.stats||{}):[])]);
+  allKeys.forEach(k=>{
+    const newVal=item.stats[k]||0;
+    const oldVal=current?(current.stats[k]||0):0;
+    const diff=newVal-oldVal;
+    if(diff===0&&newVal===0)return;
+    const label=statLabels[k]||k;
+    if(!current){
+      // No current equipped — show as pure gain
+      lines.push({text:`+${newVal} ${label}`,color:'#22c55e'});
+    } else {
+      const sign=diff>=0?'+':'';
+      const col=diff>0?'#22c55e':(diff<0?'#ef4444':'#9ca3af');
+      lines.push({text:`${sign}${diff} ${label}`,color:col});
+    }
+  });
+  return lines;
 }
 function recalcStats(){
   // Refresh aggregated talent bonuses first — all the layers below query them
@@ -385,4 +486,93 @@ function openDungeons(){
 function closeDungeons(){
   const p=document.getElementById('dungeonPanel');
   if(p)p.style.display='none';
+}
+
+
+// ═══════ INVENTORY PANEL UI ══════════════════════════════════════
+// Renders a 6×4 grid of bag slots. Tapping an item expands an inline tooltip
+// showing stats + diff vs currently equipped + EQUIP/DISCARD buttons.
+let _bagSelectedIndex=null; // index of currently-expanded item, or null
+
+function openInventory(){
+  _bagSelectedIndex=null;
+  const panel=document.getElementById('inventoryPanel');
+  if(!panel)return;
+  panel.style.display='flex';
+  renderInventory();
+}
+function closeInventory(){
+  const panel=document.getElementById('inventoryPanel');
+  if(panel)panel.style.display='none';
+  _bagSelectedIndex=null;
+}
+
+function renderInventory(){
+  const grid=document.getElementById('bagGrid');
+  const tooltip=document.getElementById('bagTooltip');
+  const countEl=document.getElementById('bagCountText');
+  if(!grid)return;
+
+  if(countEl)countEl.textContent=`${inventory.length} / ${INVENTORY_MAX}`;
+
+  // Render the grid — 24 slots, empty or filled
+  grid.innerHTML='';
+  for(let i=0;i<INVENTORY_MAX;i++){
+    const slot=document.createElement('div');
+    slot.className='bag-slot';
+    const item=inventory[i];
+    if(item){
+      const col=RARITY_COLORS[item.rarity]||'#9ca3af';
+      const icon=SLOT_ICONS[item.slot]||'✦';
+      slot.classList.add('filled');
+      slot.style.borderColor=col;
+      slot.innerHTML=`
+        <span class="bag-slot-icon" style="color:${col};text-shadow:0 0 8px ${col}66">${icon}</span>
+        <span class="bag-slot-rarity" style="background:${col}22;color:${col}">${RARITY_LABELS[item.rarity]||'?'}</span>
+      `;
+      if(i===_bagSelectedIndex)slot.classList.add('selected');
+      slot.addEventListener('click',()=>{
+        _bagSelectedIndex=(_bagSelectedIndex===i)?null:i;
+        renderInventory();
+      });
+    } else {
+      slot.classList.add('empty');
+    }
+    grid.appendChild(slot);
+  }
+
+  // Render the tooltip for the selected item — or hide it
+  if(tooltip){
+    if(_bagSelectedIndex===null||!inventory[_bagSelectedIndex]){
+      tooltip.style.display='none';
+    } else {
+      const item=inventory[_bagSelectedIndex];
+      const col=RARITY_COLORS[item.rarity]||'#9ca3af';
+      const current=equipped[item.slot];
+      const diff=computeStatDiff(item);
+      const diffHtml=diff.map(d=>`<div class="bag-stat-line" style="color:${d.color}">${d.text}</div>`).join('');
+      tooltip.innerHTML=`
+        <div class="bag-tooltip-header" style="border-color:${col}88">
+          <span class="bag-tt-name" style="color:${col};text-shadow:0 0 10px ${col}66">${item.name}</span>
+          <span class="bag-tt-rarity" style="background:${col}22;color:${col}">${RARITY_LABELS[item.rarity]||'?'}</span>
+        </div>
+        <div class="bag-tt-slot">${SLOT_ICONS[item.slot]||'✦'} ${item.slot.toUpperCase()}</div>
+        ${item.setName?`<div class="bag-tt-set">◈ ${item.setName} set</div>`:''}
+        <div class="bag-tt-section">
+          <div class="bag-tt-section-label">${current?'vs. Equipped':'Stats'}</div>
+          ${diffHtml||'<div class="bag-stat-line" style="color:#6b4d8a">— no stats —</div>'}
+        </div>
+        ${current?`<div class="bag-tt-current">Currently: ${current.name}</div>`:''}
+        <div class="bag-tt-actions">
+          <button class="bag-btn bag-btn-equip">⚔ EQUIP</button>
+          <button class="bag-btn bag-btn-discard">✗ DISCARD</button>
+        </div>
+      `;
+      tooltip.style.display='flex';
+      tooltip.style.borderColor=col+'55';
+      const idx=_bagSelectedIndex;
+      tooltip.querySelector('.bag-btn-equip').addEventListener('click',()=>equipFromBag(idx));
+      tooltip.querySelector('.bag-btn-discard').addEventListener('click',()=>discardFromBag(idx));
+    }
+  }
 }
