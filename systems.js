@@ -103,6 +103,8 @@ function discardFromBag(invIndex){
     if(!confirm(`Discard ${item.name}?\n\nThis ${RARITY_LABELS[item.rarity]||'item'} cannot be recovered.`))return;
   }
   inventory.splice(invIndex,1);
+  // Offer rare+ discards as buyback in the shop (double price)
+  if(typeof queueBuyback==='function'&&rarityTier>=2)queueBuyback(item);
   addFeed(`✗ Discarded ${item.name}`,'#6b4d8a');
   if(typeof writeSave==='function')writeSave();
   updateInventoryBadge();
@@ -573,6 +575,358 @@ function renderInventory(){
       const idx=_bagSelectedIndex;
       tooltip.querySelector('.bag-btn-equip').addEventListener('click',()=>equipFromBag(idx));
       tooltip.querySelector('.bag-btn-discard').addEventListener('click',()=>discardFromBag(idx));
+    }
+  }
+}
+
+
+// ═══════ SHOP SYSTEM ═══════════════════════════════════════════════
+// Merchant with rotating gear inventory, consumables, mystery box, buyback slot.
+// Gear prices scale with rarity + player level so mid-game can afford mid-tier
+// items without trivializing endgame costs.
+// Inventory refreshes automatically every SHOP_REFRESH_MS, or instantly for gold.
+
+const SHOP_REFRESH_MS = 5 * 60 * 1000;   // auto-refresh every 5 minutes
+const SHOP_INSTANT_REFRESH_COST = 150;   // gold to refresh inventory on demand
+const SHOP_GEAR_COUNT = 6;               // how many gear slots the shop shows
+
+// Consumables catalog. Prices are flat (don't scale with level).
+const SHOP_CONSUMABLES = [
+  {
+    id:'potion_heal',name:'Veil-Touched Elixir',icon:'✦',
+    desc:'Instantly restores 50% of max HP.',
+    price:80,
+    onBuy:()=>{const heal=Math.ceil(player.maxHp*0.5);player.hp=Math.min(player.maxHp,player.hp+heal);addFeed(`✦ +${heal} HP`,'#22c55e');},
+  },
+  {
+    id:'potion_xp',name:'Scroll of Insight',icon:'◈',
+    desc:'Immediately grants XP equal to 40% of the amount needed for next level.',
+    price:220,
+    onBuy:()=>{const gain=Math.ceil(player.xpToNext*0.4);addXP(gain);addFeed(`◈ +${gain} XP`,'#60a5fa');},
+  },
+  {
+    id:'respec',name:'Veilwright Reforge',icon:'✧',
+    desc:'Resets all talent points, refunding them to spend again.',
+    price:500,
+    onBuy:()=>{
+      if(typeof talentState!=='undefined'){
+        const refunded=talentState.pointsEarned;
+        talentState.points=refunded;
+        talentState.learned={};
+        if(typeof recalcStats==='function')recalcStats();
+        addFeed(`✧ Talents refunded: ${refunded} points`,'#c084fc');
+      }
+    },
+  },
+];
+
+// Mystery box — random gear at escalating cost (one per day... or per shop refresh for now)
+let shopMysteryBoxUses = 0; // how many times bought this rotation
+function mysteryBoxCost(){ return 250 + shopMysteryBoxUses * 100; }
+
+// Shop state
+const shopState = {
+  gear: [],                 // array of gear items currently for sale
+  lastRefresh: 0,           // timestamp of last refresh
+  buyback: null,            // last discarded rare+ item, available to buy back
+  buybackPrice: 0,
+};
+
+// Compute a gear item's shop price from its rarity + level
+function priceForItem(item){
+  const rarityMult = {common:1,uncommon:2.5,rare:6,epic:14,legendary:35,mythic:80}[item.rarity] || 1;
+  const levelMult = 1 + Math.max(1, player.level) * 0.12;
+  return Math.ceil(45 * rarityMult * levelMult);
+}
+
+// Generate a fresh shop rotation of gear
+function refreshShop(silent = false){
+  shopState.gear = [];
+  // Bias the rotation toward items near player level + their rarities
+  for (let i = 0; i < SHOP_GEAR_COUNT; i++){
+    const item = rollLoot(player.level);
+    item.shopPrice = priceForItem(item);
+    shopState.gear.push(item);
+  }
+  shopState.lastRefresh = Date.now();
+  shopMysteryBoxUses = 0;
+  if (!silent) addFeed('✦ Shop inventory refreshed','#f59e0b');
+}
+
+// Call periodically (from the main game loop) to auto-refresh the shop
+function checkShopAutoRefresh(){
+  if (!shopState.lastRefresh) { refreshShop(true); return; }
+  if (Date.now() - shopState.lastRefresh >= SHOP_REFRESH_MS){
+    refreshShop(true);
+    addFeed('✦ Merchant has new wares','#f59e0b');
+    if (typeof updateShopBadge === 'function') updateShopBadge();
+  }
+}
+
+// Called from discardFromBag when a rare+ item is thrown away — offer buyback
+function queueBuyback(item){
+  const rarityTier = {common:0,uncommon:1,rare:2,epic:3,legendary:4,mythic:5}[item.rarity] || 0;
+  if (rarityTier < 2) return; // only rare+ goes to buyback
+  shopState.buyback = {...item};
+  // Buyback costs 2x normal shop price — emergency rescue, not farming
+  shopState.buybackPrice = priceForItem(item) * 2;
+}
+
+// Attempt a gear purchase. Returns true on success.
+function buyGearFromShop(index){
+  const item = shopState.gear[index];
+  if (!item) return false;
+  if (player.gold < item.shopPrice){
+    addFeed('⚠ Not enough gold','#ef4444');
+    return false;
+  }
+  // If bag is full AND slot is filled, can't take it
+  const slotEmpty = !equipped[item.slot];
+  const bagHasRoom = inventory.length < INVENTORY_MAX;
+  if (!slotEmpty && !bagHasRoom){
+    addFeed('⚠ Bag full — free a slot first','#ef4444');
+    return false;
+  }
+  player.gold -= item.shopPrice;
+  const bought = {...item};
+  delete bought.shopPrice;
+  acquireLoot(bought);
+  // Remove from shop rotation so it can't be bought twice
+  shopState.gear.splice(index, 1);
+  if (typeof writeSave === 'function') writeSave();
+  if (typeof renderShop === 'function') renderShop();
+  return true;
+}
+
+function buyConsumable(id){
+  const c = SHOP_CONSUMABLES.find(x => x.id === id);
+  if (!c) return false;
+  if (player.gold < c.price){
+    addFeed('⚠ Not enough gold','#ef4444');
+    return false;
+  }
+  player.gold -= c.price;
+  c.onBuy();
+  if (typeof writeSave === 'function') writeSave();
+  if (typeof renderShop === 'function') renderShop();
+  return true;
+}
+
+function buyMysteryBox(){
+  const cost = mysteryBoxCost();
+  if (player.gold < cost){
+    addFeed('⚠ Not enough gold','#ef4444');
+    return false;
+  }
+  // Check room before spending
+  const sample = rollLoot(player.level);
+  const slotEmpty = !equipped[sample.slot];
+  const bagHasRoom = inventory.length < INVENTORY_MAX;
+  if (!slotEmpty && !bagHasRoom){
+    addFeed('⚠ Bag full — free a slot first','#ef4444');
+    return false;
+  }
+  player.gold -= cost;
+  shopMysteryBoxUses++;
+  // 70% chance base tier, 25% chance one tier higher, 5% chance jackpot (legendary+)
+  const roll = Math.random();
+  let item;
+  if (roll < 0.05){
+    // Jackpot — roll legendary+
+    const legendaries = (typeof ITEM_POOL !== 'undefined' ? ITEM_POOL.filter(i => i.rarity === 'legendary' || i.rarity === 'mythic') : []);
+    item = legendaries.length ? {...legendaries[Math.floor(Math.random()*legendaries.length)]} : rollLoot(player.level+10);
+    addFeed('✦✦ JACKPOT! ✦✦','#f59e0b');
+  } else if (roll < 0.30){
+    item = rollLoot(player.level + 5);
+  } else {
+    item = rollLoot(player.level);
+  }
+  acquireLoot(item);
+  if (typeof writeSave === 'function') writeSave();
+  if (typeof renderShop === 'function') renderShop();
+  return true;
+}
+
+function buyBuyback(){
+  if (!shopState.buyback) return false;
+  if (player.gold < shopState.buybackPrice){
+    addFeed('⚠ Not enough gold','#ef4444');
+    return false;
+  }
+  const slotEmpty = !equipped[shopState.buyback.slot];
+  const bagHasRoom = inventory.length < INVENTORY_MAX;
+  if (!slotEmpty && !bagHasRoom){
+    addFeed('⚠ Bag full — free a slot first','#ef4444');
+    return false;
+  }
+  player.gold -= shopState.buybackPrice;
+  acquireLoot({...shopState.buyback});
+  shopState.buyback = null;
+  shopState.buybackPrice = 0;
+  if (typeof writeSave === 'function') writeSave();
+  if (typeof renderShop === 'function') renderShop();
+  return true;
+}
+
+function instantRefreshShop(){
+  if (player.gold < SHOP_INSTANT_REFRESH_COST){
+    addFeed('⚠ Not enough gold','#ef4444');
+    return;
+  }
+  player.gold -= SHOP_INSTANT_REFRESH_COST;
+  refreshShop(false);
+  if (typeof writeSave === 'function') writeSave();
+  if (typeof renderShop === 'function') renderShop();
+}
+
+function updateShopBadge(){
+  const btn = document.querySelector('[data-menu="shop"]');
+  if (!btn) return;
+  const existing = btn.querySelector('.menu-btn-badge');
+  // Show badge only if a new rotation is ready and shop hasn't been opened
+  // Simple: show badge if shop is never-opened since last refresh
+  if (shopState.gear.length > 0 && !shopState._opened){
+    if (existing) existing.textContent = '!';
+    else {
+      const b = document.createElement('span');
+      b.className = 'menu-btn-badge';
+      b.textContent = '!';
+      btn.appendChild(b);
+    }
+  } else if (existing){
+    existing.remove();
+  }
+}
+
+// ═══════ SHOP UI ═══════════════════════════════════════════════
+
+function openShop(){
+  checkShopAutoRefresh();
+  if (!shopState.gear.length) refreshShop(true);
+  shopState._opened = true;
+  updateShopBadge();
+  const panel = document.getElementById('shopPanel');
+  if (!panel) return;
+  panel.style.display = 'flex';
+  renderShop();
+}
+
+function closeShop(){
+  const panel = document.getElementById('shopPanel');
+  if (panel) panel.style.display = 'none';
+}
+
+function renderShop(){
+  const goldEl = document.getElementById('shopGold');
+  if (goldEl) goldEl.textContent = `${player.gold} G`;
+
+  // Time-until-next-refresh
+  const timerEl = document.getElementById('shopRefreshTimer');
+  if (timerEl){
+    if (!shopState.lastRefresh) timerEl.textContent = '';
+    else {
+      const msLeft = Math.max(0, SHOP_REFRESH_MS - (Date.now() - shopState.lastRefresh));
+      const mins = Math.floor(msLeft/60000);
+      const secs = Math.floor((msLeft%60000)/1000);
+      timerEl.textContent = `Next rotation in ${mins}:${secs.toString().padStart(2,'0')}`;
+    }
+  }
+
+  // Gear grid
+  const gearGrid = document.getElementById('shopGearGrid');
+  if (gearGrid){
+    gearGrid.innerHTML = '';
+    if (!shopState.gear.length){
+      gearGrid.innerHTML = '<div class="shop-empty">Merchant is restocking...</div>';
+    } else {
+      shopState.gear.forEach((item, idx) => {
+        const col = RARITY_COLORS[item.rarity] || '#9ca3af';
+        const label = RARITY_LABELS[item.rarity] || '?';
+        const icon = SLOT_ICONS[item.slot] || '✦';
+        // Brief stat summary
+        const statsSummary = Object.entries(item.stats || {})
+          .map(([k,v]) => `+${v} ${k}`).join(' · ') || '—';
+        const canAfford = player.gold >= item.shopPrice;
+        const card = document.createElement('div');
+        card.className = 'shop-gear-card' + (canAfford ? '' : ' disabled');
+        card.style.borderColor = col + 'aa';
+        card.innerHTML = `
+          <div class="shop-gear-top">
+            <span class="shop-gear-icon" style="color:${col};text-shadow:0 0 8px ${col}66">${icon}</span>
+            <span class="shop-gear-rarity" style="background:${col}22;color:${col}">${label}</span>
+          </div>
+          <div class="shop-gear-name" style="color:${col}">${item.name}</div>
+          <div class="shop-gear-slot">${item.slot}</div>
+          <div class="shop-gear-stats">${statsSummary}</div>
+          <button class="shop-buy-btn" ${canAfford?'':'disabled'}>${item.shopPrice} G</button>
+        `;
+        const btn = card.querySelector('.shop-buy-btn');
+        if (canAfford) btn.addEventListener('click', () => buyGearFromShop(idx));
+        gearGrid.appendChild(card);
+      });
+    }
+  }
+
+  // Consumables
+  const consumablesEl = document.getElementById('shopConsumables');
+  if (consumablesEl){
+    consumablesEl.innerHTML = '';
+    SHOP_CONSUMABLES.forEach(c => {
+      const canAfford = player.gold >= c.price;
+      const row = document.createElement('div');
+      row.className = 'shop-consumable' + (canAfford ? '' : ' disabled');
+      row.innerHTML = `
+        <div class="shop-consumable-icon">${c.icon}</div>
+        <div class="shop-consumable-info">
+          <div class="shop-consumable-name">${c.name}</div>
+          <div class="shop-consumable-desc">${c.desc}</div>
+        </div>
+        <button class="shop-buy-btn" ${canAfford?'':'disabled'}>${c.price} G</button>
+      `;
+      const btn = row.querySelector('.shop-buy-btn');
+      if (canAfford) btn.addEventListener('click', () => buyConsumable(c.id));
+      consumablesEl.appendChild(row);
+    });
+
+    // Mystery box — always visible, escalating cost
+    const mbCost = mysteryBoxCost();
+    const mbAfford = player.gold >= mbCost;
+    const mb = document.createElement('div');
+    mb.className = 'shop-consumable shop-mystery' + (mbAfford ? '' : ' disabled');
+    mb.innerHTML = `
+      <div class="shop-consumable-icon">?</div>
+      <div class="shop-consumable-info">
+        <div class="shop-consumable-name">Mystery Box</div>
+        <div class="shop-consumable-desc">Random gear. 5% chance of legendary+. Cost rises each buy this rotation.</div>
+      </div>
+      <button class="shop-buy-btn" ${mbAfford?'':'disabled'}>${mbCost} G</button>
+    `;
+    const mbBtn = mb.querySelector('.shop-buy-btn');
+    if (mbAfford) mbBtn.addEventListener('click', () => buyMysteryBox());
+    consumablesEl.appendChild(mb);
+  }
+
+  // Buyback slot
+  const bbEl = document.getElementById('shopBuyback');
+  if (bbEl){
+    if (!shopState.buyback){
+      bbEl.innerHTML = '<div class="shop-empty">No recently discarded items</div>';
+    } else {
+      const item = shopState.buyback;
+      const col = RARITY_COLORS[item.rarity] || '#9ca3af';
+      const canAfford = player.gold >= shopState.buybackPrice;
+      bbEl.innerHTML = `
+        <div class="shop-consumable shop-buyback-item${canAfford?'':' disabled'}" style="border-color:${col}88">
+          <div class="shop-consumable-icon" style="color:${col}">${SLOT_ICONS[item.slot]||'✦'}</div>
+          <div class="shop-consumable-info">
+            <div class="shop-consumable-name" style="color:${col}">${item.name}</div>
+            <div class="shop-consumable-desc">Recently discarded — recover at 2× price.</div>
+          </div>
+          <button class="shop-buy-btn" ${canAfford?'':'disabled'}>${shopState.buybackPrice} G</button>
+        </div>
+      `;
+      const btn = bbEl.querySelector('.shop-buy-btn');
+      if (canAfford) btn.addEventListener('click', () => buyBuyback());
     }
   }
 }
