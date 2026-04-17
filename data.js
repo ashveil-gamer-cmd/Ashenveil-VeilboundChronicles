@@ -18,16 +18,16 @@ const MAX_ENEMIES=20;
 // a labeled placeholder renders in its place.
 // Collision radius keeps the player from walking through the landmark.
 const LANDMARKS={
-  // Open world zones — collRadius matches the visible base/footprint of the sprite,
-  // so players can't walk onto the landmark. Tuned from play testing.
-  ashen:       {spriteKey:'obelisk_ashen',      x:1800,y:1800,scale:1.4,collRadius:160},
-  crypts:      {spriteKey:'sarcophagus_crypts', x:3100,y:1900,scale:1.5,collRadius:170},
-  mire:        {spriteKey:'shrine_mire',        x:2100,y:3200,scale:1.6,collRadius:180},
-  spire:       {spriteKey:'shrine_spire',       x:3300,y:3100,scale:1.5,collRadius:170},
-  // Dungeons — landmarks placed so dungeon center stays clear for player spawn
-  hollow_crypt:    {spriteKey:'sarcophagus_crypts', x:2100,y:1900,scale:1.3,collRadius:150},
-  wraith_sanctum:  {spriteKey:'candelabra_sanctum', x:2900,y:1900,scale:1.4,collRadius:120},
-  ashen_cathedral: {spriteKey:'pew_cathedral',      x:2500,y:1800,scale:1.5,collRadius:160},
+  // Scale values reduced so painted sprites are prominent but don't overwhelm
+  // the procedural zone. Collision radii kept large to match visible footprint.
+  ashen:       {spriteKey:'obelisk_ashen',      x:1800,y:1800,scale:0.9, collRadius:110},
+  crypts:      {spriteKey:'sarcophagus_crypts', x:3100,y:1900,scale:1.0, collRadius:120},
+  mire:        {spriteKey:'shrine_mire',        x:2100,y:3200,scale:1.05,collRadius:130},
+  spire:       {spriteKey:'shrine_spire',       x:3300,y:3100,scale:1.0, collRadius:120},
+  // Dungeons
+  hollow_crypt:    {spriteKey:'sarcophagus_crypts', x:2100,y:1900,scale:0.9, collRadius:110},
+  wraith_sanctum:  {spriteKey:'candelabra_sanctum', x:2900,y:1900,scale:0.9, collRadius:85},
+  ashen_cathedral: {spriteKey:'pew_cathedral',      x:2500,y:1800,scale:1.0, collRadius:115},
 };
 
 
