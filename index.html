@@ -87,8 +87,29 @@
 <div id="menuBar">
   <div class="menu-btn" onclick="openGear()">⚔ GEAR</div>
   <div class="menu-btn" data-menu="bag" onclick="openInventory()">⚕ BAG</div>
+  <div class="menu-btn" data-menu="shop" onclick="openShop()">⚖ SHOP</div>
   <div class="menu-btn" data-menu="talents" onclick="openTalents()">✦ TALENTS</div>
   <div class="menu-btn" onclick="openProf()">♆ PROF</div>
+</div>
+
+<!-- SHOP PANEL -->
+<div id="shopPanel">
+  <div class="panel-header">
+    <h2>⚖ MERCHANT <span id="shopGold" class="shop-gold">0 G</span></h2>
+    <button class="panel-close" onclick="closeShop()">← BACK</button>
+  </div>
+  <div id="shopLayout">
+    <div id="shopRefreshRow">
+      <div id="shopRefreshTimer"></div>
+      <button id="shopRefreshBtn" onclick="instantRefreshShop()">✦ REFRESH STOCK — 150 G</button>
+    </div>
+    <div class="shop-section-label">GEAR</div>
+    <div id="shopGearGrid"></div>
+    <div class="shop-section-label">CONSUMABLES</div>
+    <div id="shopConsumables"></div>
+    <div class="shop-section-label">BUYBACK</div>
+    <div id="shopBuyback"></div>
+  </div>
 </div>
 
 <!-- INVENTORY (BAG) PANEL -->
