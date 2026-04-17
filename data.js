@@ -402,6 +402,20 @@ const DUNGEONS=[
     tier:1,
     color:'#9ca3af',
     enemyTypes:['skeleton','crawler','wraith'],
+    // Visual theme — cold gray crypt, pale stone, heavy shadow
+    theme:{
+      ambColor:'#b8b8c4',
+      skyA:'#060607',skyB:'#040405',skyC:'#020203',
+      groundBase:'#0a0a0c',
+      tileA:'rgba(200,200,215,0.045)',tileB:'rgba(140,140,160,0.022)',
+      gridC:'rgba(200,200,220,0.08)', // brighter grid = more stone-like flagstones
+      fogC:'rgba(180,180,200,',
+      lightC:'rgba(220,220,240,',
+      hasPillars:true,
+      edgeC:'rgba(15,15,20,0.55)', // darker vignette = crypt feel
+      props:['cryptPillar','sarcophagus','bonePile','cryptTomb','skullPile','cobweb'],
+      counts:[8,5,18,6,10,12], // fewer total, focused
+    },
     waves:[
       {count:6,elites:0,types:['skeleton','crawler']},
       {count:8,elites:1,types:['skeleton','wraith']},
@@ -410,14 +424,14 @@ const DUNGEONS=[
     boss:{
       name:'Bone Revenant',
       baseType:'skeleton',
-      hpMult:20,  // was 12 — bosses should feel tanky, last ~30-45s of focused damage
+      hpMult:20,
       atkMult:1.8,
       sizeMult:2.2,
     },
     reward:{
       minRarity:'rare',
       bonusGold:200,
-      bonusXP:100,  // was 300 — reduced so clears don't skyrocket levels
+      bonusXP:100,
     },
   },
   {
@@ -428,6 +442,20 @@ const DUNGEONS=[
     tier:2,
     color:'#60a5fa',
     enemyTypes:['wraith','shade','specter'],
+    // Visual theme — ethereal blue temple with cold mist
+    theme:{
+      ambColor:'#60a5fa',
+      skyA:'#04081a',skyB:'#020514',skyC:'#01020a',
+      groundBase:'#050a1a',
+      tileA:'rgba(120,180,255,0.055)',tileB:'rgba(60,110,200,0.025)',
+      gridC:'rgba(100,165,255,0.09)',
+      fogC:'rgba(60,130,220,',
+      lightC:'rgba(140,190,255,',
+      hasPillars:true,
+      edgeC:'rgba(5,15,40,0.5)',
+      props:['ashArch','veilCrystal','ashStone','cryptPillar','veilTorch'],
+      counts:[12,20,10,8,15],
+    },
     waves:[
       {count:7,elites:0,types:['wraith','shade']},
       {count:9,elites:2,types:['wraith','shade','specter']},
@@ -436,14 +464,14 @@ const DUNGEONS=[
     boss:{
       name:'Sorrowed Specter',
       baseType:'specter',
-      hpMult:26,  // was 16
+      hpMult:26,
       atkMult:2.1,
       sizeMult:2.4,
     },
     reward:{
       minRarity:'epic',
       bonusGold:500,
-      bonusXP:250,  // was 750
+      bonusXP:250,
     },
   },
   {
@@ -454,6 +482,20 @@ const DUNGEONS=[
     tier:3,
     color:'#f59e0b',
     enemyTypes:['golem','abomination','specter'],
+    // Visual theme — warm firelit ruin, glowing amber embers, scorched stone
+    theme:{
+      ambColor:'#f59e0b',
+      skyA:'#180a02',skyB:'#0e0601',skyC:'#050200',
+      groundBase:'#120802',
+      tileA:'rgba(245,180,60,0.055)',tileB:'rgba(180,120,40,0.028)',
+      gridC:'rgba(230,160,50,0.09)',
+      fogC:'rgba(200,110,30,',
+      lightC:'rgba(255,200,100,',
+      hasPillars:true,
+      edgeC:'rgba(40,15,0,0.55)',
+      props:['obsidianPillar','ashObelisk','lavaPool','crackGround','hellTorch','veilRift'],
+      counts:[10,8,12,14,15,6],
+    },
     waves:[
       {count:6,elites:1,types:['golem','abomination']},
       {count:8,elites:2,types:['golem','specter']},
@@ -462,14 +504,14 @@ const DUNGEONS=[
     boss:{
       name:'Cathedral Warden',
       baseType:'golem',
-      hpMult:35,  // was 22
+      hpMult:35,
       atkMult:2.5,
       sizeMult:2.8,
     },
     reward:{
       minRarity:'legendary',
       bonusGold:1200,
-      bonusXP:600,  // was 1800
+      bonusXP:600,
     },
   },
 ];
