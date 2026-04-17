@@ -340,3 +340,49 @@ function openTalents(){
 function closeTalents(){
   document.getElementById('talentPanel').style.display='none';
 }
+
+
+// ═══════ DUNGEON PANEL UI ═══════════════════════════════════════
+function openDungeons(){
+  const list=document.getElementById('dungeonList');
+  if(!list)return;
+  list.innerHTML='';
+  DUNGEONS.forEach(d=>{
+    const card=document.createElement('div');
+    card.className='dungeon-card';
+    const locked=player.level<d.minLevel;
+    if(locked)card.classList.add('locked');
+    card.style.borderLeft=`3px solid ${d.color}`;
+    const tierNames={1:'Tier I',2:'Tier II',3:'Tier III'};
+    const rarityLabel={common:'COMMON',uncommon:'UNCOMMON',rare:'RARE',epic:'EPIC',legendary:'LEGENDARY',mythic:'MYTHIC'}[d.reward.minRarity];
+    card.innerHTML=`
+      <div class="dg-header">
+        <div class="dg-name" style="color:${d.color}">⚑ ${d.name}</div>
+        <div class="dg-tier" style="color:${d.color};border-color:${d.color}66">${tierNames[d.tier]||'T?'}</div>
+      </div>
+      <div class="dg-desc">${d.desc}</div>
+      <div class="dg-meta-row">
+        <span class="dg-meta">⚔ Level ${d.minLevel}+</span>
+        <span class="dg-meta">⊞ ${d.waves.length} waves + boss</span>
+        <span class="dg-meta" style="color:${d.color}">✦ ${rarityLabel}+ loot</span>
+      </div>
+      <div class="dg-rewards-row">
+        <span class="dg-reward">+${d.reward.bonusGold} gold</span>
+        <span class="dg-reward">+${d.reward.bonusXP} XP</span>
+      </div>
+      <button class="dg-enter-btn" ${locked?'disabled':''}>
+        ${locked?`LOCKED · Requires Level ${d.minLevel}`:'⚡ ENTER'}
+      </button>
+    `;
+    if(!locked){
+      const btn=card.querySelector('.dg-enter-btn');
+      if(btn)btn.addEventListener('click',()=>enterDungeon(d.id));
+    }
+    list.appendChild(card);
+  });
+  document.getElementById('dungeonPanel').style.display='flex';
+}
+function closeDungeons(){
+  const p=document.getElementById('dungeonPanel');
+  if(p)p.style.display='none';
+}
