@@ -57,11 +57,18 @@ function tryEquip(item){
   checkSetBonuses();
 }
 function recalcStats(){
+  // Refresh aggregated talent bonuses first — all the layers below query them
+  if(typeof computeTalentBonuses==='function')computeTalentBonuses();
   let sm=0,atk=0,hp=0,sb=0;
   Object.values(equipped).forEach(i=>{if(!i)return;if(i.stats.sm)sm+=i.stats.sm;if(i.stats.atk)atk+=i.stats.atk;if(i.stats.hp)hp+=i.stats.hp;if(i.stats.spiritBonus)sb+=i.stats.spiritBonus;});
+  // Apply talent bonuses
+  const hpPct=typeof getTalentBonus==='function'?getTalentBonus('hpPct'):0;
+  const spiritCapBonus=typeof getTalentBonus==='function'?getTalentBonus('spiritCap'):0;
   player.soulMastery=sm; player.attack=computeAttack(player.level)+atk+sm*0.5;
-  player.maxHp=computeMaxHp(player.level)+hp; player.hp=Math.min(player.hp,player.maxHp);
-  player.maxBonds=MAX_SPIRITS+sb;
+  const baseMaxHp=computeMaxHp(player.level)+hp;
+  player.maxHp=Math.floor(baseMaxHp*(1+hpPct/100));
+  player.hp=Math.min(player.hp,player.maxHp);
+  player.maxBonds=MAX_SPIRITS+sb+spiritCapBonus;
 }
 function checkSetBonuses(){
   const cnt=getSetPieceCount('Dirge of Hollows');
@@ -186,4 +193,150 @@ function renderProfPanel(){
     });
     cards.appendChild(card);
   });
+}
+
+
+// ═══════ TALENT SYSTEM ═══════════════════════════════════════
+// Per-talent rank tracking. learned[talentId] = currentRank (0 if unlearned).
+let talentState={
+  points:0,         // unspent talent points
+  pointsEarned:0,   // total points ever earned (used to validate on load)
+  learned:{},       // talentId -> rank
+};
+
+// Award points when the player levels up. Called from addXP().
+function awardTalentPoint(){
+  talentState.points+=1;
+  talentState.pointsEarned+=1;
+  addFeed('✦ +1 Talent Point','#c4b5fd');
+  // Alert the talent menu button so player notices they have unspent points
+  const btn=document.querySelector('[data-menu="talents"]');
+  if(btn)btn.classList.add('alert');
+}
+
+// Look up how many points the player has spent in a specific branch
+function pointsInBranch(branchName){
+  const branch=TALENT_TREE[branchName];
+  if(!branch)return 0;
+  let total=0;
+  branch.talents.forEach(t=>{total+=talentState.learned[t.id]||0;});
+  return total;
+}
+
+// Attempt to spend a point on a talent. Returns true if successful.
+function learnTalent(branchName,talentId){
+  if(talentState.points<=0)return false;
+  const talent=TALENT_TREE[branchName]?.talents.find(t=>t.id===talentId);
+  if(!talent)return false;
+  const current=talentState.learned[talentId]||0;
+  if(current>=talent.maxRank)return false;
+  // Check gate — minimum points spent in this branch to unlock
+  if(pointsInBranch(branchName)<talent.gate)return false;
+  // Spend the point
+  talentState.learned[talentId]=current+1;
+  talentState.points-=1;
+  recalcStats();
+  renderTalentPanel(); // refresh UI
+  // Clear alert on menu button if no more unspent points
+  if(talentState.points<=0){
+    const btn=document.querySelector('[data-menu="talents"]');
+    if(btn)btn.classList.remove('alert');
+  }
+  return true;
+}
+
+// Wipe all spent talents and refund the points. Free respec for now.
+function resetTalents(){
+  if(!confirm('Reset all talents? All spent points will be returned.'))return;
+  talentState.learned={};
+  talentState.points=talentState.pointsEarned;
+  recalcStats();
+  renderTalentPanel();
+  addFeed('✦ Talents reset','#c4b5fd');
+}
+
+// Aggregate all talent effects into a single bonus object the engine reads.
+// Called every recalcStats(). The engine queries getTalentBonus(key) to apply effects.
+let _talentBonusCache={};
+function computeTalentBonuses(){
+  _talentBonusCache={};
+  Object.entries(TALENT_TREE).forEach(([branchName,branch])=>{
+    branch.talents.forEach(talent=>{
+      const rank=talentState.learned[talent.id]||0;
+      if(rank<=0)return;
+      const bonuses=talent.apply(rank);
+      Object.entries(bonuses).forEach(([k,v])=>{
+        _talentBonusCache[k]=(_talentBonusCache[k]||0)+v;
+      });
+    });
+  });
+}
+function getTalentBonus(key){return _talentBonusCache[key]||0;}
+
+// Render the talent panel UI. Called whenever it opens or a talent is learned.
+function renderTalentPanel(){
+  const container=document.getElementById('talentTree');
+  if(!container)return;
+  container.innerHTML='';
+  // Points header
+  const header=document.createElement('div');
+  header.className='talent-header';
+  header.innerHTML=`
+    <div class="talent-points-label">Available Points: <span class="talent-points-num">${talentState.points}</span></div>
+    <button class="talent-reset-btn" id="_resetTalentsBtn">Reset All</button>
+  `;
+  container.appendChild(header);
+  const resetBtn=document.getElementById('_resetTalentsBtn');
+  if(resetBtn)resetBtn.addEventListener('click',resetTalents);
+  // Branches
+  Object.entries(TALENT_TREE).forEach(([branchName,branch])=>{
+    const spent=pointsInBranch(branchName);
+    const branchDiv=document.createElement('div');
+    branchDiv.className='talent-branch';
+    branchDiv.style.borderLeft=`3px solid ${branch.color}`;
+    branchDiv.innerHTML=`
+      <div class="talent-branch-hdr" style="color:${branch.color}">
+        <span class="talent-branch-icon">${branch.icon}</span>
+        <span class="talent-branch-name">${branchName}</span>
+        <span class="talent-branch-spent">${spent} pts</span>
+      </div>
+      <div class="talent-grid" id="tgrid-${branchName}"></div>
+    `;
+    container.appendChild(branchDiv);
+    const grid=branchDiv.querySelector(`#tgrid-${branchName}`);
+    branch.talents.forEach(talent=>{
+      const rank=talentState.learned[talent.id]||0;
+      const locked=spent<talent.gate;
+      const maxed=rank>=talent.maxRank;
+      const canLearn=!locked&&!maxed&&talentState.points>0;
+      const node=document.createElement('div');
+      node.className='talent-node';
+      if(rank>0)node.classList.add('learned');
+      if(locked)node.classList.add('locked');
+      if(maxed)node.classList.add('maxed');
+      if(canLearn)node.classList.add('available');
+      const effectText=rank>0?talent.effect(rank):talent.effect(1);
+      const gateText=locked?`<div class="tn-gate">Unlocks at ${talent.gate} pts</div>`:'';
+      node.innerHTML=`
+        <span class="tn-icon" style="color:${branch.color}">${talent.icon}</span>
+        <div class="tn-name">${talent.name}</div>
+        <div class="tn-desc">${talent.desc}</div>
+        <div class="tn-effect">${effectText}</div>
+        <div class="tn-rank">${rank}/${talent.maxRank}</div>
+        ${gateText}
+      `;
+      if(canLearn){
+        node.addEventListener('click',()=>learnTalent(branchName,talent.id));
+      }
+      grid.appendChild(node);
+    });
+  });
+}
+
+function openTalents(){
+  renderTalentPanel();
+  document.getElementById('talentPanel').style.display='flex';
+}
+function closeTalents(){
+  document.getElementById('talentPanel').style.display='none';
 }
