@@ -410,14 +410,14 @@ const DUNGEONS=[
     boss:{
       name:'Bone Revenant',
       baseType:'skeleton',
-      hpMult:12,  // 12x normal enemy HP of that type
+      hpMult:20,  // was 12 — bosses should feel tanky, last ~30-45s of focused damage
       atkMult:1.8,
       sizeMult:2.2,
     },
     reward:{
       minRarity:'rare',
       bonusGold:200,
-      bonusXP:300,
+      bonusXP:100,  // was 300 — reduced so clears don't skyrocket levels
     },
   },
   {
@@ -436,14 +436,14 @@ const DUNGEONS=[
     boss:{
       name:'Sorrowed Specter',
       baseType:'specter',
-      hpMult:16,
+      hpMult:26,  // was 16
       atkMult:2.1,
       sizeMult:2.4,
     },
     reward:{
       minRarity:'epic',
       bonusGold:500,
-      bonusXP:750,
+      bonusXP:250,  // was 750
     },
   },
   {
@@ -462,14 +462,14 @@ const DUNGEONS=[
     boss:{
       name:'Cathedral Warden',
       baseType:'golem',
-      hpMult:22,
+      hpMult:35,  // was 22
       atkMult:2.5,
       sizeMult:2.8,
     },
     reward:{
       minRarity:'legendary',
       bonusGold:1200,
-      bonusXP:1800,
+      bonusXP:600,  // was 1800
     },
   },
 ];
