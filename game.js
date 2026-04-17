@@ -2927,6 +2927,7 @@ function buildSave(){
     zoneId:curZone?.id||1,
     equipped:JSON.parse(JSON.stringify(equipped)), // deep clone so mutations don't corrupt save
     inventory:typeof inventory!=='undefined'?JSON.parse(JSON.stringify(inventory)):[],
+    shopState:typeof shopState!=='undefined'?JSON.parse(JSON.stringify(shopState)):null,
     professions:JSON.parse(JSON.stringify(professions)),
     talents:typeof talentState!=='undefined'?JSON.parse(JSON.stringify(talentState)):null,
   };
@@ -2996,6 +2997,13 @@ function applySave(data){
     }
     if(typeof updateInventoryBadge==='function')updateInventoryBadge();
   }
+  // Shop state — restore rotation, buyback, last refresh time
+  if(typeof shopState!=='undefined'&&data.shopState){
+    shopState.gear=data.shopState.gear||[];
+    shopState.lastRefresh=data.shopState.lastRefresh||0;
+    shopState.buyback=data.shopState.buyback||null;
+    shopState.buybackPrice=data.shopState.buybackPrice||0;
+  }
   // Professions
   if(data.professions){
     Object.keys(professions).forEach(pname=>{
@@ -3027,6 +3035,8 @@ function applySave(data){
 // Saves periodically during play — cheap operation, negligible cost.
 function maybeAutoSave(now){
   if(now-lastSaveTime>AUTOSAVE_INTERVAL){writeSave();}
+  // Also check shop auto-refresh timer
+  if(typeof checkShopAutoRefresh==='function')checkShopAutoRefresh();
 }
 
 // Refresh the title screen's buttons based on whether a save exists.
