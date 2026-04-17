@@ -263,7 +263,8 @@ let envProps=[];
 // Note: envProps is declared above in GAME STATE section
 function rngF(s){return((s*16807)%2147483647)/2147483647;}
 function generateEnvironment(){
-  envProps=[];const z=curZone;let s=7919;
+  envProps=[];
+  const z=getActiveTheme();let s=7919;
   z.props.forEach((type,ti)=>{
     const cnt=z.counts[ti]||30;
     for(let i=0;i<cnt;i++){
@@ -545,8 +546,18 @@ function drawSpirit(s,t){
 function drawBackground(now){}// kept for compat
 function drawGroundPlane(now){}// kept for compat
 
+// Returns the currently active visual theme. In a dungeon, uses the dungeon's
+// theme; in the open world, uses the current zone. This is the single source
+// of truth for all environmental rendering.
+function getActiveTheme(){
+  if(dungeonState.active && dungeonState.def && dungeonState.def.theme){
+    return dungeonState.def.theme;
+  }
+  return curZone;
+}
+
 function drawWorld(now){
-  const z=curZone;
+  const z=getActiveTheme();
   // Zone-specific sky gradient
   const sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,z.skyA);sky.addColorStop(.5,z.skyB);sky.addColorStop(1,z.skyC);
   ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
@@ -667,6 +678,9 @@ function enterDungeon(dungeonId){
   dungeonState.phase='wave';
   dungeonState.phaseTimer=0;
   dungeonState.bossEntity=null;
+  // Regenerate environment props for the new theme — this is what makes the
+  // dungeon look visually different from the open world
+  generateEnvironment();
   // Spawn first wave immediately
   spawnDungeonWave(0);
   // UI feedback — show dungeon HUD, hide zone label (dungeon HUD replaces it)
@@ -836,12 +850,43 @@ function exitDungeon(success){
   player.vx=0;player.vy=0;
   player.lastInput=performance.now(); // prevents AFK pathing for a few seconds
   if(typeof setAfkWaypoint==='function')setAfkWaypoint();
+  // Regenerate environment with open-world theme (getActiveTheme() now returns curZone)
+  generateEnvironment();
   // Hide dungeon HUD, restore normal zone label
   const overlay=document.getElementById('dungeonStatus');
   if(overlay)overlay.style.display='none';
+  const bossBar=document.getElementById('bossHpBar');
+  if(bossBar)bossBar.style.display='none';
   const zoneLbl=document.getElementById('zoneLabel');
   if(zoneLbl)zoneLbl.style.display='block';
   if(!success)addFeed('Dungeon failed','#6b4d8a');
+}
+
+// Player-triggered forfeit. Confirms so a misclick doesn't cost progress.
+function abandonDungeon(){
+  if(!dungeonState.active)return;
+  if(!confirm('Abandon this dungeon run?\n\nAll progress in this run will be lost.'))return;
+  addFeed('⚑ Run abandoned','#6b4d8a');
+  exitDungeon(false);
+}
+
+// Update the boss HP bar. Called each frame while a boss fight is active.
+function updateBossHpBar(){
+  const bar=document.getElementById('bossHpBar');
+  if(!bar)return;
+  const boss=dungeonState.bossEntity;
+  if(!boss||boss.dead||dungeonState.phase!=='boss'){
+    bar.style.display='none';
+    return;
+  }
+  bar.style.display='flex';
+  const nameEl=bar.querySelector('.boss-hp-name');
+  const fillEl=bar.querySelector('.boss-hp-fill');
+  if(nameEl)nameEl.textContent=boss.bossName||'Boss';
+  if(fillEl){
+    const pct=Math.max(0,Math.min(100,(boss.hp/boss.maxHp)*100));
+    fillEl.style.width=pct+'%';
+  }
 }
 
 function updateDungeonHUD(){
@@ -868,6 +913,8 @@ function updateDungeonHUD(){
   if(titleEl)titleEl.textContent=title;
   if(subEl)subEl.textContent=sub;
   if(titleEl)titleEl.style.color=def.color;
+  // Keep boss HP bar in sync
+  updateBossHpBar();
 }
 
 // ═══════ PORTAL SYSTEM ═══════════════════════════════════
@@ -957,6 +1004,9 @@ function updatePortal(dt,now){
     addFeed('⚑ Portal collapsed.','#6b4d8a');
     portalState.active=null;
     portalState.nextSpawnAt=now+PORTAL_SPAWN_COOLDOWN_MIN+Math.random()*(PORTAL_SPAWN_COOLDOWN_MAX-PORTAL_SPAWN_COOLDOWN_MIN);
+    // Hide the portal prompt if it was showing
+    const promptEl=document.getElementById('portalPrompt');
+    if(promptEl)promptEl.style.display='none';
     return;
   }
   // Dim-warn threshold
@@ -965,31 +1015,46 @@ function updatePortal(dt,now){
     p.warned=true;
     addFeed('⚑ Portal fading — go now!','#f59e0b');
   }
-  // Check player proximity for channel
+  // Check player proximity — show/hide the confirmation prompt instead of auto-channeling
   const dx=player.x-p.x, dy=player.y-p.y, d=Math.sqrt(dx*dx+dy*dy);
-  if(d<PORTAL_ENTRY_RADIUS){
-    if(p.phase==='idle'){
-      p.phase='channeling';
-      p.channelStart=now;
-      addFeed(`Channeling ${p.def.name}...`,p.def.color);
-    }
-  } else {
-    if(p.phase==='channeling'){
-      // Left range — cancel channel
-      p.phase='idle';
-      p.channelStart=0;
+  const nearPortal=d<PORTAL_ENTRY_RADIUS*1.8; // slightly bigger radius for prompt visibility
+  const promptEl=document.getElementById('portalPrompt');
+  if(promptEl){
+    if(nearPortal){
+      // Show the prompt if not already showing
+      if(!p.promptVisible){
+        p.promptVisible=true;
+        const dgNameEl=promptEl.querySelector('.portal-prompt-name');
+        if(dgNameEl){
+          dgNameEl.textContent=p.def.name;
+          dgNameEl.style.color=p.def.color;
+        }
+        promptEl.style.display='flex';
+        promptEl.style.borderColor=p.def.color+'88';
+      }
+    } else {
+      // Hide the prompt when walking away
+      if(p.promptVisible){
+        p.promptVisible=false;
+        promptEl.style.display='none';
+      }
     }
   }
-  // Complete channel → enter dungeon
-  if(p.phase==='channeling'&&now-p.channelStart>=PORTAL_CHANNEL_MS){
-    p.phase='entering';
-    const def=p.def;
-    // Consume the portal first (enterDungeon clears enemies, etc.)
-    portalState.active=null;
-    portalState.nextSpawnAt=now+PORTAL_SPAWN_COOLDOWN_MIN+Math.random()*(PORTAL_SPAWN_COOLDOWN_MAX-PORTAL_SPAWN_COOLDOWN_MIN);
-    // Use the existing enterDungeon function with the dungeon ID
-    enterDungeon(def.id);
-  }
+}
+
+// Called when player taps the ENTER button on the portal prompt.
+// This is now the ONLY way to enter a portal — no more walk-in-by-accident.
+function confirmPortalEntry(){
+  if(!portalState.active)return;
+  const p=portalState.active;
+  const def=p.def;
+  // Hide the prompt immediately
+  const promptEl=document.getElementById('portalPrompt');
+  if(promptEl)promptEl.style.display='none';
+  // Consume portal
+  portalState.active=null;
+  portalState.nextSpawnAt=performance.now()+PORTAL_SPAWN_COOLDOWN_MIN+Math.random()*(PORTAL_SPAWN_COOLDOWN_MAX-PORTAL_SPAWN_COOLDOWN_MIN);
+  enterDungeon(def.id);
 }
 
 // Called from render() AFTER the canvas has been translated into world space.
