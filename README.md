@@ -2,7 +2,7 @@
 
 A browser-based ARPG built in vanilla HTML/CSS/JavaScript.
 
-Play it here (once GitHub Pages is enabled): **https://YOUR-USERNAME.github.io/ashenveil/**
+Play it here (once GitHub Pages is enabled): **https://ashveil-gamer-cmd.github.io/Ashenveil-VeilboundChronicles/)**
 
 ## File Structure
 
