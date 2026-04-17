@@ -1405,6 +1405,23 @@ function newGameConfirm(){
 // ═══════ INPUT ═══════════════════════════════════════════
 document.addEventListener('keydown',e=>{keys[e.key]=true;player.lastInput=performance.now();});
 document.addEventListener('keyup',e=>{keys[e.key]=false;});
+
+// ─── EMERGENCY SAVE TRIGGERS ───
+// If the tab is hidden, minimized, closed, or the phone locks, save immediately.
+// This catches: closing tab, switching apps on mobile, phone screen lock, browser
+// backgrounded on iOS, page reload, and accidental navigation away.
+// Without these, short play sessions can lose all progress between 10-second autosaves.
+function emergencySave(){
+  if(typeof writeSave!=='function')return;
+  if(!running)return; // don't save on title screen
+  writeSave();
+}
+// Fires when tab becomes hidden — most reliable cross-browser signal
+document.addEventListener('visibilitychange',()=>{if(document.hidden)emergencySave();});
+// Fires just before the page unloads — catches close/reload/navigate-away
+window.addEventListener('pagehide',emergencySave);
+// Fires when the browser loses focus (desktop)
+window.addEventListener('blur',emergencySave);
 document.getElementById('startBtn').addEventListener('click',()=>startGame(false));
 // New continue/newgame buttons — only present if HTML has been updated
 const _continueBtn=document.getElementById('continueBtn');
