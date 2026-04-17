@@ -34,10 +34,27 @@ function rollLoot(level){
   const filtered=ITEM_POOL.filter(i=>i.rarity===rarity||Math.random()<0.12);
   return {...(filtered.length?filtered[Math.floor(Math.random()*filtered.length)]:ITEM_POOL[Math.floor(Math.random()*ITEM_POOL.length)])};
 }
+// Rarity color palette — single source of truth used by all gear UI
+const RARITY_COLORS={common:'#9ca3af',uncommon:'#22c55e',rare:'#60a5fa',epic:'#c084fc',legendary:'#f59e0b',mythic:'#ff6b6b'};
+const RARITY_LABELS={common:'COMMON',uncommon:'UNCOMMON',rare:'RARE',epic:'EPIC',legendary:'LEGENDARY',mythic:'MYTHIC'};
+
+// Icon for each gear slot — used in gear panel and drop notifications
+const SLOT_ICONS={Weapon:'⚔',Helmet:'🜲',Chest:'🛡',Gloves:'✋',Boots:'👞',Belt:'᎓',Ring:'○',Amulet:'◈'};
+
 function tryEquip(item){
-  equipped[item.slot]=item; recalcStats();
-  const col={common:'#9ca3af',uncommon:'#22c55e',rare:'#60a5fa',epic:'#c084fc',legendary:'#f59e0b'}[item.rarity];
-  addFeed(`✦ ${item.name}`,col); checkSetBonuses();
+  const oldItem=equipped[item.slot];
+  equipped[item.slot]=item;
+  recalcStats();
+  const col=RARITY_COLORS[item.rarity]||'#9ca3af';
+  const label=RARITY_LABELS[item.rarity]||'ITEM';
+  const icon=SLOT_ICONS[item.slot]||'✦';
+  // Rich drop notification: icon + rarity + name + replaced status
+  addFeed(`${icon} [${label}] ${item.name}`,col);
+  if(oldItem){
+    // Show what was replaced, dimmed
+    addFeed(`  └ replaced ${oldItem.name}`,'#5a4a7a');
+  }
+  checkSetBonuses();
 }
 function recalcStats(){
   let sm=0,atk=0,hp=0,sb=0;
@@ -52,18 +69,64 @@ function checkSetBonuses(){
   if(cnt>0){sp.style.display='block';sp.innerHTML=`<div class="set-badge">✦ DIRGE ${cnt}/5</div>`;const b=SET_BONUSES['Dirge of Hollows'];if(b[cnt]){addFeed(`DIRGE ${cnt}PC: ${b[cnt].desc}`,'#f59e0b');}}
   else sp.style.display='none';
 }
+// Friendly stat labels — converts internal keys like "sm" to readable names like "Soul Mastery"
+const STAT_LABELS={
+  sm:'Soul Mastery',
+  atk:'Attack Power',
+  hp:'Max Health',
+  res:'Resistance',
+  crit:'Crit Chance',
+  cdr:'Cooldown Reduction',
+  lifeOnHit:'Life on Hit',
+  spiritBonus:'Spirit Capacity',
+};
+const STAT_SUFFIX={crit:'%',cdr:'%',res:'%'}; // some stats are percentages
+
+function formatStat(k,v){
+  const label=STAT_LABELS[k]||k.toUpperCase();
+  const suffix=STAT_SUFFIX[k]||'';
+  const sign=v>=0?'+':'';
+  return `${sign}${v}${suffix} ${label}`;
+}
+
 function openGear(){
   const slots=document.getElementById('gearSlots'); slots.innerHTML='';
   GEAR_SLOTS.forEach(slot=>{
     const item=equipped[slot];
     const div=document.createElement('div');div.className='gear-slot';
-    let html=`<div class="gear-slot-name">${slot}</div>`;
+    const slotIcon=SLOT_ICONS[slot]||'◇';
     if(item){
-      const stats=Object.entries(item.stats).map(([k,v])=>`+${v} ${k.toUpperCase()}`).join(' · ');
-      const setLine=item.setName?`<span class="set-badge-line">◆ ${item.setName}</span>`:'';
-      html+=`<div class="gear-item ${item.rarity}">${item.name}${setLine}</div><span class="gear-stat">${stats}</span>`;
-    } else html+=`<div class="gear-empty">— Empty —</div>`;
-    div.innerHTML=html; slots.appendChild(div);
+      const rarityCol=RARITY_COLORS[item.rarity]||'#9ca3af';
+      const rarityLabel=RARITY_LABELS[item.rarity]||'';
+      // Apply rarity color as a left-border band via inline style
+      div.style.borderLeft=`3px solid ${rarityCol}`;
+      div.classList.add('has-item');
+      const statsHtml=Object.entries(item.stats)
+        .map(([k,v])=>`<span class="gear-stat-row">${formatStat(k,v)}</span>`)
+        .join('');
+      const setLine=item.setName
+        ? `<div class="gear-set-line">◆ Set: ${item.setName} (${item.setPiece||'?'}/5)</div>`
+        : '';
+      div.innerHTML=`
+        <div class="gear-slot-header">
+          <span class="gear-slot-icon">${slotIcon}</span>
+          <span class="gear-slot-name">${slot}</span>
+          <span class="gear-rarity-tag" style="color:${rarityCol};border-color:${rarityCol}66">${rarityLabel}</span>
+        </div>
+        <div class="gear-item ${item.rarity}">${item.name}</div>
+        <div class="gear-stats-block">${statsHtml}</div>
+        ${setLine}
+      `;
+    } else {
+      div.innerHTML=`
+        <div class="gear-slot-header">
+          <span class="gear-slot-icon gear-slot-icon-empty">${slotIcon}</span>
+          <span class="gear-slot-name">${slot}</span>
+        </div>
+        <div class="gear-empty">— Empty —</div>
+      `;
+    }
+    slots.appendChild(div);
   });
   document.getElementById('gearPanel').style.display='flex';
 }
@@ -124,4 +187,3 @@ function renderProfPanel(){
     cards.appendChild(card);
   });
 }
-
