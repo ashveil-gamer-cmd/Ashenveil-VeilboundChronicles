@@ -16,28 +16,49 @@ const MAX_ENEMIES=20;
 const ZONES=[
   {id:'ashen',name:'Ashen Wastes',tier:'ZONE I',minLv:1,ambColor:'#c084fc',
    skyA:'#0e0420',skyB:'#080118',skyC:'#040010',
-   groundBase:'#0c0820',tileA:'rgba(180,120,255,0.032)',tileB:'rgba(140,80,220,0.018)',
+   groundBase:'#0c0820',
+   // Terrain patches — three scales of ground variance for an organic look
+   patchA:'rgba(90,50,150,0.18)',  // large blobs — slightly lighter purple-dirt
+   patchB:'rgba(40,20,80,0.22)',   // medium — darker depressions, shadows
+   patchC:'rgba(200,150,255,0.08)', // small flecks — ash sparkles
+   pathColor:'rgba(160,120,200,0.22)', // dusty veiled path
+   tileA:'rgba(180,120,255,0.032)',tileB:'rgba(140,80,220,0.018)', // legacy, unused now
    gridC:'rgba(160,100,255,0.038)',fogC:'rgba(100,40,180,',lightC:'rgba(200,140,255,',
    hasPillars:true,edgeC:'rgba(80,20,120,0.35)',
    props:['ashStone','ashArch','veilCrystal','darkPool','ashPatch','veilTorch','ruinWall','bonePile'],
    counts:[55,18,30,28,55,22,15,40],bias:['wraith','skeleton','shade'],ashFx:true},
   {id:'crypts',name:'Bone Crypts',tier:'ZONE II',minLv:8,ambColor:'#d97706',
    skyA:'#080508',skyB:'#050305',skyC:'#020102',
-   groundBase:'#0a0709',tileA:'rgba(200,160,80,0.028)',tileB:'rgba(160,120,60,0.016)',
+   groundBase:'#0a0709',
+   patchA:'rgba(140,110,70,0.15)',  // pale bone-dust patches
+   patchB:'rgba(50,35,15,0.30)',    // deep shadow hollows
+   patchC:'rgba(230,200,140,0.09)', // cream bone specks
+   pathColor:'rgba(180,150,100,0.24)', // worn stone path
+   tileA:'rgba(200,160,80,0.028)',tileB:'rgba(160,120,60,0.016)',
    gridC:'rgba(180,140,70,0.036)',fogC:'rgba(80,60,30,',lightC:'rgba(220,170,80,',
    hasPillars:false,edgeC:'rgba(60,40,10,0.3)',
    props:['cryptPillar','sarcophagus','cryptTomb','bonePile','cobweb','skullPile','cryptTorch','cryptWall'],
    counts:[28,12,22,60,35,40,30,20],bias:['skeleton','golem','abomination'],boneDust:true},
   {id:'mire',name:'Abyssal Mire',tier:'ZONE III',minLv:18,ambColor:'#34d399',
    skyA:'#030d06',skyB:'#020904',skyC:'#010402',
-   groundBase:'#040e05',tileA:'rgba(50,200,100,0.028)',tileB:'rgba(30,160,70,0.016)',
+   groundBase:'#040e05',
+   patchA:'rgba(30,90,50,0.22)',    // mossy wet patches
+   patchB:'rgba(60,130,80,0.14)',   // lighter grass tufts
+   patchC:'rgba(180,240,200,0.07)', // pollen specks
+   pathColor:'rgba(60,100,70,0.26)', // muddy game trail
+   tileA:'rgba(50,200,100,0.028)',tileB:'rgba(30,160,70,0.016)',
    gridC:'rgba(40,180,80,0.036)',fogC:'rgba(15,80,40,',lightC:'rgba(60,220,110,',
    hasPillars:true,edgeC:'rgba(10,60,25,0.32)',
    props:['swampTree','toxicPool','mushroom','mireRoot','toxicVent','mireVine','swampRock'],
    counts:[25,30,45,40,20,35,28],bias:['crawler','abomination','specter'],toxicFx:true},
   {id:'spire',name:"Veil's Spire",tier:'ZONE IV',minLv:30,ambColor:'#ef4444',
    skyA:'#130002',skyB:'#0a0001',skyC:'#050001',
-   groundBase:'#120003',tileA:'rgba(255,60,60,0.03)',tileB:'rgba(200,30,30,0.016)',
+   groundBase:'#120003',
+   patchA:'rgba(120,30,30,0.24)',   // charred red scorched ground
+   patchB:'rgba(60,10,10,0.30)',    // deep cracks
+   patchC:'rgba(255,140,80,0.08)',  // glowing ember flecks
+   pathColor:'rgba(180,60,50,0.26)', // blood-crusted road
+   tileA:'rgba(255,60,60,0.03)',tileB:'rgba(200,30,30,0.016)',
    gridC:'rgba(240,50,50,0.038)',fogC:'rgba(140,10,10,',lightC:'rgba(255,90,70,',
    hasPillars:true,edgeC:'rgba(120,8,8,0.45)',
    props:['veilCrystal','lavaPool','obsidianPillar','veilRift','hellTorch','ashObelisk','crackGround'],
@@ -404,17 +425,22 @@ const DUNGEONS=[
     enemyTypes:['skeleton','crawler','wraith'],
     // Visual theme — cold gray crypt, pale stone, heavy shadow
     theme:{
+      id:'hollow_crypt',
       ambColor:'#b8b8c4',
       skyA:'#060607',skyB:'#040405',skyC:'#020203',
       groundBase:'#0a0a0c',
+      patchA:'rgba(180,180,200,0.14)',   // pale stone flagstone patches
+      patchB:'rgba(30,30,40,0.28)',       // dark crypt shadow hollows
+      patchC:'rgba(220,220,240,0.08)',    // dust/bone chip flecks
+      pathColor:'rgba(200,195,210,0.20)', // worn crypt stone path
       tileA:'rgba(200,200,215,0.045)',tileB:'rgba(140,140,160,0.022)',
-      gridC:'rgba(200,200,220,0.08)', // brighter grid = more stone-like flagstones
+      gridC:'rgba(200,200,220,0.08)',
       fogC:'rgba(180,180,200,',
       lightC:'rgba(220,220,240,',
       hasPillars:true,
-      edgeC:'rgba(15,15,20,0.55)', // darker vignette = crypt feel
+      edgeC:'rgba(15,15,20,0.55)',
       props:['cryptPillar','sarcophagus','bonePile','cryptTomb','skullPile','cobweb'],
-      counts:[8,5,18,6,10,12], // fewer total, focused
+      counts:[8,5,18,6,10,12],
     },
     waves:[
       {count:6,elites:0,types:['skeleton','crawler']},
@@ -444,9 +470,14 @@ const DUNGEONS=[
     enemyTypes:['wraith','shade','specter'],
     // Visual theme — ethereal blue temple with cold mist
     theme:{
+      id:'wraith_sanctum',
       ambColor:'#60a5fa',
       skyA:'#04081a',skyB:'#020514',skyC:'#01020a',
       groundBase:'#050a1a',
+      patchA:'rgba(80,150,230,0.18)',   // marbled blue stone patches
+      patchB:'rgba(20,40,90,0.28)',      // dark temple alcoves
+      patchC:'rgba(180,220,255,0.09)',   // ethereal blue sparkles
+      pathColor:'rgba(140,180,230,0.22)', // shimmering veil path
       tileA:'rgba(120,180,255,0.055)',tileB:'rgba(60,110,200,0.025)',
       gridC:'rgba(100,165,255,0.09)',
       fogC:'rgba(60,130,220,',
@@ -484,9 +515,14 @@ const DUNGEONS=[
     enemyTypes:['golem','abomination','specter'],
     // Visual theme — warm firelit ruin, glowing amber embers, scorched stone
     theme:{
+      id:'ashen_cathedral',
       ambColor:'#f59e0b',
       skyA:'#180a02',skyB:'#0e0601',skyC:'#050200',
       groundBase:'#120802',
+      patchA:'rgba(200,100,40,0.20)',   // scorched warm stone patches
+      patchB:'rgba(60,20,5,0.30)',       // charred black burn marks
+      patchC:'rgba(255,190,100,0.10)',   // glowing ember specks
+      pathColor:'rgba(200,130,60,0.25)', // ash-stained stone aisle
       tileA:'rgba(245,180,60,0.055)',tileB:'rgba(180,120,40,0.028)',
       gridC:'rgba(230,160,50,0.09)',
       fogC:'rgba(200,110,30,',
