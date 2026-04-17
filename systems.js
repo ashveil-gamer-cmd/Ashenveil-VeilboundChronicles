@@ -187,7 +187,7 @@ function renderProfPanel(){
     (RECIPES[name]||[]).forEach(r=>{
       const row=document.createElement('div');row.className='recipe';
       const cost=Object.entries(r.cost).map(([k,v])=>`${v} ${k}`).join(', ');
-      row.innerHTML=`<span class="recipe-name">${r.name} <span style="color:#2d2040;font-size:8px">(${cost})</span></span>`;
+      row.innerHTML=`<span class="recipe-name">${r.name}</span> <span class="recipe-cost">${cost}</span>`;
       const btn=document.createElement('button');btn.className='craft-btn';btn.textContent='CRAFT';btn.disabled=!canCraft(name,r);
       btn.onclick=()=>craft(name,r);row.appendChild(btn);card.appendChild(row);
     });
