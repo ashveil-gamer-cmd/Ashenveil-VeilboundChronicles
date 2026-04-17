@@ -41,6 +41,14 @@ const SFX={
   eliteDeath:()=>{playTone(100,35,0.22,0.22);playNoise(0.18,0.20,600,'lowpass');},
   playerHit:()=>{playTone(200,100,0.08,0.20);playNoise(0.06,0.18,1500,'bandpass');},
   pickup:()=>{playTone(660,990,0.07,0.14);playTone(990,1320,0.05,0.11,'sine',0.06);},
+  // Rarity-tiered loot pickup sounds — higher rarity = more dramatic, layered
+  pickupCommon:()=>{playTone(500,700,0.06,0.10);},
+  pickupUncommon:()=>{playTone(660,990,0.08,0.14);playTone(880,1100,0.05,0.10,'sine',0.05);},
+  pickupRare:()=>{playTone(550,880,0.12,0.18);playTone(880,1320,0.10,0.14,'sine',0.08);playTone(440,660,0.08,0.10,'triangle',0.15);},
+  pickupEpic:()=>{playTone(440,660,0.20,0.22);playTone(660,990,0.16,0.18,'sine',0.08);playTone(990,1320,0.14,0.16,'sine',0.18);playNoise(0.08,0.14,2000,'highpass',0.05);},
+  pickupLegendary:()=>{playTone(330,440,0.3,0.26);playTone(550,880,0.26,0.22,'sine',0.1);playTone(880,1320,0.22,0.20,'sine',0.22);playTone(1320,1760,0.18,0.16,'triangle',0.38);playNoise(0.15,0.18,3000,'highpass',0.05);},
+  pickupMythic:()=>{playTone(220,330,0.4,0.28);playTone(440,660,0.35,0.24,'sine',0.12);playTone(880,1320,0.3,0.22,'sine',0.28);playTone(1760,2200,0.25,0.2,'triangle',0.48);playNoise(0.25,0.2,4000,'highpass',0.05);playTone(110,55,0.5,0.18,'sine',0.1);},
+  zoneChange:()=>{playTone(220,440,0.35,0.18);playTone(330,660,0.25,0.14,'sine',0.1);playTone(440,880,0.2,0.12,'sine',0.2);},
 };
 
 // ─── MP3 MUSIC PLAYER ────────────────────────────
@@ -110,4 +118,3 @@ function startAmbient(){
     },8000+Math.random()*6000);
   }catch(e){}
 }
-
