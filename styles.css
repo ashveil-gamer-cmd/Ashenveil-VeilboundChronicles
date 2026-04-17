@@ -459,3 +459,142 @@ canvas#c{display:block;position:fixed;top:0;left:0}
   box-shadow:0 0 18px rgba(192,132,252,0.45);
   transform:translateY(-1px)
 }
+
+/* ─── INVENTORY PANEL ─── */
+#inventoryPanel{position:fixed;inset:0;z-index:400;display:none;flex-direction:column;background:linear-gradient(160deg,#0f0820,#06001a);overflow-y:auto}
+#bagLayout{
+  display:flex;flex-direction:column;gap:clamp(10px,1.5vw,18px);
+  max-width:920px;width:100%;margin:0 auto;
+  padding:clamp(12px,1.5vw,20px);
+}
+#bagGrid{
+  display:grid;
+  grid-template-columns:repeat(6,1fr);
+  gap:clamp(6px,0.8vw,10px);
+  width:100%;
+}
+.bag-count{
+  font-family:'Cinzel',serif;
+  font-size:clamp(10px,1vw,12px);
+  color:#b8a8d0;letter-spacing:1.5px;margin-left:12px;
+  font-weight:400;
+}
+.bag-slot{
+  aspect-ratio:1;
+  border:1.5px solid rgba(255,255,255,0.08);
+  background:rgba(255,255,255,0.03);
+  border-radius:6px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:2px;
+  transition:all 0.15s;
+  cursor:pointer;
+  position:relative;
+  overflow:hidden;
+}
+.bag-slot.empty{
+  background:rgba(255,255,255,0.015);
+  border-color:rgba(255,255,255,0.05);
+  cursor:default;
+}
+.bag-slot.filled:hover{transform:translateY(-2px);box-shadow:0 4px 14px rgba(0,0,0,0.5)}
+.bag-slot.selected{transform:translateY(-2px);box-shadow:0 0 0 2px rgba(255,255,255,0.3),0 4px 18px rgba(0,0,0,0.6)}
+.bag-slot-icon{font-size:clamp(18px,2.2vw,26px);line-height:1;font-weight:700}
+.bag-slot-rarity{
+  font-family:'Cinzel',serif;
+  font-size:clamp(7px,0.75vw,9px);
+  letter-spacing:1px;padding:1px 6px;border-radius:2px;
+  font-weight:600;
+}
+/* Tooltip */
+#bagTooltip{
+  display:none;
+  flex-direction:column;gap:clamp(8px,1vw,12px);
+  background:rgba(15,8,30,0.95);
+  border:1.5px solid rgba(255,255,255,0.1);
+  border-radius:8px;
+  padding:clamp(14px,1.5vw,20px);
+  box-shadow:0 8px 32px rgba(0,0,0,0.7);
+}
+.bag-tooltip-header{
+  display:flex;justify-content:space-between;align-items:center;gap:12px;
+  padding-bottom:clamp(8px,1vw,12px);
+  border-bottom:1px solid;
+}
+.bag-tt-name{
+  font-family:'Cinzel',serif;
+  font-size:clamp(14px,1.5vw,18px);
+  letter-spacing:2px;font-weight:700;flex:1;
+}
+.bag-tt-rarity{
+  font-family:'Cinzel',serif;
+  font-size:clamp(9px,0.95vw,11px);
+  letter-spacing:1.5px;padding:3px 10px;border-radius:3px;font-weight:600;
+}
+.bag-tt-slot{
+  font-family:'Cinzel',serif;
+  font-size:clamp(10px,1vw,12px);color:#b8a8d0;letter-spacing:2px;
+}
+.bag-tt-set{
+  font-size:clamp(10px,1vw,12px);color:#c084fc;font-style:italic;letter-spacing:1px;
+}
+.bag-tt-section{display:flex;flex-direction:column;gap:4px}
+.bag-tt-section-label{
+  font-family:'Cinzel',serif;
+  font-size:clamp(9px,0.95vw,11px);
+  letter-spacing:2px;color:#6b4d8a;text-transform:uppercase;
+  margin-bottom:4px;
+}
+.bag-stat-line{
+  font-family:'Cinzel',serif;
+  font-size:clamp(11px,1.1vw,13px);
+  letter-spacing:0.5px;font-weight:500;
+}
+.bag-tt-current{
+  font-size:clamp(10px,1vw,12px);color:#6b4d8a;font-style:italic;
+  margin-top:4px;
+}
+.bag-tt-actions{
+  display:flex;gap:10px;margin-top:clamp(8px,1vw,12px);
+}
+.bag-btn{
+  flex:1;
+  font-family:'Cinzel',serif;
+  font-size:clamp(11px,1.1vw,13px);
+  letter-spacing:2px;text-transform:uppercase;font-weight:700;
+  padding:clamp(10px,1.2vw,14px);
+  border-radius:5px;cursor:pointer;
+  transition:all 0.15s;
+}
+.bag-btn-equip{
+  color:#fff;
+  background:linear-gradient(135deg,rgba(34,197,94,0.25),rgba(34,197,94,0.08));
+  border:1px solid rgba(34,197,94,0.5);
+}
+.bag-btn-equip:hover{
+  background:linear-gradient(135deg,rgba(34,197,94,0.4),rgba(34,197,94,0.15));
+  border-color:#22c55e;box-shadow:0 0 14px rgba(34,197,94,0.3);
+}
+.bag-btn-discard{
+  color:#ef4444;
+  background:transparent;
+  border:1px solid rgba(239,68,68,0.3);
+}
+.bag-btn-discard:hover{
+  background:rgba(239,68,68,0.1);
+  border-color:#ef4444;
+}
+/* Count badge on the BAG menu button */
+.menu-btn-badge{
+  position:absolute;top:-6px;right:-6px;
+  min-width:18px;height:18px;padding:0 5px;
+  background:#ef4444;color:#fff;
+  font-family:'Cinzel',serif;font-size:10px;font-weight:700;
+  border-radius:9px;display:flex;align-items:center;justify-content:center;
+  border:1.5px solid #0a0018;
+  box-shadow:0 2px 6px rgba(0,0,0,0.5);
+}
+.menu-btn{position:relative}
+/* Responsive: narrower grid on phones */
+@media (max-width:500px){
+  #bagGrid{grid-template-columns:repeat(4,1fr)}
+}
