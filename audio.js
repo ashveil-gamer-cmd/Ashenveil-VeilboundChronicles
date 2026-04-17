@@ -1,20 +1,63 @@
 // ═══════ AUDIO ═══════════════════════════════════════════
+// Shared AudioContext for SFX + ambient music. Volume controlled by masterVolume,
+// persisted in localStorage. Ambient uses zone-specific oscillator layers that
+// cross-fade cleanly on zone transitions without leaking Web Audio nodes.
+
 let audioCtx = null;
+// Master volume gain — all audio routes through this so one slider controls everything.
+let masterGainNode = null;
+// Persisted volume: 0 = muted, 1 = full. Defaults to 0.6.
+let masterVolume = 0.6;
+try{
+  const saved = localStorage.getItem('ashenveil_volume');
+  if(saved !== null){
+    const n = parseFloat(saved);
+    if(!Number.isNaN(n)) masterVolume = Math.max(0, Math.min(1, n));
+  }
+}catch(e){}
+
 function getAC(){
-  if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  if(!audioCtx){
+    audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    // Route every sound through a single master gain for volume control
+    masterGainNode = audioCtx.createGain();
+    masterGainNode.gain.value = masterVolume;
+    masterGainNode.connect(audioCtx.destination);
+  }
   if(audioCtx.state==='suspended') audioCtx.resume();
   return audioCtx;
 }
+// Return the destination that all audio should connect to (master gain, not ctx.destination)
+function audioDest(){
+  if(!audioCtx) getAC();
+  return masterGainNode;
+}
+
+// Public setter for volume — persists to localStorage and applies live
+function setMasterVolume(v){
+  masterVolume = Math.max(0, Math.min(1, v));
+  if(masterGainNode){
+    try{
+      masterGainNode.gain.cancelScheduledValues(audioCtx.currentTime);
+      masterGainNode.gain.setValueAtTime(masterVolume, audioCtx.currentTime);
+    }catch(e){}
+  }
+  try{ localStorage.setItem('ashenveil_volume', String(masterVolume)); }catch(e){}
+}
+function getMasterVolume(){ return masterVolume; }
+
 function playTone(freq,endFreq,dur,gain,type='sine',delay=0){
   try{
     const ac=getAC(),o=ac.createOscillator(),g=ac.createGain();
-    o.connect(g);g.connect(ac.destination);
+    o.connect(g);g.connect(audioDest());
     o.type=type;const t=ac.currentTime+delay;
     o.frequency.setValueAtTime(freq,t);
     if(endFreq!==freq)o.frequency.exponentialRampToValueAtTime(Math.max(1,endFreq),t+dur);
     g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(gain,t+0.008);
     g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
     o.start(t);o.stop(t+dur+0.05);
+    // Critical: disconnect after stop so nodes can be garbage-collected
+    o.onended = ()=>{ try{o.disconnect();g.disconnect();}catch(e){} };
   }catch(e){}
 }
 function playNoise(dur,gain,filterFreq,filterType='lowpass',delay=0){
@@ -23,10 +66,11 @@ function playNoise(dur,gain,filterFreq,filterType='lowpass',delay=0){
     const d=buf.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;
     const src=ac.createBufferSource(),flt=ac.createBiquadFilter(),g=ac.createGain();
     src.buffer=buf;flt.type=filterType;flt.frequency.value=filterFreq;
-    src.connect(flt);flt.connect(g);g.connect(ac.destination);
+    src.connect(flt);flt.connect(g);g.connect(audioDest());
     const t=ac.currentTime+delay;
     g.gain.setValueAtTime(gain,t);g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
     src.start(t);src.stop(t+dur+0.05);
+    src.onended = ()=>{ try{src.disconnect();flt.disconnect();g.disconnect();}catch(e){} };
   }catch(e){}
 }
 const SFX={
@@ -41,7 +85,6 @@ const SFX={
   eliteDeath:()=>{playTone(100,35,0.22,0.22);playNoise(0.18,0.20,600,'lowpass');},
   playerHit:()=>{playTone(200,100,0.08,0.20);playNoise(0.06,0.18,1500,'bandpass');},
   pickup:()=>{playTone(660,990,0.07,0.14);playTone(990,1320,0.05,0.11,'sine',0.06);},
-  // Rarity-tiered loot pickup sounds — higher rarity = more dramatic, layered
   pickupCommon:()=>{playTone(500,700,0.06,0.10);},
   pickupUncommon:()=>{playTone(660,990,0.08,0.14);playTone(880,1100,0.05,0.10,'sine',0.05);},
   pickupRare:()=>{playTone(550,880,0.12,0.18);playTone(880,1320,0.10,0.14,'sine',0.08);playTone(440,660,0.08,0.10,'triangle',0.15);},
@@ -51,178 +94,114 @@ const SFX={
   zoneChange:()=>{playTone(220,440,0.35,0.18);playTone(330,660,0.25,0.14,'sine',0.1);playTone(440,880,0.2,0.12,'sine',0.2);},
 };
 
-// ═══════ MUSIC SYSTEM — ZONE-AWARE DYNAMIC AMBIENT ═══════════
-// Procedural ambient music generated with Web Audio API. Each zone and dungeon
-// has its own "sound identity" — drone frequencies, melodic notes, textures.
-// Changes cross-fade smoothly when player moves between zones or enters dungeons.
-// No external audio files needed.
-
-// ─── AMBIENT PROFILES PER ZONE/DUNGEON ───
-// Each profile describes the sonic character of a space:
-//   drones:   constant low-frequency tones that give the space its "color"
-//   notes:    list of frequencies played as random melodic accents
-//   noteType: oscillator type for melodic notes (sine=pure, triangle=soft, sawtooth=eerie)
-//   noteGain: how loud the accents are
-//   noteInterval: average ms between melodic notes
-//   hasShimmer: whether to add a high-frequency shimmering layer (bright zones)
-//   hasPulse:   whether to add a rhythmic low-end pulse (tense zones)
+// ═══════ ZONE AMBIENT (procedural, leak-free) ══════════════════════
+// Each zone has a sonic profile. Cross-fades cleanly on switches, tracks every
+// Web Audio node created, disconnects fully on teardown.
 const AMBIENT_PROFILES = {
-  ashen: {
-    // Ashen Wastes — cold grey windswept grief. Low drone, sparse distant tones.
-    drones: [{freq:55,gain:0.045,type:'sine'},{freq:82.4,gain:0.02,type:'sine'}],
-    notes: [220,165,275,330,247],
-    noteType: 'sine',
-    noteGain: 0.032,
-    noteInterval: 9000,
-    hasShimmer: false,
-    hasPulse: false,
-  },
-  crypts: {
-    // Bone Crypts — warm amber dread. Deeper drone, occasional distant bell-like tones.
-    drones: [{freq:48,gain:0.05,type:'sine'},{freq:71,gain:0.025,type:'triangle'}],
-    notes: [196,262,330,392,440],
-    noteType: 'triangle',
-    noteGain: 0.035,
-    noteInterval: 11000,
-    hasShimmer: false,
-    hasPulse: true,
-  },
-  mire: {
-    // Abyssal Mire — damp lush unease. Mid drone, watery textures, bright pollen-like notes.
-    drones: [{freq:62,gain:0.04,type:'sine'},{freq:92.5,gain:0.022,type:'sine'},{freq:110,gain:0.015,type:'triangle'}],
-    notes: [277,330,370,440,523],
-    noteType: 'sine',
-    noteGain: 0.028,
-    noteInterval: 7500,
-    hasShimmer: true,
-    hasPulse: false,
-  },
-  spire: {
-    // Veil's Spire — volcanic dread. Low distorted drone, rising tension tones.
-    drones: [{freq:41,gain:0.055,type:'sawtooth'},{freq:65,gain:0.022,type:'sine'}],
-    notes: [175,208,262,311,370],
-    noteType: 'sawtooth',
-    noteGain: 0.03,
-    noteInterval: 6000,
-    hasShimmer: false,
-    hasPulse: true,
-  },
-  hollow_crypt: {
-    // Hollow Crypt dungeon — suffocating dread. Very low drone + rare high bell.
-    drones: [{freq:36,gain:0.055,type:'sine'},{freq:54,gain:0.025,type:'sine'}],
-    notes: [131,196,262,330],
-    noteType: 'triangle',
-    noteGain: 0.038,
-    noteInterval: 5500,
-    hasShimmer: false,
-    hasPulse: true,
-  },
-  wraith_sanctum: {
-    // Wraith Sanctum dungeon — ethereal blue dread. Shimmery high layer, cold.
-    drones: [{freq:58,gain:0.04,type:'sine'},{freq:87,gain:0.025,type:'sine'},{freq:130,gain:0.015,type:'sine'}],
-    notes: [330,392,440,523,659],
-    noteType: 'sine',
-    noteGain: 0.035,
-    noteInterval: 5000,
-    hasShimmer: true,
-    hasPulse: false,
-  },
-  ashen_cathedral: {
-    // Ashen Cathedral dungeon — burning ruin. Warm low drone, crackling rhythmic pulse.
-    drones: [{freq:43,gain:0.055,type:'sawtooth'},{freq:65,gain:0.028,type:'triangle'}],
-    notes: [165,220,277,330,415],
-    noteType: 'triangle',
-    noteGain: 0.034,
-    noteInterval: 4500,
-    hasShimmer: false,
-    hasPulse: true,
-  },
+  ashen:           {drones:[{freq:55,gain:0.045,type:'sine'},{freq:82.4,gain:0.02,type:'sine'}],                                       notes:[220,165,275,330,247], noteType:'sine',     noteGain:0.032, noteInterval:9000,  hasShimmer:false, hasPulse:false},
+  crypts:          {drones:[{freq:48,gain:0.05,type:'sine'},{freq:71,gain:0.025,type:'triangle'}],                                     notes:[196,262,330,392,440], noteType:'triangle', noteGain:0.035, noteInterval:11000, hasShimmer:false, hasPulse:true},
+  mire:            {drones:[{freq:62,gain:0.04,type:'sine'},{freq:92.5,gain:0.022,type:'sine'},{freq:110,gain:0.015,type:'triangle'}], notes:[277,330,370,440,523], noteType:'sine',     noteGain:0.028, noteInterval:7500,  hasShimmer:true,  hasPulse:false},
+  spire:           {drones:[{freq:41,gain:0.055,type:'sawtooth'},{freq:65,gain:0.022,type:'sine'}],                                    notes:[175,208,262,311,370], noteType:'sawtooth', noteGain:0.03,  noteInterval:6000,  hasShimmer:false, hasPulse:true},
+  hollow_crypt:    {drones:[{freq:36,gain:0.055,type:'sine'},{freq:54,gain:0.025,type:'sine'}],                                        notes:[131,196,262,330],     noteType:'triangle', noteGain:0.038, noteInterval:5500,  hasShimmer:false, hasPulse:true},
+  wraith_sanctum:  {drones:[{freq:58,gain:0.04,type:'sine'},{freq:87,gain:0.025,type:'sine'},{freq:130,gain:0.015,type:'sine'}],       notes:[330,392,440,523,659], noteType:'sine',     noteGain:0.035, noteInterval:5000,  hasShimmer:true,  hasPulse:false},
+  ashen_cathedral: {drones:[{freq:43,gain:0.055,type:'sawtooth'},{freq:65,gain:0.028,type:'triangle'}],                                notes:[165,220,277,330,415], noteType:'triangle', noteGain:0.034, noteInterval:4500,  hasShimmer:false, hasPulse:true},
 };
 
-// ─── STATE ───
+// Ambient state — every Web Audio node is tracked here so teardown can disconnect all.
+// `generation` counter is incremented on every zone switch — prevents orphan callbacks
+// from a previous zone's scheduler from adding layers to the current zone.
 let ambientState = {
   running: false,
-  currentZoneId: null,     // which profile is currently playing
-  droneLayers: [],          // array of {osc, gain} for the ambient drones
-  shimmerLayer: null,       // optional high shimmer
-  pulseLayer: null,         // optional rhythmic low pulse
-  noteTimer: null,          // setTimeout for next melodic note
-  masterGain: null,         // single master gain so we can fade the whole ambient
+  currentZoneId: null,
+  generation: 0,              // increment on every switch to invalidate stale callbacks
+  layers: [],                  // {osc, gain, extra?} for drones/shimmer/pulse
+  noteTimer: null,
+  ambMasterGain: null,         // submaster for ambient music only
+  transitioning: false,        // while true, switchAmbientZone is a no-op
 };
 
 function startMusic(){
-  // Entry point. Decides current zone and starts ambient for it.
-  if(ambientState.running)return;
+  if(ambientState.running) return;
   const ac = getAC();
-  ambientState.masterGain = ac.createGain();
-  ambientState.masterGain.gain.value = 0;
-  ambientState.masterGain.connect(ac.destination);
-  // Fade master up over 3 seconds for a graceful fade-in
-  ambientState.masterGain.gain.linearRampToValueAtTime(1.0, ac.currentTime + 3);
+  ambientState.ambMasterGain = ac.createGain();
+  ambientState.ambMasterGain.gain.value = 0;
+  ambientState.ambMasterGain.connect(audioDest());
+  ambientState.ambMasterGain.gain.linearRampToValueAtTime(1.0, ac.currentTime + 3);
   ambientState.running = true;
-  // Kick off appropriate profile
-  const zid = currentZoneId();
-  switchAmbientZone(zid);
+  switchAmbientZone(currentZoneId());
 }
 
-// Returns the identifier of the currently-active zone or dungeon.
 function currentZoneId(){
-  if(typeof dungeonState!=='undefined' && dungeonState.active && dungeonState.def){
-    return dungeonState.def.id;
-  }
-  if(typeof curZone!=='undefined' && curZone){
-    return curZone.id;
-  }
+  if(typeof dungeonState!=='undefined' && dungeonState.active && dungeonState.def) return dungeonState.def.id;
+  if(typeof curZone!=='undefined' && curZone) return curZone.id;
   return 'ashen';
 }
 
-// Called from game code when zone changes. Cross-fades from current ambient to new.
+// CRITICAL FIX: debounced + guarded. Silently ignores same-zone calls, ignores
+// calls during an in-progress transition. This prevents the frame-loop spam from
+// creating duplicate nodes.
 function switchAmbientZone(zoneId){
-  if(!ambientState.running)return;
-  if(ambientState.currentZoneId === zoneId)return;
+  if(!ambientState.running) return;
+  if(ambientState.currentZoneId === zoneId) return;
+  if(ambientState.transitioning) return; // already fading — don't stack
   const profile = AMBIENT_PROFILES[zoneId] || AMBIENT_PROFILES.ashen;
-  // Fade out old layers, then replace
+  ambientState.transitioning = true;
+  ambientState.generation++;
+  const myGeneration = ambientState.generation;
   tearDownAmbientLayers(1.2, ()=>{
+    // Verify we're still the current generation — if another switch happened while we faded, abort
+    if(myGeneration !== ambientState.generation){
+      ambientState.transitioning = false;
+      return;
+    }
     ambientState.currentZoneId = zoneId;
-    buildAmbientLayers(profile);
+    buildAmbientLayers(profile, myGeneration);
+    ambientState.transitioning = false;
   });
 }
 
-// Tears down all currently-active ambient layers (drones, shimmer, pulse, note timer).
-// Fades them out over `fadeSec` seconds, then runs `onDone`.
+// Tears down ALL ambient nodes, disconnecting + stopping every one.
+// Uses tracked `layers` array so nothing is missed.
 function tearDownAmbientLayers(fadeSec, onDone){
-  const ac = getAC();
-  const layers = [...ambientState.droneLayers];
-  if(ambientState.shimmerLayer) layers.push(ambientState.shimmerLayer);
-  if(ambientState.pulseLayer) layers.push(ambientState.pulseLayer);
-  // Stop note timer immediately
+  if(!audioCtx){ if(onDone) onDone(); return; }
+  const ac = audioCtx;
+  const layersToKill = ambientState.layers.slice();
+  ambientState.layers = [];
   if(ambientState.noteTimer){
     clearTimeout(ambientState.noteTimer);
     ambientState.noteTimer = null;
   }
-  if(!layers.length){ if(onDone)onDone(); return; }
-  // Fade each gain to near-zero, then stop oscillator
-  layers.forEach(l=>{
+  if(!layersToKill.length){ if(onDone) onDone(); return; }
+  layersToKill.forEach(layer=>{
     try{
-      l.gain.gain.cancelScheduledValues(ac.currentTime);
-      const curGain = l.gain.gain.value;
-      l.gain.gain.setValueAtTime(curGain, ac.currentTime);
-      l.gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + fadeSec);
-      setTimeout(()=>{ try{l.osc.stop();}catch(e){} }, (fadeSec+0.1)*1000);
-    } catch(e){}
+      layer.gain.gain.cancelScheduledValues(ac.currentTime);
+      layer.gain.gain.setValueAtTime(layer.gain.gain.value, ac.currentTime);
+      layer.gain.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + fadeSec);
+    }catch(e){}
+    // After fade completes, stop + fully disconnect everything
+    setTimeout(()=>{
+      try{ layer.osc.stop(); }catch(e){}
+      try{ layer.osc.disconnect(); }catch(e){}
+      try{ layer.gain.disconnect(); }catch(e){}
+      if(layer.lfo){
+        try{ layer.lfo.stop(); }catch(e){}
+        try{ layer.lfo.disconnect(); }catch(e){}
+      }
+      if(layer.lfoGain){
+        try{ layer.lfoGain.disconnect(); }catch(e){}
+      }
+    }, (fadeSec + 0.15) * 1000);
   });
-  ambientState.droneLayers = [];
-  ambientState.shimmerLayer = null;
-  ambientState.pulseLayer = null;
-  setTimeout(()=>{ if(onDone)onDone(); }, fadeSec*1000);
+  setTimeout(()=>{ if(onDone) onDone(); }, fadeSec * 1000);
 }
 
-// Creates all ambient layers for a given profile and starts them.
-function buildAmbientLayers(profile){
-  const ac = getAC();
-  const master = ambientState.masterGain;
-  if(!master)return;
-  // DRONES — each gets its own oscillator + gain, fading in smoothly
+function buildAmbientLayers(profile, generation){
+  if(!audioCtx || !ambientState.ambMasterGain) return;
+  // Guard: if generation no longer matches, the zone was switched again — abort
+  if(generation !== ambientState.generation) return;
+  const ac = audioCtx;
+  const dest = ambientState.ambMasterGain;
+  // DRONES
   profile.drones.forEach(d=>{
     try{
       const osc = ac.createOscillator();
@@ -231,13 +210,13 @@ function buildAmbientLayers(profile){
       osc.frequency.value = d.freq;
       gain.gain.value = 0;
       osc.connect(gain);
-      gain.connect(master);
+      gain.connect(dest);
       osc.start();
       gain.gain.linearRampToValueAtTime(d.gain, ac.currentTime + 3.5);
-      ambientState.droneLayers.push({osc, gain});
-    } catch(e){}
+      ambientState.layers.push({osc, gain});
+    }catch(e){}
   });
-  // SHIMMER — high sine with subtle amplitude modulation (bright zones only)
+  // SHIMMER
   if(profile.hasShimmer){
     try{
       const osc = ac.createOscillator();
@@ -246,10 +225,9 @@ function buildAmbientLayers(profile){
       osc.frequency.value = 1200 + Math.random()*200;
       gain.gain.value = 0;
       osc.connect(gain);
-      gain.connect(master);
+      gain.connect(dest);
       osc.start();
       gain.gain.linearRampToValueAtTime(0.008, ac.currentTime + 4);
-      // LFO to modulate shimmer gain subtly
       const lfo = ac.createOscillator();
       const lfoGain = ac.createGain();
       lfo.frequency.value = 0.15;
@@ -257,10 +235,10 @@ function buildAmbientLayers(profile){
       lfo.connect(lfoGain);
       lfoGain.connect(gain.gain);
       lfo.start();
-      ambientState.shimmerLayer = {osc, gain, lfo};
-    } catch(e){}
+      ambientState.layers.push({osc, gain, lfo, lfoGain});
+    }catch(e){}
   }
-  // PULSE — rhythmic low-frequency sub-bass (tense zones only)
+  // PULSE
   if(profile.hasPulse){
     try{
       const osc = ac.createOscillator();
@@ -269,50 +247,55 @@ function buildAmbientLayers(profile){
       osc.frequency.value = 32;
       gain.gain.value = 0;
       osc.connect(gain);
-      gain.connect(master);
+      gain.connect(dest);
       osc.start();
-      // LFO makes the pulse actually pulse
       const lfo = ac.createOscillator();
       const lfoGain = ac.createGain();
-      lfo.frequency.value = 0.25; // ~4 second cycle
+      lfo.frequency.value = 0.25;
       lfoGain.gain.value = 0.022;
       lfo.connect(lfoGain);
       lfoGain.connect(gain.gain);
       lfo.start();
-      // Baseline gain + LFO on top
       gain.gain.linearRampToValueAtTime(0.018, ac.currentTime + 3);
-      ambientState.pulseLayer = {osc, gain, lfo};
-    } catch(e){}
+      ambientState.layers.push({osc, gain, lfo, lfoGain});
+    }catch(e){}
   }
-  // NOTES — schedule first melodic accent. It self-schedules the next.
-  scheduleNextAmbientNote(profile);
+  scheduleNextAmbientNote(profile, generation);
 }
 
-// Schedules a single ambient melodic note, then recurs to schedule the next.
-function scheduleNextAmbientNote(profile){
-  const jitter = profile.noteInterval * (0.6 + Math.random()*0.8); // ±40% variance
+// FIX: generation-checked scheduler. If the zone changed since this was scheduled,
+// the callback bails out without playing or rescheduling. Notes self-clean via onended.
+function scheduleNextAmbientNote(profile, generation){
+  const jitter = profile.noteInterval * (0.6 + Math.random()*0.8);
   ambientState.noteTimer = setTimeout(()=>{
+    // Generation check — if zone switched, abort
+    if(generation !== ambientState.generation) return;
+    if(!ambientState.running) return;
+    if(!audioCtx || !ambientState.ambMasterGain) return;
     try{
-      const ac = getAC();
-      const master = ambientState.masterGain;
-      if(!master || !ambientState.running) return;
+      const ac = audioCtx;
       const note = profile.notes[Math.floor(Math.random()*profile.notes.length)];
       const osc = ac.createOscillator();
       const gain = ac.createGain();
       osc.type = profile.noteType || 'sine';
       osc.frequency.value = note;
       osc.connect(gain);
-      gain.connect(master);
+      gain.connect(ambientState.ambMasterGain);
       const t = ac.currentTime;
-      // Soft attack, long release, fades to near-silence naturally
       gain.gain.setValueAtTime(0, t);
       gain.gain.linearRampToValueAtTime(profile.noteGain, t + 0.15);
       gain.gain.exponentialRampToValueAtTime(0.0001, t + 4);
       osc.start(t);
       osc.stop(t + 4.1);
-    } catch(e){}
-    // Recur for next note — only if still in same zone
-    if(ambientState.running)scheduleNextAmbientNote(profile);
+      // CRITICAL: clean up after the note finishes so nodes don't pile up
+      osc.onended = ()=>{
+        try{ osc.disconnect(); }catch(e){}
+        try{ gain.disconnect(); }catch(e){}
+      };
+    }catch(e){}
+    // Reschedule self if still current
+    if(generation === ambientState.generation && ambientState.running){
+      scheduleNextAmbientNote(profile, generation);
+    }
   }, jitter);
 }
-
