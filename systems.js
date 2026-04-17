@@ -1,1406 +1,984 @@
-// ═══════ ASHENVEIL SYSTEMS (Gear + Professions) ═══════
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#000;overflow:hidden;font-family:'Crimson Text',serif;touch-action:none;user-select:none}
+canvas#c{display:block;position:fixed;top:0;left:0}
 
-// ═══════ GEAR SYSTEM ═════════════════════════════════════
-const GEAR_SLOTS=['Weapon','Helmet','Chest','Gloves','Boots','Belt','Ring','Amulet'];
-let equipped={Weapon:null,Helmet:null,Chest:null,Gloves:null,Boots:null,Belt:null,Ring:null,Amulet:null};
+/* ═══════════════════════════════════════════════════════════
+   UI ZONE MAP — nothing overlaps because each element lives in
+   its own reserved zone.
+   ┌─────────────────────────────────────────────────┐
+   │  HUD (top-left, max 200x100)    ZONE (top-right)│
+   │  SET BADGE (top-center, below HUD line)         │
+   │                                                 │
+   │              [play area]                        │
+   │                                                 │
+   │  FEED LOG (left)            MENU BTNS (right)   │
+   │  ─── ABILITY BAR (bottom, full width) ───       │
+   └─────────────────────────────────────────────────┘
+   ═══════════════════════════════════════════════════════════ */
 
-const ITEM_POOL=[
-  {name:'Veil Staff',slot:'Weapon',rarity:'rare',stats:{sm:8,atk:12},setName:'Dirge of Hollows',setPiece:1},
-  {name:'Pale Hood',slot:'Helmet',rarity:'uncommon',stats:{hp:80,sm:4}},
-  {name:'Hollow Robes',slot:'Chest',rarity:'rare',stats:{hp:140,res:3}},
-  {name:'Ashen Gloves',slot:'Gloves',rarity:'common',stats:{atk:6,crit:2}},
-  {name:'Veilbound Cowl',slot:'Helmet',rarity:'rare',stats:{hp:180,sm:12},setName:'Dirge of Hollows',setPiece:2},
-  {name:'Haunted Vestments',slot:'Chest',rarity:'epic',stats:{hp:240,spiritBonus:1},setName:'Dirge of Hollows',setPiece:3},
-  {name:'Pale Grasp',slot:'Gloves',rarity:'rare',stats:{sm:8,crit:8},setName:'Dirge of Hollows',setPiece:4},
-  {name:'Dirge Treads',slot:'Boots',rarity:'rare',stats:{hp:100,cdr:10},setName:'Dirge of Hollows',setPiece:5},
-  {name:'Soulthread Belt',slot:'Belt',rarity:'uncommon',stats:{hp:60,lifeOnHit:5}},
-  {name:'Hollow Ring',slot:'Ring',rarity:'rare',stats:{sm:6,atk:8}},
-  {name:'Veil Pendant',slot:'Amulet',rarity:'epic',stats:{sm:14,crit:6}},
-  {name:'Wraith Conduit',slot:'Weapon',rarity:'epic',stats:{sm:16,atk:18,spiritBonus:2},setName:'Dirge of Hollows',setPiece:0},
-];
-const SET_BONUSES={
-  'Dirge of Hollows':{
-    2:{desc:'Spirit bond cap +2',apply:()=>{player.maxBonds=(player.maxBonds||5)+2;}},
-    3:{desc:'Spirits explode on death',apply:()=>{}},
-    4:{desc:'Raise summons 2 spirits',apply:()=>{}},
-    5:{desc:'HOLLOW SURGE: 7+ spirits → Echo 500% DMG',apply:()=>{}},
-  }
-};
-function getSetPieceCount(sn){return Object.values(equipped).filter(i=>i&&i.setName===sn).length;}
-function rollLoot(level){
-  const tierIdx=Math.min(Math.floor(level/20),4);
-  const rarities=['common','uncommon','rare','epic','legendary'];
-  const rarity=rarities[Math.min(tierIdx+Math.floor(Math.random()*2),4)];
-  const filtered=ITEM_POOL.filter(i=>i.rarity===rarity||Math.random()<0.12);
-  return {...(filtered.length?filtered[Math.floor(Math.random()*filtered.length)]:ITEM_POOL[Math.floor(Math.random()*ITEM_POOL.length)])};
+/* ─── TITLE ─── */
+#titleScreen{
+  position:fixed;inset:0;z-index:200;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  background:radial-gradient(ellipse at 50% 40%,#1a0a2e 0%,#0a0010 60%,#000 100%);
 }
-// Rarity color palette — single source of truth used by all gear UI
-const RARITY_COLORS={common:'#9ca3af',uncommon:'#22c55e',rare:'#60a5fa',epic:'#c084fc',legendary:'#f59e0b',mythic:'#ff6b6b'};
-const RARITY_LABELS={common:'COMMON',uncommon:'UNCOMMON',rare:'RARE',epic:'EPIC',legendary:'LEGENDARY',mythic:'MYTHIC'};
+.title-eyebrow{font-family:'Cinzel',serif;font-size:clamp(0.5rem,1.5vw,0.7rem);color:#5a3a7a;letter-spacing:0.6em;text-transform:uppercase;margin-bottom:1em}
+.title-main{font-family:'Cinzel',serif;font-size:clamp(3rem,12vw,7rem);font-weight:900;
+  background:linear-gradient(180deg,#e8d5ff 0%,#c084fc 35%,#9DC4B0 70%,#7abaab 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+  letter-spacing:0.15em;line-height:1;filter:drop-shadow(0 0 40px #c084fc66)}
+.title-sub{font-family:'Cinzel',serif;font-size:clamp(0.5rem,2vw,0.85rem);color:#6b4d8a;letter-spacing:0.5em;margin:0.6em 0 3em;text-transform:uppercase}
+.title-divider{width:200px;height:1px;background:linear-gradient(90deg,transparent,#c084fc44,transparent);margin-bottom:3em}
+#startBtn{
+  font-family:'Cinzel',serif;font-size:0.9rem;letter-spacing:0.35em;text-transform:uppercase;
+  color:#e8d5ff;background:linear-gradient(135deg,#2d1060 0%,#1a0a40 100%);
+  border:1px solid #c084fc60;padding:16px 56px;cursor:pointer;transition:all 0.4s;
+  box-shadow:0 0 30px #c084fc20,inset 0 1px 0 rgba(255,255,255,0.1)
+}
+#startBtn:hover{border-color:#c084fc;box-shadow:0 0 50px #c084fc40,inset 0 1px 0 rgba(255,255,255,0.15);color:#fff;transform:translateY(-1px)}
+#continueBtn{
+  font-family:'Cinzel',serif;font-size:0.9rem;letter-spacing:0.35em;text-transform:uppercase;
+  color:#fff;background:linear-gradient(135deg,#4c1d95 0%,#2d1060 100%);
+  border:1px solid #c084fc;padding:16px 56px;cursor:pointer;transition:all 0.4s;
+  box-shadow:0 0 40px #c084fc40,inset 0 1px 0 rgba(255,255,255,0.15)
+}
+#continueBtn:hover{box-shadow:0 0 60px #c084fc66,inset 0 1px 0 rgba(255,255,255,0.2);transform:translateY(-1px)}
+#newGameBtn{
+  font-family:'Cinzel',serif;font-size:0.65rem;letter-spacing:0.3em;text-transform:uppercase;
+  color:#6b4d8a;background:transparent;border:1px solid #3d2555;
+  padding:10px 32px;cursor:pointer;transition:all 0.3s;margin-top:12px;display:block
+}
+#newGameBtn:hover{color:#c084fc;border-color:#c084fc50}
+.title-lore{font-size:clamp(0.65rem,1.5vw,0.8rem);color:#3d2555;letter-spacing:1px;margin-top:3em;font-style:italic;max-width:420px;text-align:center;line-height:1.8}
 
-// Icon for each gear slot — used in gear panel and drop notifications
-const SLOT_ICONS={Weapon:'⚔',Helmet:'🜲',Chest:'🛡',Gloves:'✋',Boots:'👞',Belt:'᎓',Ring:'○',Amulet:'◈'};
-
-// ═══════ INVENTORY SYSTEM ═══════════════════════════════════
-// 24-slot bag that receives drops when the equipment slot is already filled.
-// - First-drop auto-equip: if the equip slot is empty, item goes straight to gear.
-// - Subsequent drops accumulate in the bag until the player reviews them.
-// - Rare+ discards require confirmation so legendaries can't be accidentally trashed.
-// - Inventory persists through save/load (handled by buildSave/applySave in game.js).
-const INVENTORY_MAX=24;
-let inventory=[]; // array of full item objects
-
-// Called by combat drop logic. Decides: auto-equip if slot empty, else route to bag.
-// If bag is full, common/uncommon items auto-salvage into materials so AFK drops
-// aren't silently lost. Rare+ items WARN the player but don't auto-consume — the
-// player should make that decision.
-function acquireLoot(item){
-  const current=equipped[item.slot];
-  const col=RARITY_COLORS[item.rarity]||'#9ca3af';
-  const label=RARITY_LABELS[item.rarity]||'ITEM';
-  const icon=SLOT_ICONS[item.slot]||'✦';
-  if(!current){
-    // Slot empty — auto-equip for frictionless early game / first drops
-    equipped[item.slot]=item;
-    recalcStats();
-    addFeed(`${icon} [${label}] ${item.name}`,col);
-    addFeed(`  └ auto-equipped (${item.slot} was empty)`,'#5a7aa0');
-    checkSetBonuses();
-  } else if(inventory.length<INVENTORY_MAX){
-    // Slot filled — goes to bag for player to decide
-    inventory.push(item);
-    addFeed(`${icon} ${label} ${item.name} → bag (${inventory.length}/${INVENTORY_MAX})`,col);
-    updateInventoryBadge();
-  } else {
-    // Bag full — behavior depends on rarity
-    const rarityTier={common:0,uncommon:1,rare:2,epic:3,legendary:4,mythic:5}[item.rarity]||0;
-    if(rarityTier<=1){
-      // Common/uncommon — auto-salvage silently into materials so AFK doesn't waste them
-      const yields=salvageYieldFor(item);
-      Object.entries(yields).forEach(([mat,qty])=>creditMaterial(mat,qty));
-      // Small profession XP even from auto-salvage so AFK contributes to crafting
-      const salvageXP = {common:5, uncommon:10}[item.rarity] || 5;
-      Object.keys(professions).forEach(p=>addProfXP(p, salvageXP));
-      const gained=Object.entries(yields).map(([k,v])=>`+${v} ${MATERIAL_LABELS[k]}`).join(' ');
-      addFeed(`⚒ Bag full — auto-salvaged ${item.name} (${gained})`,'#a78bfa');
-    } else {
-      // Rare+ — warn player loud and clear, do NOT consume (they deserve a decision)
-      addFeed(`⚠ BAG FULL — ${label} ${item.name} LOST! Clear space in your bag!`,'#ef4444');
-      // Emergency pop-up via a ground FX so player notices mid-AFK
-      if(typeof pushGroundFX==='function'&&typeof player!=='undefined'){
-        pushGroundFX({type:'bloom',x:player.x,y:player.y,r:200,maxR:200,color:'#ef4444',life:1.2,maxLife:1.2});
-      }
-    }
-  }
+/* ─── HUD (TOP-LEFT ZONE, reserved top:0-100px, left:0-200px) ─── */
+#hud{
+  position:fixed;top:0;left:0;pointer-events:none;display:none;
+  padding:10px 12px;z-index:50;
+  background:linear-gradient(135deg,rgba(10,0,25,0.75),rgba(5,0,15,0.5) 80%,transparent);
+  border-bottom-right-radius:14px;
+  max-width:200px
+}
+.hud-portrait{
+  width:40px;height:40px;border-radius:8px;float:left;margin-right:9px;
+  background:radial-gradient(#2d1060,#0d0020);border:1.5px solid #c084fc50;
+  display:flex;align-items:center;justify-content:center;font-size:1.3rem
+}
+.hud-info{overflow:hidden}
+.hud-name{font-family:'Cinzel',serif;font-size:9px;color:#c084fc;letter-spacing:2px;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hud-bar-row{display:flex;align-items:center;gap:4px;margin-bottom:2px}
+.hud-bar-lbl{font-size:6.5px;color:#554466;text-transform:uppercase;letter-spacing:1px;width:14px}
+.hud-bar-bg{flex:1;max-width:120px;height:5px;background:rgba(255,255,255,0.05);border-radius:3px;overflow:hidden;border:1px solid rgba(255,255,255,0.04)}
+.hud-bar-fill{height:100%;border-radius:2px;transition:width 0.2s}
+#hpFill{background:linear-gradient(90deg,#7f1d1d,#ef4444,#fca5a5)}
+#xpFill{background:linear-gradient(90deg,#4c1d95,#8b5cf6,#c4b5fd)}
+#spFill{background:linear-gradient(90deg,#134e4a,#9DC4B0)}
+.hud-gold{font-family:'Cinzel',serif;font-size:9px;color:#f59e0b;letter-spacing:1px;margin-top:3px;clear:both;padding-top:2px}
+.hud-level-badge{
+  display:inline-block;background:linear-gradient(135deg,#2d1060,#1a0a40);
+  border:1px solid #c084fc50;border-radius:4px;padding:1px 6px;
+  font-family:'Cinzel',serif;font-size:8px;color:#c084fc;letter-spacing:1px;margin-right:5px
 }
 
-// Tapping EQUIP in the tooltip: swap bag item into slot, move old equipped to bag.
-function equipFromBag(invIndex){
-  const item=inventory[invIndex];
-  if(!item)return;
-  const oldItem=equipped[item.slot];
-  equipped[item.slot]=item;
-  inventory.splice(invIndex,1);
-  if(oldItem&&inventory.length<INVENTORY_MAX){
-    inventory.push(oldItem);
-  }
-  recalcStats();
-  checkSetBonuses();
-  const col=RARITY_COLORS[item.rarity]||'#9ca3af';
-  addFeed(`✦ Equipped ${item.name}`,col);
-  if(typeof writeSave==='function')writeSave();
-  updateInventoryBadge();
-  renderInventory();
+/* ─── ZONE + KILL COUNTER (TOP-RIGHT ZONE) ─── */
+#zoneLabel{position:fixed;top:12px;right:14px;display:none;pointer-events:none;text-align:right;z-index:50}
+.zone-name{font-family:'Cinzel',serif;font-size:10px;color:#6b4d8a;letter-spacing:3px;text-transform:uppercase}
+.kill-counter{font-family:'Cinzel',serif;font-size:11px;color:#c084fc;letter-spacing:2px;margin-top:2px}
+
+/* ─── SPIRIT PIPS (below HUD, never overlaps name) ─── */
+#spiritPanel{position:fixed;top:102px;left:14px;display:none;flex-direction:row;gap:4px;pointer-events:none;z-index:49}
+.spip{
+  width:10px;height:10px;border-radius:50%;border:1px solid #9DC4B040;
+  background:radial-gradient(#9DC4B0,#5a9a88);
+  box-shadow:0 0 8px #9DC4B0;animation:spf 2.2s ease-in-out infinite
+}
+.spip.dead{background:rgba(157,196,176,0.08);box-shadow:none;animation:none;border-color:#222}
+@keyframes spf{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-2px) scale(1.1)}}
+
+/* ─── SET PROGRESS (TOP-CENTER, BELOW HUD so never overlaps name) ─── */
+#setProgress{position:fixed;top:108px;left:50%;transform:translateX(-50%);display:none;pointer-events:none;z-index:50}
+.set-badge{font-family:'Cinzel',serif;font-size:8px;color:#f59e0b;letter-spacing:2px;background:rgba(0,0,0,0.75);border:1px solid rgba(245,158,11,0.3);padding:3px 12px;border-radius:4px;text-shadow:0 0 8px #f59e0b44}
+
+/* ─── ABILITY BAR (BOTTOM, reserved 0-100px from bottom) ─── */
+#abilityBar{
+  position:fixed;bottom:0;left:0;right:0;display:none;
+  padding:10px 10px 18px;
+  background:linear-gradient(0deg,rgba(0,0,0,0.97) 0%,rgba(5,0,15,0.85) 70%,transparent 100%);
+  justify-content:center;gap:8px;pointer-events:all;z-index:50
+}
+.ab{
+  width:60px;height:60px;border-radius:12px;
+  background:linear-gradient(145deg,#1a0a30,#0d0020);
+  border:1.5px solid rgba(192,132,252,0.2);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  cursor:pointer;position:relative;overflow:hidden;transition:all 0.2s;
+  box-shadow:0 4px 15px rgba(0,0,0,0.6),inset 0 1px 0 rgba(255,255,255,0.05)
+}
+.ab:active{transform:scale(0.91)}
+.ab.ready{border-color:rgba(192,132,252,0.45);box-shadow:0 0 14px rgba(192,132,252,0.15),0 4px 15px rgba(0,0,0,0.6),inset 0 1px 0 rgba(255,255,255,0.08)}
+.ab canvas{border-radius:6px;pointer-events:none}
+.ab-hotkey{font-family:'Cinzel',serif;font-size:7px;color:#443355;position:absolute;top:3px;left:5px;letter-spacing:0.5px}
+.ab-name{font-size:6.5px;color:#6b4d8a;letter-spacing:0.5px;position:absolute;bottom:4px;text-transform:uppercase;pointer-events:none}
+.ab-cd{position:absolute;inset:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;font-family:'Cinzel',serif;font-size:15px;font-weight:700;color:#fff;pointer-events:none;transition:opacity 0.2s;border-radius:12px;text-shadow:0 1px 4px rgba(0,0,0,0.95),0 0 8px rgba(0,0,0,0.8)}
+.ab-ov{position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.6);transition:height 0.05s;pointer-events:none;border-radius:0 0 12px 12px}
+
+/* ─── MENU BTNS (RIGHT COLUMN above ability bar, clear of play area) ─── */
+#menuBar{
+  position:fixed;bottom:110px;right:10px;display:none;flex-direction:column;gap:6px;
+  pointer-events:all;z-index:50
+}
+.menu-btn{
+  font-family:'Cinzel',serif;font-size:8px;color:#9DC4B0;
+  background:linear-gradient(135deg,rgba(10,20,18,0.95),rgba(5,10,8,0.95));
+  border:1px solid rgba(157,196,176,0.2);padding:7px 14px;cursor:pointer;
+  letter-spacing:1px;border-radius:6px;text-align:center;transition:all 0.2s;
+  box-shadow:0 2px 8px rgba(0,0,0,0.6);min-width:72px
+}
+.menu-btn:hover{border-color:#9DC4B0;color:#fff;box-shadow:0 0 12px #9DC4B020}
+
+/* ─── FEED LOG (LEFT COLUMN above ability bar, capped width so never reaches menu) ─── */
+#feedLog{
+  position:fixed;bottom:110px;left:14px;pointer-events:none;display:none;
+  flex-direction:column-reverse;gap:3px;max-height:180px;overflow:hidden;z-index:40;
+  max-width:calc(100vw - 120px)
+}
+.feed{font-family:'Cinzel',serif;font-size:9.5px;letter-spacing:1.5px;opacity:0;animation:fa 3.8s forwards;text-shadow:0 1px 4px rgba(0,0,0,0.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@keyframes fa{0%{opacity:0;transform:translateX(-6px)}8%{opacity:1;transform:translateX(0)}75%{opacity:1}100%{opacity:0}}
+
+/* ─── MUSIC LABEL (tucked above ability bar, right side, truncated) ─── */
+#musicLabel{
+  position:fixed;bottom:92px;right:92px;display:none;pointer-events:none;
+  font-family:'Cinzel',serif;font-size:7px;color:#2a1a3a;letter-spacing:1px;
+  text-align:right;z-index:30;max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
 }
 
-// Tapping DISCARD in the tooltip: remove from bag permanently.
-// Rare+ items trigger a confirmation so legendaries aren't accidentally trashed.
-function discardFromBag(invIndex){
-  const item=inventory[invIndex];
-  if(!item)return;
-  const rarityTier={common:0,uncommon:1,rare:2,epic:3,legendary:4,mythic:5}[item.rarity]||0;
-  if(rarityTier>=2){
-    if(!confirm(`Discard ${item.name}?\n\nThis ${RARITY_LABELS[item.rarity]||'item'} cannot be recovered.`))return;
-  }
-  inventory.splice(invIndex,1);
-  // Offer rare+ discards as buyback in the shop (double price)
-  if(typeof queueBuyback==='function'&&rarityTier>=2)queueBuyback(item);
-  addFeed(`✗ Discarded ${item.name}`,'#6b4d8a');
-  if(typeof writeSave==='function')writeSave();
-  updateInventoryBadge();
-  renderInventory();
+/* ─── BOSS HEALTHBAR (above ability bar, centered) ─── */
+#bossBar{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);display:none;flex-direction:column;align-items:center;gap:3px;z-index:60;pointer-events:none}
+.boss-name{font-family:'Cinzel',serif;font-size:10px;color:#fbbf24;letter-spacing:3px;text-shadow:0 0 10px #fbbf2466}
+.boss-bar-bg{width:260px;height:8px;background:rgba(0,0,0,0.6);border:1px solid rgba(251,191,36,0.3);border-radius:4px;overflow:hidden}
+.boss-bar-fill{height:100%;background:linear-gradient(90deg,#7f1d1d,#dc2626,#fbbf24);border-radius:3px;transition:width 0.2s}
+
+/* ─── DEATH SCREEN (full-screen overlay) ─── */
+#deathScreen{position:fixed;inset:0;z-index:300;display:none;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.92)}
+#deathScreen h2{font-family:'Cinzel',serif;font-size:2.5rem;color:#ef4444;text-shadow:0 0 60px #ef444488;letter-spacing:0.3em;margin-bottom:0.3em;animation:deathPulse 2s ease-in-out infinite}
+@keyframes deathPulse{0%,100%{text-shadow:0 0 60px #ef444488}50%{text-shadow:0 0 100px #ef4444cc}}
+#deathScreen p{color:#554;font-size:0.9rem;letter-spacing:2px;margin-bottom:2em;font-family:'Cinzel',serif}
+#riseBtn{font-family:'Cinzel',serif;font-size:0.85rem;letter-spacing:0.35em;text-transform:uppercase;color:#c4b5fd;background:linear-gradient(135deg,#2d1060,#1a0a40);border:1px solid #c084fc50;padding:14px 48px;cursor:pointer;transition:all 0.3s}
+#riseBtn:hover{border-color:#c084fc;color:#fff;box-shadow:0 0 40px #c084fc40}
+
+/* ─── LEVEL UP BANNER ─── */
+#lvlUpBanner{position:fixed;top:38%;left:50%;transform:translate(-50%,-50%);z-index:250;pointer-events:none;display:none;flex-direction:column;align-items:center;gap:6px}
+#lvlUpBanner h3{font-family:'Cinzel',serif;font-size:clamp(2rem,7vw,3.2rem);font-weight:900;background:linear-gradient(170deg,#fff,#c4b5fd,#9DC4B0);-webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:0.4em;animation:lvlPop 2.8s forwards}
+#lvlUpBanner p{font-family:'Cinzel',serif;font-size:0.68rem;color:#7c3aed;letter-spacing:3px;animation:lvlPop 2.8s forwards;text-transform:uppercase}
+@keyframes lvlPop{0%{opacity:0;transform:scale(0.7) translateY(20px)}12%{opacity:1;transform:scale(1.05) translateY(0)}88%{opacity:1;transform:scale(1)}100%{opacity:0}}
+
+/* ─── GEAR PANEL (full-screen modal) ─── */
+#gearPanel{position:fixed;inset:0;z-index:400;display:none;flex-direction:column;background:linear-gradient(160deg,#0a0018,#06001a);border:none;overflow-y:auto}
+.panel-header{padding:clamp(14px,1.5vw,22px) clamp(16px,2vw,28px) clamp(10px,1.2vw,16px);display:flex;align-items:center;gap:12px;position:sticky;top:0;background:inherit;z-index:2;border-bottom:1px solid rgba(192,132,252,0.15)}
+.panel-header h2{font-family:'Cinzel',serif;font-size:clamp(15px,1.6vw,22px);color:#c084fc;letter-spacing:clamp(3px,0.4vw,5px);flex:1;text-shadow:0 0 16px rgba(192,132,252,0.3)}
+.panel-close{font-family:'Cinzel',serif;font-size:clamp(10px,1vw,12px);color:#9a7abe;background:transparent;border:1px solid #8a6ab0;padding:clamp(6px,0.8vw,10px) clamp(14px,1.4vw,20px);cursor:pointer;border-radius:4px;letter-spacing:2px;transition:all 0.2s}
+.panel-close:hover{color:#c084fc;border-color:#c084fc}
+.gear-grid{display:grid;grid-template-columns:1fr 1fr;gap:clamp(8px,1vw,14px);padding:clamp(14px,1.5vw,22px);max-width:1100px;width:100%;margin:0 auto;box-sizing:border-box}
+.gear-slot{background:rgba(255,255,255,0.03);border:1px solid rgba(192,132,252,0.12);border-radius:8px;padding:clamp(12px,1.2vw,18px);transition:border-color 0.2s;border-left:3px solid rgba(255,255,255,0.08)}
+.gear-slot:hover{border-color:rgba(192,132,252,0.3)}
+.gear-slot.has-item{background:rgba(192,132,252,0.04)}
+.gear-slot-header{display:flex;align-items:center;gap:10px;margin-bottom:clamp(6px,0.8vw,10px);flex-wrap:wrap}
+.gear-slot-icon{font-size:clamp(16px,1.6vw,20px);color:#c084fc;width:22px;text-align:center;opacity:0.9;flex-shrink:0}
+.gear-slot-icon-empty{opacity:0.3}
+.gear-slot-name{font-family:'Cinzel',serif;font-size:clamp(10px,1vw,12px);color:#b8a8d0;letter-spacing:2px;text-transform:uppercase;flex:1;font-weight:600;min-width:0}
+.gear-rarity-tag{font-family:'Cinzel',serif;font-size:clamp(8.5px,0.85vw,11px);letter-spacing:clamp(0.5px,0.1vw,1.5px);padding:2px 6px;border:1px solid;border-radius:3px;text-transform:uppercase;font-weight:700;white-space:nowrap;flex-shrink:0}
+.gear-item{font-family:'Crimson Text',serif;font-size:clamp(14px,1.4vw,18px);font-weight:600;margin-bottom:clamp(6px,0.8vw,10px);letter-spacing:0.5px}
+.gear-item.common{color:#b4bcc4}
+.gear-item.uncommon{color:#3dd574}
+.gear-item.rare{color:#7db3ff;text-shadow:0 0 8px rgba(96,165,250,0.4)}
+.gear-item.epic{color:#d4a4ff;text-shadow:0 0 10px rgba(192,132,252,0.5)}
+.gear-item.legendary{color:#ffb833;text-shadow:0 0 12px rgba(245,158,11,0.6)}
+.gear-item.mythic{color:#ff8a8a;text-shadow:0 0 14px rgba(255,107,107,0.6)}
+.gear-stats-block{display:flex;flex-direction:column;gap:clamp(2px,0.3vw,4px);margin-top:clamp(4px,0.5vw,8px)}
+.gear-stat-row{font-size:clamp(11px,1.05vw,13px);color:#c8b8e0;letter-spacing:0.3px;padding:1px 0}
+.gear-stat{display:block;font-size:9px;color:#4a3666;margin-top:3px;letter-spacing:0.5px} /* legacy */
+.gear-empty{color:#5a4a7a;font-style:italic;font-size:clamp(11px,1.05vw,13px);padding:4px 0}
+.gear-set-line{font-size:clamp(10px,1vw,12px);color:#fbbf24cc;margin-top:clamp(6px,0.8vw,10px);font-family:'Cinzel',serif;letter-spacing:1px;padding-top:clamp(5px,0.6vw,8px);border-top:1px solid rgba(245,158,11,0.2);font-weight:600}
+.set-badge-line{font-size:8px;color:#f59e0b88;margin-top:2px;font-family:'Cinzel',serif;letter-spacing:1px}
+
+/* ─── PROF PANEL (full-screen modal) ─── */
+#profPanel{position:fixed;inset:0;z-index:400;display:none;flex-direction:column;background:linear-gradient(160deg,#0a0018,#06001a);overflow-y:auto}
+#profCards{max-width:1000px;width:100%;margin:0 auto;padding:clamp(10px,1.2vw,16px) 0}
+.prof-card{margin:0 clamp(14px,1.5vw,20px) clamp(12px,1.2vw,18px);border:1px solid rgba(157,196,176,0.15);border-radius:10px;padding:clamp(14px,1.4vw,20px);background:rgba(157,196,176,0.03)}
+.prof-name{font-family:'Cinzel',serif;font-size:clamp(12px,1.3vw,16px);color:#b8dcc9;letter-spacing:2px;margin-bottom:clamp(8px,1vw,12px);text-transform:uppercase;font-weight:600;text-shadow:0 0 10px rgba(157,196,176,0.25)}
+.prof-xp-bg{height:clamp(5px,0.6vw,7px);background:rgba(255,255,255,0.06);border-radius:3px;margin-bottom:clamp(10px,1.1vw,14px);overflow:hidden;border:1px solid rgba(255,255,255,0.04)}
+.prof-xp-fill{height:100%;background:linear-gradient(90deg,#134e4a,#9DC4B0);border-radius:2px;transition:width 0.4s}
+.mat-row{display:flex;gap:clamp(6px,0.8vw,10px);flex-wrap:wrap;margin-bottom:clamp(10px,1.2vw,14px)}
+.mat{font-size:clamp(10px,1vw,12px);color:#8aaaa0;background:rgba(157,196,176,0.08);padding:clamp(4px,0.5vw,6px) clamp(8px,1vw,12px);border-radius:4px;border:1px solid rgba(157,196,176,0.15);font-weight:500}
+.mat.has{color:#d4ecdf;background:rgba(157,196,176,0.18);border-color:rgba(157,196,176,0.35);font-weight:600}
+.recipe{display:flex;align-items:center;justify-content:space-between;padding:clamp(8px,0.9vw,12px) 0;border-bottom:1px solid rgba(255,255,255,0.06);gap:10px}
+.recipe-name{font-size:clamp(12px,1.2vw,15px);color:#c4b8d8;font-family:'Cinzel',serif;letter-spacing:0.5px;flex:1}
+.recipe-cost{font-size:clamp(10px,0.95vw,12px);color:#8aaaa0}
+.craft-btn{font-family:'Cinzel',serif;font-size:clamp(10px,1vw,12px);color:#b8dcc9;background:linear-gradient(135deg,#0a2420,#051510);border:1px solid #9DC4B066;padding:clamp(6px,0.8vw,9px) clamp(14px,1.4vw,20px);cursor:pointer;border-radius:4px;letter-spacing:1.5px;transition:all 0.2s;font-weight:600}
+.craft-btn:hover:not(:disabled){border-color:#9DC4B0;color:#fff;box-shadow:0 0 12px rgba(157,196,176,0.3)}
+.craft-btn:disabled{color:#3a4a45;border-color:#1a2a25;cursor:not-allowed}
+
+/* ─── TOOLTIP ─── */
+#tooltip{position:fixed;z-index:500;display:none;background:linear-gradient(145deg,#0d0020,#180040);border:1px solid #c084fc40;border-radius:8px;padding:10px 14px;max-width:200px;pointer-events:none}
+.tt-name{font-family:'Cinzel',serif;font-size:11px;margin-bottom:4px;letter-spacing:1px}
+.tt-stats{font-size:9px;color:#6b4d8a;line-height:1.7}
+
+/* ─── UNUSED PANELS (hidden, kept in DOM for future features) ─── */
+.panel{position:fixed;inset:0;z-index:400;display:none;flex-direction:column;background:linear-gradient(160deg,#0a0018,#06001a);overflow-y:auto}
+.panel-hdr{padding:18px 16px 12px;display:flex;align-items:center;gap:10px;position:sticky;top:0;background:inherit;z-index:2}
+.talent-branch{margin-bottom:20px;border:1px solid rgba(255,255,255,0.05);border-radius:8px;overflow:hidden}
+.talent-branch-hdr{font-family:Cinzel,serif;font-size:9px;letter-spacing:3px;padding:8px 12px;text-transform:uppercase;display:flex;align-items:center;gap:8px}
+.talent-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:10px}
+.talent-node{background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.07);border-radius:8px;padding:8px 6px;cursor:pointer;transition:all 0.2s;text-align:center}
+.talent-node:hover:not(.locked){border-color:rgba(255,255,255,0.18);background:rgba(255,255,255,0.05);transform:translateY(-1px)}
+.talent-node.learned{border-color:rgba(232,184,75,0.4);background:rgba(232,184,75,0.06)}
+.talent-node.locked{opacity:0.35;cursor:not-allowed}
+.talent-node .tn-icon{font-size:1.3rem;display:block;margin-bottom:4px}
+.talent-node .tn-name{font-family:Cinzel,serif;font-size:7px;letter-spacing:1px;color:#888;margin-bottom:3px}
+.talent-node.learned .tn-name{color:#e8b84b}
+.talent-node .tn-desc{font-size:7.5px;color:#4a3a5a;line-height:1.4}
+.talent-node .tn-rank{font-family:Cinzel,serif;font-size:7px;color:#3a2a48;margin-top:3px}
+.talent-node.learned .tn-rank{color:rgba(232,184,75,0.6)}
+.dungeon-card.locked{opacity:0.4;cursor:not-allowed}
+.shop-tab{font-family:Cinzel,serif;font-size:8px;color:#4a3a5a;letter-spacing:2px;padding:6px 14px;cursor:pointer;border-bottom:2px solid transparent;transition:all 0.2s}
+.shop-tab.active{color:#e8b84b;border-color:#e8b84b}
+.shop-item{background:rgba(255,255,255,0.025);border:1px solid rgba(232,184,75,0.15);border-radius:8px;padding:10px;cursor:pointer;transition:all 0.2s}
+.shop-item:hover{border-color:rgba(232,184,75,0.45);background:rgba(232,184,75,0.04);transform:translateY(-1px)}
+.shop-item-name{font-family:Cinzel,serif;font-size:10px;letter-spacing:1px;margin-bottom:4px;color:#c4b5fd}
+.shop-item-desc{font-size:9px;color:#4a3a2a;line-height:1.5;margin-bottom:6px}
+.shop-item-cost{font-family:Cinzel,serif;font-size:9px;color:#e8b84b;letter-spacing:1px}
+.shop-item-cost.cant-afford{color:#5a3a1a;text-decoration:line-through}
+.stat-card{background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:7px;padding:10px}
+.stat-name{font-family:Cinzel,serif;font-size:8px;color:#4a3a5a;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px}
+.stat-val{font-family:Cinzel,serif;font-size:1.1rem;color:#c4b5fd;letter-spacing:1px}
+.stat-sub{font-size:8px;color:#3a2a48;margin-top:2px}
+.menu-btn.alert{border-color:rgba(232,184,75,0.4);color:#e8b84b;animation:alertPulse 1.5s ease-in-out infinite}
+@keyframes alertPulse{0%,100%{box-shadow:0 0 4px rgba(232,184,75,0.1)}50%{box-shadow:0 0 14px rgba(232,184,75,0.3)}}
+.panel::-webkit-scrollbar{width:4px}.panel::-webkit-scrollbar-track{background:#050010}.panel::-webkit-scrollbar-thumb{background:#2d1060;border-radius:2px}
+
+/* ─── TALENT PANEL ─── */
+/* Uses clamp() to scale text/spacing: mobile stays compact, desktop gets breathing room.
+   Also caps panel width so content is readable on wide monitors instead of stretching edge to edge. */
+#talentPanel{position:fixed;inset:0;z-index:400;display:none;flex-direction:column;background:linear-gradient(160deg,#0a0018,#06001a);overflow-y:auto}
+#talentTree{max-width:1100px;width:100%;margin:0 auto}
+.talent-header{display:flex;align-items:center;justify-content:space-between;padding:clamp(10px,1.5vw,18px) clamp(14px,2vw,24px);border-bottom:1px solid rgba(192,132,252,0.12);margin-bottom:clamp(10px,1.5vw,16px);position:sticky;top:48px;background:linear-gradient(160deg,#0a0018,#06001a);z-index:3}
+.talent-points-label{font-family:'Cinzel',serif;font-size:clamp(10px,1.2vw,13px);color:#b8a8d0;letter-spacing:2px;text-transform:uppercase}
+.talent-points-num{color:#fbbf24;font-size:clamp(20px,2.2vw,26px);margin-left:10px;font-weight:700;text-shadow:0 0 12px #fbbf2488;vertical-align:middle}
+.talent-reset-btn{font-family:'Cinzel',serif;font-size:clamp(10px,1vw,12px);color:#9a7abe;background:transparent;border:1px solid #8a6ab0;padding:clamp(6px,0.8vw,10px) clamp(14px,1.4vw,20px);cursor:pointer;border-radius:4px;letter-spacing:2px;transition:all 0.2s}
+.talent-reset-btn:hover{color:#ef4444;border-color:#ef4444}
+
+.talent-branch{margin:0 clamp(12px,1.5vw,20px) clamp(14px,1.5vw,20px);border:1px solid rgba(255,255,255,0.07);border-radius:10px;overflow:hidden;background:rgba(255,255,255,0.02)}
+.talent-branch-hdr{display:flex;align-items:center;gap:12px;padding:clamp(10px,1.2vw,16px) clamp(14px,1.5vw,20px);font-family:'Cinzel',serif;font-size:clamp(13px,1.4vw,17px);letter-spacing:3px;text-transform:uppercase;background:rgba(0,0,0,0.35);border-bottom:1px solid rgba(255,255,255,0.06)}
+.talent-branch-icon{font-size:clamp(16px,1.6vw,20px)}
+.talent-branch-name{flex:1;font-weight:600}
+.talent-branch-spent{font-size:clamp(11px,1.1vw,13px);color:#d4c4e8;letter-spacing:1.5px;background:rgba(0,0,0,0.5);padding:4px 10px;border-radius:4px;border:1px solid rgba(255,255,255,0.1);font-weight:600}
+
+.talent-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:clamp(6px,0.8vw,12px);padding:clamp(10px,1.2vw,16px)}
+.talent-node{background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:clamp(10px,1.1vw,16px) clamp(8px,1vw,14px);cursor:default;transition:all 0.2s;text-align:center;position:relative;display:flex;flex-direction:column;gap:clamp(5px,0.5vw,8px);min-height:clamp(135px,13vw,170px)}
+.talent-node.available{cursor:pointer;border-color:rgba(192,132,252,0.35);box-shadow:0 0 14px rgba(192,132,252,0.10)}
+.talent-node.available:hover{border-color:rgba(192,132,252,0.75);background:rgba(192,132,252,0.07);transform:translateY(-1px)}
+.talent-node.learned{border-color:rgba(251,191,36,0.45);background:rgba(251,191,36,0.05)}
+.talent-node.maxed{border-color:rgba(251,191,36,0.85);background:rgba(251,191,36,0.10);box-shadow:0 0 14px rgba(251,191,36,0.20)}
+.talent-node.locked{opacity:0.45;cursor:not-allowed}
+
+.tn-icon{font-size:clamp(22px,2vw,28px);display:block;line-height:1;margin-bottom:2px}
+/* Higher-contrast name text — was #b8a8d0, bumped to near-white for readability */
+.tn-name{font-family:'Cinzel',serif;font-size:clamp(11px,1.1vw,14px);letter-spacing:1.5px;color:#e0d4f0;text-transform:uppercase;font-weight:700;line-height:1.2}
+.talent-node.learned .tn-name{color:#fbbf24}
+.talent-node.maxed .tn-name{color:#fde68a;text-shadow:0 0 8px rgba(253,230,138,0.4)}
+/* Description — significantly brighter for readability */
+.tn-desc{font-size:clamp(10px,1vw,12px);color:#a899c5;line-height:1.4;flex:1}
+/* Effect text — the "what this does" line, made readable and prominent */
+.tn-effect{font-size:clamp(11px,1.1vw,14px);color:#9DC4B0;letter-spacing:0.3px;font-weight:700;padding:clamp(4px,0.5vw,7px) clamp(6px,0.7vw,10px);background:rgba(157,196,176,0.10);border-radius:4px;border:1px solid rgba(157,196,176,0.15)}
+.talent-node.learned .tn-effect{color:#fde68a;background:rgba(251,191,36,0.12);border-color:rgba(251,191,36,0.25)}
+.talent-node.maxed .tn-effect{color:#fff8dc;background:rgba(251,191,36,0.18);border-color:rgba(251,191,36,0.4)}
+.tn-rank{font-family:'Cinzel',serif;font-size:clamp(11px,1vw,13px);color:#9a7abe;letter-spacing:2px;font-weight:600}
+.talent-node.learned .tn-rank{color:#fbbf24}
+.talent-node.maxed .tn-rank{color:#fde68a}
+/* Gate message — brighter red so it's noticeable when scanning */
+.tn-gate{font-size:clamp(10px,1vw,12px);color:#ef4444;letter-spacing:0.5px;font-weight:600;background:rgba(239,68,68,0.08);padding:3px 6px;border-radius:3px;border:1px solid rgba(239,68,68,0.2)}
+
+/* Desktop: on wider screens, give talent nodes more internal space */
+@media (min-width:900px){
+  .talent-grid{gap:14px;padding:16px 20px}
+  .talent-node{padding:18px 14px;gap:8px}
 }
 
-// Legacy entry point — existing code (loot drops, dungeon rewards) calls tryEquip.
-// Route it through the new acquireLoot so everything respects inventory rules.
-function tryEquip(item){acquireLoot(item);}
+/* ─── DUNGEON PANEL ─── */
+#dungeonPanel{position:fixed;inset:0;z-index:400;display:none;flex-direction:column;background:linear-gradient(160deg,#1a0010,#0a0018);overflow-y:auto}
+#dungeonList{max-width:900px;width:100%;margin:0 auto;padding:clamp(12px,1.5vw,20px);display:flex;flex-direction:column;gap:clamp(12px,1.2vw,16px)}
+.dungeon-card{
+  background:rgba(255,255,255,0.03);
+  border:1px solid rgba(255,255,255,0.08);
+  border-left:3px solid rgba(255,255,255,0.1);
+  border-radius:10px;
+  padding:clamp(14px,1.5vw,20px);
+  display:flex;flex-direction:column;gap:clamp(8px,1vw,12px);
+  transition:all 0.2s
+}
+.dungeon-card:hover:not(.locked){border-color:rgba(255,255,255,0.2);background:rgba(255,255,255,0.05);transform:translateY(-1px)}
+.dungeon-card.locked{opacity:0.55}
+.dg-header{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.dg-name{font-family:'Cinzel',serif;font-size:clamp(15px,1.5vw,20px);letter-spacing:2px;flex:1;font-weight:700;min-width:0;text-shadow:0 0 10px currentColor}
+.dg-tier{font-family:'Cinzel',serif;font-size:clamp(10px,1vw,12px);letter-spacing:1.5px;padding:4px 10px;border:1px solid;border-radius:4px;text-transform:uppercase;font-weight:600;white-space:nowrap;flex-shrink:0}
+.dg-desc{font-size:clamp(12px,1.15vw,14px);color:#b8a8d0;line-height:1.55;font-style:italic}
+.dg-meta-row{display:flex;gap:clamp(8px,1vw,14px);flex-wrap:wrap;margin-top:4px}
+.dg-meta{font-family:'Cinzel',serif;font-size:clamp(10px,1vw,12px);color:#d4c4e8;letter-spacing:1px;background:rgba(255,255,255,0.04);padding:4px 10px;border-radius:4px;border:1px solid rgba(255,255,255,0.08)}
+.dg-rewards-row{display:flex;gap:clamp(6px,0.8vw,10px);flex-wrap:wrap}
+.dg-reward{font-family:'Cinzel',serif;font-size:clamp(10px,1vw,12px);color:#fbbf24;letter-spacing:1px;background:rgba(251,191,36,0.08);padding:3px 10px;border-radius:3px;border:1px solid rgba(251,191,36,0.2)}
+.dg-enter-btn{
+  font-family:'Cinzel',serif;
+  font-size:clamp(12px,1.2vw,14px);
+  letter-spacing:3px;text-transform:uppercase;font-weight:700;
+  color:#fff;
+  background:linear-gradient(135deg,rgba(192,132,252,0.2),rgba(192,132,252,0.05));
+  border:1px solid rgba(192,132,252,0.5);
+  padding:clamp(10px,1.1vw,14px) clamp(20px,2vw,32px);
+  cursor:pointer;border-radius:6px;transition:all 0.2s;
+  margin-top:6px
+}
+.dg-enter-btn:hover:not(:disabled){background:linear-gradient(135deg,rgba(192,132,252,0.35),rgba(192,132,252,0.1));border-color:#c084fc;box-shadow:0 0 18px rgba(192,132,252,0.3)}
+.dg-enter-btn:disabled{color:#6b4d8a;background:transparent;border-color:rgba(107,77,138,0.3);cursor:not-allowed}
 
-// Updates the "X" count badge on the BAG menu button.
-function updateInventoryBadge(){
-  const btn=document.querySelector('[data-menu="bag"]');
-  if(!btn)return;
-  const existing=btn.querySelector('.menu-btn-badge');
-  if(inventory.length>0){
-    if(existing){
-      existing.textContent=inventory.length;
-    } else {
-      const b=document.createElement('span');
-      b.className='menu-btn-badge';
-      b.textContent=inventory.length;
-      btn.appendChild(b);
-    }
-  } else if(existing){
-    existing.remove();
-  }
+/* ─── DUNGEON STATUS OVERLAY ─── (shown during a run at top-center below HUD zone) */
+#dungeonStatus{
+  position:fixed;top:clamp(110px,12vh,130px);left:50%;transform:translateX(-50%);
+  z-index:48;pointer-events:none;
+  display:none;flex-direction:column;align-items:center;gap:3px;
+  background:rgba(0,0,0,0.75);
+  padding:clamp(8px,1vw,12px) clamp(16px,1.8vw,24px);
+  border:1px solid rgba(192,132,252,0.3);
+  border-radius:6px;
+  box-shadow:0 4px 16px rgba(0,0,0,0.6)
+}
+.dungeon-status-title{
+  font-family:'Cinzel',serif;font-size:clamp(12px,1.3vw,16px);
+  letter-spacing:3px;text-transform:uppercase;font-weight:700;
+  color:#c084fc;text-shadow:0 0 10px currentColor
+}
+.dungeon-status-sub{
+  font-family:'Cinzel',serif;font-size:clamp(9px,1vw,11px);
+  letter-spacing:2px;text-transform:uppercase;
+  color:#b8a8d0
 }
 
-// ═══════ STAT DISPLAY + UPGRADE CLASSIFICATION ═════════════════════
-// Uses the STAT_LABELS + formatStat helpers defined below for consistent stat names.
+/* ─── ABANDON RUN BUTTON (inside dungeon) ─── */
+#abandonRunBtn{
+  font-family:'Cinzel',serif;
+  font-size:clamp(9px,1vw,11px);
+  letter-spacing:1.5px;text-transform:uppercase;font-weight:600;
+  color:#b8a8d0;
+  background:rgba(0,0,0,0.75);
+  border:1px solid rgba(192,132,252,0.3);
+  border-radius:4px;
+  padding:clamp(5px,0.7vw,8px) clamp(10px,1.2vw,16px);
+  cursor:pointer;
+  margin-top:clamp(6px,0.8vw,10px);
+  transition:all 0.2s;
+  pointer-events:auto; /* parent has pointer-events:none */
+}
+#abandonRunBtn:hover{color:#ef4444;border-color:#ef4444;background:rgba(239,68,68,0.15)}
 
-// Returns the raw stats on an item as tooltip lines. Used when NO item is equipped
-// in that slot yet — show what the item IS, not what it adds over nothing.
-function computeStatLines(item){
-  const lines=[];
-  Object.entries(item.stats||{}).forEach(([k,v])=>{
-    if(!v)return;
-    const label=(typeof STAT_LABELS!=='undefined'?STAT_LABELS[k]:null)||k;
-    lines.push({text:`+${v} ${label}`, color:'#d4c896'});
-  });
-  return lines;
+/* Dungeon status overlay needs to allow pointer events on its button */
+#dungeonStatus{pointer-events:none}
+
+/* ─── BOSS HP BAR ─── */
+#bossHpBar{
+  position:fixed;top:clamp(170px,18vh,200px);left:50%;transform:translateX(-50%);
+  z-index:48;pointer-events:none;
+  display:none;flex-direction:column;gap:5px;
+  width:clamp(280px,40vw,460px);
+  background:rgba(0,0,0,0.75);
+  padding:clamp(8px,1vw,12px) clamp(14px,1.6vw,22px);
+  border:1px solid rgba(239,68,68,0.4);
+  border-radius:6px;
+  box-shadow:0 4px 16px rgba(0,0,0,0.6),0 0 24px rgba(239,68,68,0.2)
+}
+.boss-hp-name{
+  font-family:'Cinzel',serif;
+  font-size:clamp(12px,1.3vw,15px);
+  letter-spacing:3px;text-transform:uppercase;font-weight:700;
+  color:#ef4444;text-shadow:0 0 10px currentColor;text-align:center
+}
+.boss-hp-track{
+  height:clamp(10px,1.2vw,14px);
+  background:rgba(80,20,20,0.6);
+  border-radius:3px;overflow:hidden;
+  border:1px solid rgba(239,68,68,0.3)
+}
+.boss-hp-fill{
+  height:100%;
+  background:linear-gradient(90deg,#ef4444 0%,#dc2626 50%,#991b1b 100%);
+  transition:width 0.15s ease-out;
+  box-shadow:0 0 8px rgba(239,68,68,0.5) inset
 }
 
-// Compare a bag item's stats to what's equipped. Returns diff lines for tooltip.
-function computeStatDiff(item){
-  const current=equipped[item.slot];
-  const lines=[];
-  const allKeys=new Set([...Object.keys(item.stats||{}),...(current?Object.keys(current.stats||{}):[])]);
-  allKeys.forEach(k=>{
-    const newVal=item.stats[k]||0;
-    const oldVal=current?(current.stats[k]||0):0;
-    const diff=newVal-oldVal;
-    if(diff===0 && newVal===0)return;
-    const label=(typeof STAT_LABELS!=='undefined'?STAT_LABELS[k]:null)||k;
-    const sign=diff>=0?'+':'';
-    const col=diff>0?'#22c55e':(diff<0?'#ef4444':'#9ca3af');
-    lines.push({text:`${sign}${diff} ${label}`, color:col});
-  });
-  return lines;
+/* ─── PORTAL ENTRY PROMPT ─── */
+#portalPrompt{
+  position:fixed;bottom:clamp(100px,14vh,140px);left:50%;transform:translateX(-50%);
+  z-index:55;
+  display:none;flex-direction:column;align-items:center;gap:clamp(6px,0.8vw,10px);
+  background:rgba(0,0,0,0.88);
+  padding:clamp(12px,1.4vw,18px) clamp(20px,2vw,32px);
+  border:2px solid rgba(192,132,252,0.5);
+  border-radius:8px;
+  box-shadow:0 6px 20px rgba(0,0,0,0.7),0 0 32px rgba(192,132,252,0.25);
+  animation:portalPromptPulse 2s ease-in-out infinite
+}
+@keyframes portalPromptPulse{
+  0%,100%{box-shadow:0 6px 20px rgba(0,0,0,0.7),0 0 24px rgba(192,132,252,0.2)}
+  50%{box-shadow:0 6px 20px rgba(0,0,0,0.7),0 0 40px rgba(192,132,252,0.45)}
+}
+.portal-prompt-label{
+  font-family:'Cinzel',serif;
+  font-size:clamp(10px,1vw,12px);
+  letter-spacing:2px;text-transform:uppercase;
+  color:#9a7abe
+}
+.portal-prompt-name{
+  font-family:'Cinzel',serif;
+  font-size:clamp(16px,1.6vw,22px);
+  letter-spacing:3px;text-transform:uppercase;font-weight:700;
+  color:#c084fc;text-shadow:0 0 12px currentColor
+}
+.portal-prompt-btn{
+  font-family:'Cinzel',serif;
+  font-size:clamp(13px,1.3vw,16px);
+  letter-spacing:3px;text-transform:uppercase;font-weight:700;
+  color:#fff;
+  background:linear-gradient(135deg,rgba(192,132,252,0.35),rgba(192,132,252,0.1));
+  border:1px solid rgba(192,132,252,0.7);
+  padding:clamp(10px,1.2vw,14px) clamp(28px,3vw,44px);
+  cursor:pointer;border-radius:6px;
+  transition:all 0.15s;
+  margin-top:4px
+}
+.portal-prompt-btn:hover{
+  background:linear-gradient(135deg,rgba(192,132,252,0.55),rgba(192,132,252,0.2));
+  border-color:#c084fc;
+  box-shadow:0 0 18px rgba(192,132,252,0.45);
+  transform:translateY(-1px)
 }
 
-// Classify whether a bag item would be an upgrade, sidegrade, or downgrade vs equipped.
-// Returns: 'upgrade' | 'sidegrade' | 'downgrade' | 'empty-slot'
-// Logic: sum weighted stat values. Weights reflect Hollowcaller priorities
-// (Soul Mastery > HP > Attack > Crit). Stat weight table kept small so it's tunable.
-const STAT_WEIGHTS = {
-  sm:2.5, atk:1.2, hp:0.2, crit:1.5, cdr:2.0, res:0.8,
-  lifeOnHit:1.8, spiritBonus:3.0,
-};
-function classifyBagItem(item){
-  const current=equipped[item.slot];
-  if(!current)return 'empty-slot';
-  const score = stats => Object.entries(stats||{}).reduce((s,[k,v])=>s+v*(STAT_WEIGHTS[k]||1), 0);
-  const newScore = score(item.stats);
-  const oldScore = score(current.stats);
-  if(newScore > oldScore * 1.08) return 'upgrade';
-  if(newScore < oldScore * 0.92) return 'downgrade';
-  return 'sidegrade';
+/* ─── INVENTORY PANEL ─── */
+#inventoryPanel{position:fixed;inset:0;z-index:400;display:none;flex-direction:column;background:linear-gradient(160deg,#0f0820,#06001a);overflow-y:auto}
+#bagLayout{
+  display:flex;flex-direction:column;gap:clamp(10px,1.5vw,18px);
+  max-width:920px;width:100%;margin:0 auto;
+  padding:clamp(12px,1.5vw,20px);
+}
+#bagGrid{
+  display:grid;
+  grid-template-columns:repeat(6,1fr);
+  gap:clamp(6px,0.8vw,10px);
+  width:100%;
+}
+.bag-count{
+  font-family:'Cinzel',serif;
+  font-size:clamp(10px,1vw,12px);
+  color:#b8a8d0;letter-spacing:1.5px;margin-left:12px;
+  font-weight:400;
+}
+.bag-slot{
+  aspect-ratio:1;
+  border:1.5px solid rgba(255,255,255,0.08);
+  background:rgba(255,255,255,0.03);
+  border-radius:6px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:2px;
+  transition:all 0.15s;
+  cursor:pointer;
+  position:relative;
+  overflow:hidden;
+}
+.bag-slot.empty{
+  background:rgba(255,255,255,0.015);
+  border-color:rgba(255,255,255,0.05);
+  cursor:default;
+}
+.bag-slot.filled:hover{transform:translateY(-2px);box-shadow:0 4px 14px rgba(0,0,0,0.5)}
+.bag-slot.selected{transform:translateY(-2px);box-shadow:0 0 0 2px rgba(255,255,255,0.3),0 4px 18px rgba(0,0,0,0.6)}
+.bag-slot-icon{font-size:clamp(18px,2.2vw,26px);line-height:1;font-weight:700}
+.bag-slot-rarity{
+  font-family:'Cinzel',serif;
+  font-size:clamp(7px,0.75vw,9px);
+  letter-spacing:1px;padding:1px 6px;border-radius:2px;
+  font-weight:600;
+}
+/* Tooltip */
+#bagTooltip{
+  display:none;
+  flex-direction:column;gap:clamp(8px,1vw,12px);
+  background:rgba(15,8,30,0.95);
+  border:1.5px solid rgba(255,255,255,0.1);
+  border-radius:8px;
+  padding:clamp(14px,1.5vw,20px);
+  box-shadow:0 8px 32px rgba(0,0,0,0.7);
+}
+.bag-tooltip-header{
+  display:flex;justify-content:space-between;align-items:center;gap:12px;
+  padding-bottom:clamp(8px,1vw,12px);
+  border-bottom:1px solid;
+}
+.bag-tt-name{
+  font-family:'Cinzel',serif;
+  font-size:clamp(14px,1.5vw,18px);
+  letter-spacing:2px;font-weight:700;flex:1;
+}
+.bag-tt-rarity{
+  font-family:'Cinzel',serif;
+  font-size:clamp(9px,0.95vw,11px);
+  letter-spacing:1.5px;padding:3px 10px;border-radius:3px;font-weight:600;
+}
+.bag-tt-slot{
+  font-family:'Cinzel',serif;
+  font-size:clamp(10px,1vw,12px);color:#b8a8d0;letter-spacing:2px;
+}
+.bag-tt-set{
+  font-size:clamp(10px,1vw,12px);color:#c084fc;font-style:italic;letter-spacing:1px;
+}
+.bag-tt-section{display:flex;flex-direction:column;gap:4px}
+.bag-tt-section-label{
+  font-family:'Cinzel',serif;
+  font-size:clamp(9px,0.95vw,11px);
+  letter-spacing:2px;color:#6b4d8a;text-transform:uppercase;
+  margin-bottom:4px;
+}
+.bag-stat-line{
+  font-family:'Cinzel',serif;
+  font-size:clamp(11px,1.1vw,13px);
+  letter-spacing:0.5px;font-weight:500;
+}
+.bag-tt-current{
+  font-size:clamp(10px,1vw,12px);color:#6b4d8a;font-style:italic;
+  margin-top:4px;
+}
+.bag-tt-actions{
+  display:flex;gap:10px;margin-top:clamp(8px,1vw,12px);
+}
+.bag-btn{
+  flex:1;
+  font-family:'Cinzel',serif;
+  font-size:clamp(11px,1.1vw,13px);
+  letter-spacing:2px;text-transform:uppercase;font-weight:700;
+  padding:clamp(10px,1.2vw,14px);
+  border-radius:5px;cursor:pointer;
+  transition:all 0.15s;
+}
+.bag-btn-equip{
+  color:#fff;
+  background:linear-gradient(135deg,rgba(34,197,94,0.25),rgba(34,197,94,0.08));
+  border:1px solid rgba(34,197,94,0.5);
+}
+.bag-btn-equip:hover{
+  background:linear-gradient(135deg,rgba(34,197,94,0.4),rgba(34,197,94,0.15));
+  border-color:#22c55e;box-shadow:0 0 14px rgba(34,197,94,0.3);
+}
+.bag-btn-discard{
+  color:#ef4444;
+  background:transparent;
+  border:1px solid rgba(239,68,68,0.3);
+}
+.bag-btn-discard:hover{
+  background:rgba(239,68,68,0.1);
+  border-color:#ef4444;
+}
+/* Count badge on the BAG menu button */
+.menu-btn-badge{
+  position:absolute;top:-6px;right:-6px;
+  min-width:18px;height:18px;padding:0 5px;
+  background:#ef4444;color:#fff;
+  font-family:'Cinzel',serif;font-size:10px;font-weight:700;
+  border-radius:9px;display:flex;align-items:center;justify-content:center;
+  border:1.5px solid #0a0018;
+  box-shadow:0 2px 6px rgba(0,0,0,0.5);
+}
+.menu-btn{position:relative}
+/* Responsive: narrower grid on phones */
+@media (max-width:500px){
+  #bagGrid{grid-template-columns:repeat(4,1fr)}
 }
 
-// ═══════ SALVAGE SYSTEM ══════════════════════════════════════════════
-// Converts bag items into profession materials. Rarity determines material
-// type + quantity. Materials flow into existing professions system so salvage
-// is meaningful and not just "delete but with a different name."
-const SALVAGE_YIELDS = {
-  common:     { scrap:1 },
-  uncommon:   { scrap:2 },
-  rare:       { scrap:2, etherDust:1 },
-  epic:       { etherDust:2, runecore:1 },
-  legendary:  { runecore:2, soulbond:1 },
-  mythic:     { runecore:3, soulbond:2 },
-};
-const MATERIAL_LABELS = {
-  scrap:'Scrap Metal', etherDust:'Ether Dust',
-  runecore:'Runecore', soulbond:'Soulbond Shard',
-};
-const MATERIAL_COLORS = {
-  scrap:'#9ca3af', etherDust:'#60a5fa',
-  runecore:'#c084fc', soulbond:'#f59e0b',
-};
-
-// Preview what a salvage would yield — used for tooltip display.
-function salvageYieldFor(item){
-  return SALVAGE_YIELDS[item.rarity] || {scrap:1};
+/* ─── SHOP PANEL ─── */
+#shopPanel{position:fixed;inset:0;z-index:400;display:none;flex-direction:column;background:linear-gradient(160deg,#1a0f08,#080400);overflow-y:auto}
+#shopLayout{
+  display:flex;flex-direction:column;gap:clamp(14px,1.8vw,22px);
+  max-width:940px;width:100%;margin:0 auto;
+  padding:clamp(12px,1.5vw,20px);
+}
+.shop-gold{
+  font-family:'Cinzel',serif;font-size:clamp(11px,1vw,14px);
+  color:#f59e0b;letter-spacing:2px;margin-left:14px;font-weight:600;
+  text-shadow:0 0 10px rgba(245,158,11,0.4);
+}
+#shopRefreshRow{
+  display:flex;justify-content:space-between;align-items:center;gap:14px;
+  padding:clamp(8px,1vw,14px) clamp(10px,1.2vw,16px);
+  background:rgba(245,158,11,0.06);
+  border:1px solid rgba(245,158,11,0.18);
+  border-radius:6px;
+}
+#shopRefreshTimer{
+  font-family:'Cinzel',serif;font-size:clamp(9px,0.95vw,11px);
+  color:#b8a08a;letter-spacing:1.5px;
+}
+#shopRefreshBtn{
+  font-family:'Cinzel',serif;font-size:clamp(10px,1vw,12px);letter-spacing:2px;
+  color:#f59e0b;background:transparent;
+  border:1px solid rgba(245,158,11,0.45);
+  padding:8px 16px;border-radius:4px;cursor:pointer;font-weight:600;
+  transition:all 0.15s;
+}
+#shopRefreshBtn:hover{background:rgba(245,158,11,0.12);border-color:#f59e0b;box-shadow:0 0 12px rgba(245,158,11,0.3)}
+.shop-section-label{
+  font-family:'Cinzel',serif;font-size:clamp(10px,1vw,12px);
+  letter-spacing:3px;color:#6b4d8a;text-transform:uppercase;
+  padding-bottom:4px;border-bottom:1px solid rgba(255,255,255,0.06);
+  margin-top:6px;
+}
+/* Gear grid */
+#shopGearGrid{
+  display:grid;grid-template-columns:repeat(3,1fr);
+  gap:clamp(8px,1vw,14px);
+}
+.shop-gear-card{
+  display:flex;flex-direction:column;gap:6px;
+  padding:clamp(10px,1.2vw,14px);
+  background:rgba(255,255,255,0.03);
+  border:1.5px solid rgba(255,255,255,0.1);
+  border-radius:6px;
+  transition:all 0.15s;
+}
+.shop-gear-card.disabled{opacity:0.5}
+.shop-gear-card:not(.disabled):hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(0,0,0,0.5)}
+.shop-gear-top{display:flex;justify-content:space-between;align-items:center}
+.shop-gear-icon{font-size:clamp(20px,2.4vw,28px);line-height:1;font-weight:700}
+.shop-gear-rarity{
+  font-family:'Cinzel',serif;font-size:clamp(8px,0.8vw,10px);
+  padding:2px 8px;border-radius:3px;letter-spacing:1.5px;font-weight:600;
+}
+.shop-gear-name{
+  font-family:'Cinzel',serif;font-size:clamp(11px,1.1vw,13px);
+  letter-spacing:1px;font-weight:700;
+}
+.shop-gear-slot{
+  font-family:'Cinzel',serif;font-size:clamp(8px,0.85vw,10px);
+  color:#8a7aa8;letter-spacing:2px;
+}
+.shop-gear-stats{
+  font-size:clamp(10px,1vw,12px);color:#b8a8d0;
+  line-height:1.4;flex:1;
+}
+/* Consumables + buyback shared row style */
+.shop-consumable{
+  display:flex;align-items:center;gap:clamp(10px,1.2vw,14px);
+  padding:clamp(10px,1.2vw,14px);
+  background:rgba(255,255,255,0.02);
+  border:1px solid rgba(255,255,255,0.08);
+  border-radius:6px;
+  margin-bottom:8px;
+}
+.shop-consumable.disabled{opacity:0.5}
+.shop-consumable-icon{
+  font-size:clamp(22px,2.6vw,30px);line-height:1;
+  width:44px;height:44px;display:flex;align-items:center;justify-content:center;
+  color:#f59e0b;text-shadow:0 0 10px rgba(245,158,11,0.4);
+  background:rgba(245,158,11,0.1);border-radius:6px;flex-shrink:0;
+}
+.shop-consumable-info{flex:1;display:flex;flex-direction:column;gap:3px}
+.shop-consumable-name{
+  font-family:'Cinzel',serif;font-size:clamp(11px,1.1vw,13px);
+  color:#e8dfc8;letter-spacing:1px;font-weight:600;
+}
+.shop-consumable-desc{
+  font-size:clamp(9px,0.95vw,11px);color:#8a7aa8;line-height:1.4;
+}
+.shop-mystery .shop-consumable-icon{
+  color:#c084fc;background:rgba(192,132,252,0.12);
+  text-shadow:0 0 12px rgba(192,132,252,0.5);
+}
+.shop-buy-btn{
+  font-family:'Cinzel',serif;font-size:clamp(11px,1.1vw,13px);
+  letter-spacing:1.5px;font-weight:700;
+  color:#f59e0b;background:linear-gradient(135deg,rgba(245,158,11,0.15),rgba(245,158,11,0.05));
+  border:1px solid rgba(245,158,11,0.45);
+  padding:clamp(8px,1vw,11px) clamp(12px,1.4vw,18px);
+  border-radius:4px;cursor:pointer;
+  transition:all 0.15s;flex-shrink:0;
+}
+.shop-buy-btn:hover:not([disabled]){
+  background:linear-gradient(135deg,rgba(245,158,11,0.3),rgba(245,158,11,0.12));
+  border-color:#f59e0b;box-shadow:0 0 14px rgba(245,158,11,0.3);
+}
+.shop-buy-btn[disabled]{
+  opacity:0.4;cursor:not-allowed;
+  color:#6b4d3a;border-color:rgba(107,77,58,0.4);background:transparent;
+}
+.shop-empty{
+  font-style:italic;color:#6b4d8a;
+  font-size:clamp(10px,1vw,12px);
+  padding:18px;text-align:center;
+}
+/* Responsive: narrower gear grid on phones */
+@media (max-width:620px){
+  #shopGearGrid{grid-template-columns:repeat(2,1fr)}
+  #shopRefreshRow{flex-direction:column;align-items:stretch;text-align:center}
 }
 
-// Execute salvage on a bag item. Removes from bag, credits materials + prof XP.
-function salvageFromBag(invIndex){
-  const item=inventory[invIndex];
-  if(!item)return;
-  const rarityTier={common:0,uncommon:1,rare:2,epic:3,legendary:4,mythic:5}[item.rarity]||0;
-  // Rare+ still confirms — player might want to keep or sell via buyback
-  if(rarityTier>=2){
-    const yields=salvageYieldFor(item);
-    const yieldSummary=Object.entries(yields).map(([k,v])=>`${v} ${MATERIAL_LABELS[k]}`).join(', ');
-    if(!confirm(`Salvage ${item.name}?\n\nThis ${RARITY_LABELS[item.rarity]||'item'} will be broken down into: ${yieldSummary}`))return;
-  }
-  const yields=salvageYieldFor(item);
-  Object.entries(yields).forEach(([mat,qty])=>{
-    creditMaterial(mat, qty);
-  });
-  // Profession XP — scales with rarity. Salvage feeds ALL professions a little.
-  const salvageXP = {common:5, uncommon:10, rare:25, epic:60, legendary:150, mythic:300}[item.rarity] || 5;
-  Object.keys(professions).forEach(p=>addProfXP(p, salvageXP));
-  inventory.splice(invIndex,1);
-  const gained=Object.entries(yields).map(([k,v])=>`+${v} ${MATERIAL_LABELS[k]}`).join(' · ');
-  addFeed(`⚒ Salvaged ${item.name} → ${gained} (+${salvageXP} prof XP)`,'#a78bfa');
-  if(typeof writeSave==='function')writeSave();
-  updateInventoryBadge();
-  renderInventory();
+/* ─── BAG DEPTH UPDATES ─── */
+/* Upgrade chevron in top-left of each bag slot */
+.bag-slot-mark{
+  position:absolute;top:3px;left:5px;
+  font-size:clamp(11px,1.2vw,14px);font-weight:700;
+  line-height:1;letter-spacing:0;
+  pointer-events:none;
+}
+/* Verdict banner in tooltip */
+.bag-tt-verdict{
+  font-family:'Cinzel',serif;
+  font-size:clamp(10px,1.05vw,12px);
+  letter-spacing:2.5px;font-weight:700;
+  padding:clamp(6px,0.8vw,9px) clamp(10px,1.2vw,14px);
+  border:1px solid;border-radius:4px;
+  text-align:center;text-transform:uppercase;
+}
+/* Salvage preview section in tooltip */
+.bag-tt-salvage-preview .bag-stat-line{
+  font-size:clamp(10px,1vw,12px);
+  letter-spacing:0.5px;
+}
+/* Salvage button — purple/magical to differentiate from equip/discard */
+.bag-btn-salvage{
+  color:#a78bfa;
+  background:transparent;
+  border:1px solid rgba(167,139,250,0.45);
+}
+.bag-btn-salvage:hover{
+  background:rgba(167,139,250,0.15);
+  border-color:#a78bfa;
+  box-shadow:0 0 14px rgba(167,139,250,0.3);
+}
+/* When tooltip has 3 buttons, make them stack vertically on narrow screens */
+@media (max-width:520px){
+  .bag-tt-actions{flex-direction:column}
 }
 
-// Credits materials to professions. All 3 professions share the same material
-// pool so this just adds to all of them — each profession has its own copy of
-// each material (no single shared pool) because save/load treats them per-prof.
-function creditMaterial(material, qty){
-  if(typeof professions==='undefined')return;
-  Object.values(professions).forEach(p=>{
-    if(!p.materials)p.materials={};
-    p.materials[material] = (p.materials[material]||0) + qty;
-  });
+/* ─── PROFESSION PANEL DEPTH ─── */
+.prof-xp-row{
+  display:flex;align-items:center;gap:8px;margin-bottom:6px;
+}
+.prof-xp-text{
+  font-family:'Cinzel',serif;font-size:clamp(8px,0.85vw,10px);
+  color:#b8a8d0;letter-spacing:1px;white-space:nowrap;
+}
+.mat-row{
+  display:flex;flex-wrap:wrap;gap:8px;
+  padding:clamp(6px,0.8vw,10px);
+  background:rgba(255,255,255,0.03);
+  border-radius:4px;margin-bottom:8px;
+}
+.mat{
+  font-family:'Cinzel',serif;font-size:clamp(9px,0.9vw,11px);
+  letter-spacing:0.5px;
+}
+.recipe-list{display:flex;flex-direction:column;gap:6px}
+.recipe{
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:10px;align-items:center;
+  padding:clamp(8px,1vw,12px);
+  background:rgba(255,255,255,0.02);
+  border:1px solid rgba(255,255,255,0.07);
+  border-radius:5px;
+}
+.recipe-head{
+  display:flex;align-items:center;gap:8px;
+}
+.recipe-icon{font-size:clamp(14px,1.4vw,17px);font-weight:700;line-height:1}
+.recipe-name{
+  font-family:'Cinzel',serif;font-size:clamp(11px,1.1vw,13px);
+  letter-spacing:1px;font-weight:600;
+}
+.recipe-rarity{
+  font-family:'Cinzel',serif;font-size:clamp(8px,0.8vw,10px);
+  padding:2px 7px;border-radius:3px;letter-spacing:1.5px;font-weight:600;
+}
+.recipe-stats{
+  grid-column:1 / -1;
+  font-size:clamp(10px,1vw,12px);color:#b8a8d0;
+  margin-top:2px;
+}
+.recipe-cost{
+  grid-column:1 / -1;
+  font-size:clamp(10px,1vw,12px);
+}
+.recipe-block{
+  grid-column:1 / -1;
+  font-size:clamp(9px,0.9vw,11px);
+  color:#ef4444;font-style:italic;
+}
+.craft-btn{
+  grid-row:1;grid-column:2;
+  font-family:'Cinzel',serif;font-size:clamp(10px,1vw,12px);
+  letter-spacing:1.5px;font-weight:700;
+  color:#9DC4B0;background:linear-gradient(135deg,rgba(157,196,176,0.15),rgba(157,196,176,0.05));
+  border:1px solid rgba(157,196,176,0.45);
+  padding:clamp(6px,0.8vw,9px) clamp(10px,1.2vw,14px);
+  border-radius:4px;cursor:pointer;
+  transition:all 0.15s;
+}
+.craft-btn:hover:not([disabled]){
+  background:linear-gradient(135deg,rgba(157,196,176,0.3),rgba(157,196,176,0.12));
+  border-color:#9DC4B0;box-shadow:0 0 12px rgba(157,196,176,0.3);
+}
+.craft-btn[disabled]{
+  opacity:0.4;cursor:not-allowed;color:#4a5a50;border-color:rgba(74,90,80,0.4);
+  background:transparent;
 }
 
-function recalcStats(){
-  // Refresh aggregated talent bonuses first — all the layers below query them
-  if(typeof computeTalentBonuses==='function')computeTalentBonuses();
-  let sm=0,atk=0,hp=0,sb=0;
-  Object.values(equipped).forEach(i=>{if(!i)return;if(i.stats.sm)sm+=i.stats.sm;if(i.stats.atk)atk+=i.stats.atk;if(i.stats.hp)hp+=i.stats.hp;if(i.stats.spiritBonus)sb+=i.stats.spiritBonus;});
-  // Apply talent bonuses
-  const hpPct=typeof getTalentBonus==='function'?getTalentBonus('hpPct'):0;
-  const spiritCapBonus=typeof getTalentBonus==='function'?getTalentBonus('spiritCap'):0;
-  player.soulMastery=sm; player.attack=computeAttack(player.level)+atk+sm*0.5;
-  const baseMaxHp=computeMaxHp(player.level)+hp;
-  player.maxHp=Math.floor(baseMaxHp*(1+hpPct/100));
-  player.hp=Math.min(player.hp,player.maxHp);
-  player.maxBonds=MAX_SPIRITS+sb+spiritCapBonus;
+/* ─── GEAR PANEL DEPTH ─── */
+.gear-summary{
+  margin-bottom:clamp(12px,1.5vw,18px);
+  padding:clamp(10px,1.2vw,15px) clamp(12px,1.5vw,18px);
+  background:rgba(245,158,11,0.04);
+  border:1px solid rgba(245,158,11,0.2);
+  border-radius:6px;
 }
-function checkSetBonuses(){
-  const cnt=getSetPieceCount('Dirge of Hollows');
-  const sp=document.getElementById('setProgress');
-  if(cnt>0){sp.style.display='block';sp.innerHTML=`<div class="set-badge">✦ DIRGE ${cnt}/5</div>`;const b=SET_BONUSES['Dirge of Hollows'];if(b[cnt]){addFeed(`DIRGE ${cnt}PC: ${b[cnt].desc}`,'#f59e0b');}}
-  else sp.style.display='none';
+.gear-summary-label{
+  font-family:'Cinzel',serif;font-size:clamp(9px,0.9vw,11px);
+  letter-spacing:3px;color:#f59e0b;text-transform:uppercase;
+  margin-bottom:8px;font-weight:600;
 }
-// Friendly stat labels — converts internal keys like "sm" to readable names like "Soul Mastery"
-const STAT_LABELS={
-  sm:'Soul Mastery',
-  atk:'Attack Power',
-  hp:'Max Health',
-  res:'Resistance',
-  crit:'Crit Chance',
-  cdr:'Cooldown Reduction',
-  lifeOnHit:'Life on Hit',
-  spiritBonus:'Spirit Capacity',
-};
-const STAT_SUFFIX={crit:'%',cdr:'%',res:'%'}; // some stats are percentages
+.gear-summary-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));
+  gap:6px 16px;
+}
+.gear-summary-stat{
+  display:flex;align-items:baseline;gap:8px;
+  font-size:clamp(10px,1vw,12px);
+}
+.gear-summary-val{
+  font-family:'Cinzel',serif;font-weight:700;
+  font-size:clamp(12px,1.1vw,14px);
+  letter-spacing:0.5px;
+}
+.gear-summary-key{color:#8a7aa8;letter-spacing:0.5px}
 
-function formatStat(k,v){
-  const label=STAT_LABELS[k]||k.toUpperCase();
-  const suffix=STAT_SUFFIX[k]||'';
-  const sign=v>=0?'+':'';
-  return `${sign}${v}${suffix} ${label}`;
+.gear-sets-card{
+  margin-bottom:clamp(12px,1.5vw,18px);
+  padding:clamp(10px,1.2vw,15px) clamp(12px,1.5vw,18px);
+  background:rgba(192,132,252,0.05);
+  border:1px solid rgba(192,132,252,0.25);
+  border-radius:6px;
 }
-
-// ═══════ GEAR PANEL ═══════════════════════════════════════════════
-// Interactive gear panel — shows all equipped items with rich tooltips,
-// tap-to-interact buttons (MOVE TO BAG / SALVAGE), live set bonus tracking,
-// and an aggregated stats summary. Matches the bag panel in polish.
-let _gearSelectedSlot=null;
-
-function openGear(){
-  _gearSelectedSlot=null;
-  renderGearPanel();
-  document.getElementById('gearPanel').style.display='flex';
+.gear-set-row{margin-top:6px}
+.gear-set-header{
+  display:flex;justify-content:space-between;align-items:baseline;
 }
-function closeGear(){
-  _gearSelectedSlot=null;
-  document.getElementById('gearPanel').style.display='none';
+.gear-set-name{
+  font-family:'Cinzel',serif;font-size:clamp(11px,1.1vw,13px);
+  color:#c084fc;letter-spacing:1.5px;font-weight:600;
 }
-
-// Unequip an item into the bag. If bag is full and it's a rare+, warn.
-function unequipToBag(slot){
-  const item=equipped[slot];
-  if(!item)return;
-  if(inventory.length>=INVENTORY_MAX){
-    addFeed(`⚠ Bag full — can't unequip ${item.name}`,'#ef4444');
-    return;
-  }
-  inventory.push(item);
-  equipped[slot]=null;
-  recalcStats();
-  checkSetBonuses();
-  addFeed(`◇ ${item.name} → bag`,'#6b9acf');
-  updateInventoryBadge();
-  if(typeof writeSave==='function')writeSave();
-  _gearSelectedSlot=null;
-  renderGearPanel();
+.gear-set-count{
+  font-family:'Cinzel',serif;font-size:clamp(9px,0.9vw,11px);
+  color:#d4c896;letter-spacing:1px;
+}
+.gear-set-active{
+  font-size:clamp(10px,1vw,12px);color:#22c55e;
+  margin-top:3px;padding-left:4px;
+}
+.gear-set-next{
+  font-size:clamp(10px,1vw,12px);color:#8a7aa8;
+  margin-top:2px;padding-left:4px;font-style:italic;
 }
 
-// Salvage a piece directly from equipped slots. Same rules/yields as bag salvage.
-function salvageFromGear(slot){
-  const item=equipped[slot];
-  if(!item)return;
-  const rarityTier={common:0,uncommon:1,rare:2,epic:3,legendary:4,mythic:5}[item.rarity]||0;
-  if(rarityTier>=2){
-    const yields=salvageYieldFor(item);
-    const yieldSummary=Object.entries(yields).map(([k,v])=>`${v} ${MATERIAL_LABELS[k]}`).join(', ');
-    if(!confirm(`Salvage equipped ${item.name}?\n\nYou will UNEQUIP and break down this ${RARITY_LABELS[item.rarity]||'item'} into: ${yieldSummary}`))return;
-  }
-  const yields=salvageYieldFor(item);
-  Object.entries(yields).forEach(([mat,qty])=>creditMaterial(mat,qty));
-  const salvageXP={common:5,uncommon:10,rare:25,epic:60,legendary:150,mythic:300}[item.rarity]||5;
-  Object.keys(professions).forEach(p=>addProfXP(p,salvageXP));
-  equipped[slot]=null;
-  recalcStats();
-  checkSetBonuses();
-  const gained=Object.entries(yields).map(([k,v])=>`+${v} ${MATERIAL_LABELS[k]}`).join(' · ');
-  addFeed(`⚒ Salvaged equipped ${item.name} → ${gained}`,'#a78bfa');
-  if(typeof writeSave==='function')writeSave();
-  _gearSelectedSlot=null;
-  renderGearPanel();
+.gear-slot-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+  gap:clamp(8px,1vw,12px);
 }
-
-// Computes a summary of aggregated stats from all equipped gear.
-// Returns an array of {label, value, color} lines for rendering.
-function computeEquippedStatsSummary(){
-  const totals={};
-  Object.values(equipped).forEach(item=>{
-    if(!item||!item.stats)return;
-    Object.entries(item.stats).forEach(([k,v])=>{
-      totals[k]=(totals[k]||0)+v;
-    });
-  });
-  return Object.entries(totals).map(([k,v])=>{
-    const label=(typeof STAT_LABELS!=='undefined'?STAT_LABELS[k]:null)||k;
-    const suffix=(typeof STAT_SUFFIX!=='undefined'?STAT_SUFFIX[k]:null)||'';
-    return {label,value:`+${v}${suffix}`,color:'#d4c896'};
-  });
+.gear-slot{
+  padding:clamp(10px,1.2vw,14px);
+  background:rgba(255,255,255,0.03);
+  border:1px solid rgba(255,255,255,0.08);
+  border-radius:6px;
+  transition:all 0.15s;
+  cursor:pointer;
 }
-
-// Computes active set bonus info — which sets are in progress, what bonuses
-// are currently applying, and what the next tier would give.
-function computeActiveSets(){
-  const sets={};
-  Object.values(equipped).forEach(item=>{
-    if(!item||!item.setName)return;
-    sets[item.setName]=(sets[item.setName]||0)+1;
-  });
-  return Object.entries(sets).map(([name,count])=>{
-    const tiers=SET_BONUSES[name]||{};
-    // Find active tier (highest tier <= count) and next tier
-    const tierKeys=Object.keys(tiers).map(Number).sort((a,b)=>a-b);
-    let activeTier=null, nextTier=null;
-    tierKeys.forEach(t=>{
-      if(t<=count)activeTier=t;
-      else if(nextTier===null)nextTier=t;
-    });
-    return {
-      name,
-      count,
-      maxPieces:5, // hardcoded for now — all sets are 5-piece
-      activeTier,
-      activeDesc:activeTier?tiers[activeTier].desc:null,
-      nextTier,
-      nextDesc:nextTier?tiers[nextTier].desc:null,
-    };
-  });
+.gear-slot.has-item:hover{background:rgba(255,255,255,0.05);transform:translateY(-1px)}
+.gear-slot.selected{
+  background:rgba(255,255,255,0.06);
+  box-shadow:0 0 0 1px rgba(255,255,255,0.18),0 6px 18px rgba(0,0,0,0.5);
 }
-
-function renderGearPanel(){
-  const slots=document.getElementById('gearSlots');
-  if(!slots)return;
-  slots.innerHTML='';
-
-  // ── ACTIVE STATS SUMMARY ──
-  const summary=computeEquippedStatsSummary();
-  if(summary.length){
-    const summaryCard=document.createElement('div');
-    summaryCard.className='gear-summary';
-    summaryCard.innerHTML=`
-      <div class="gear-summary-label">TOTAL BONUSES FROM EQUIPMENT</div>
-      <div class="gear-summary-grid">
-        ${summary.map(s=>`
-          <div class="gear-summary-stat">
-            <span class="gear-summary-val" style="color:${s.color}">${s.value}</span>
-            <span class="gear-summary-key">${s.label}</span>
-          </div>
-        `).join('')}
-      </div>
-    `;
-    slots.appendChild(summaryCard);
-  }
-
-  // ── ACTIVE SET BONUSES ──
-  const activeSets=computeActiveSets();
-  if(activeSets.length){
-    const setsCard=document.createElement('div');
-    setsCard.className='gear-sets-card';
-    setsCard.innerHTML=`
-      <div class="gear-summary-label">SET BONUSES</div>
-      ${activeSets.map(s=>`
-        <div class="gear-set-row">
-          <div class="gear-set-header">
-            <span class="gear-set-name">◆ ${s.name}</span>
-            <span class="gear-set-count">${s.count} / ${s.maxPieces}</span>
-          </div>
-          ${s.activeDesc?`<div class="gear-set-active">✓ ${s.activeTier}PC: ${s.activeDesc}</div>`:''}
-          ${s.nextDesc?`<div class="gear-set-next">◇ ${s.nextTier}PC: ${s.nextDesc}</div>`:''}
-        </div>
-      `).join('')}
-    `;
-    slots.appendChild(setsCard);
-  }
-
-  // ── EQUIPMENT SLOTS ──
-  const equipmentWrap=document.createElement('div');
-  equipmentWrap.className='gear-slot-grid';
-  GEAR_SLOTS.forEach(slot=>{
-    const item=equipped[slot];
-    const div=document.createElement('div');
-    div.className='gear-slot';
-    const slotIcon=SLOT_ICONS[slot]||'◇';
-    if(item){
-      const rarityCol=RARITY_COLORS[item.rarity]||'#9ca3af';
-      const rarityLabel=RARITY_LABELS[item.rarity]||'';
-      div.classList.add('has-item');
-      div.style.borderLeft=`3px solid ${rarityCol}`;
-      const statsHtml=Object.entries(item.stats||{})
-        .map(([k,v])=>{
-          const label=(typeof STAT_LABELS!=='undefined'?STAT_LABELS[k]:null)||k;
-          const suffix=(typeof STAT_SUFFIX!=='undefined'?STAT_SUFFIX[k]:null)||'';
-          return `<span class="gear-stat-row" style="color:#d4c896">+${v}${suffix} ${label}</span>`;
-        })
-        .join('');
-      const setLine=item.setName
-        ? `<div class="gear-set-line">◆ Part of ${item.setName} set</div>`
-        : '';
-      const craftedBadge=item.crafted?`<span class="gear-crafted-badge">⚒ CRAFTED</span>`:'';
-      div.innerHTML=`
-        <div class="gear-slot-header">
-          <span class="gear-slot-icon" style="color:${rarityCol}">${slotIcon}</span>
-          <span class="gear-slot-name">${slot}</span>
-          <span class="gear-rarity-tag" style="color:${rarityCol};border-color:${rarityCol}66;background:${rarityCol}22">${rarityLabel}</span>
-        </div>
-        <div class="gear-item-name" style="color:${rarityCol};text-shadow:0 0 8px ${rarityCol}44">${item.name} ${craftedBadge}</div>
-        <div class="gear-stats-block">${statsHtml}</div>
-        ${setLine}
-      `;
-      // Click-to-select to reveal actions
-      if(_gearSelectedSlot===slot){
-        div.classList.add('selected');
-        const actions=document.createElement('div');
-        actions.className='gear-actions';
-        actions.innerHTML=`
-          <button class="gear-action-btn gear-action-move">◇ MOVE TO BAG</button>
-          <button class="gear-action-btn gear-action-salvage">⚒ SALVAGE</button>
-        `;
-        actions.querySelector('.gear-action-move').addEventListener('click',e=>{e.stopPropagation();unequipToBag(slot);});
-        actions.querySelector('.gear-action-salvage').addEventListener('click',e=>{e.stopPropagation();salvageFromGear(slot);});
-        div.appendChild(actions);
-      }
-      div.addEventListener('click',()=>{
-        _gearSelectedSlot=(_gearSelectedSlot===slot)?null:slot;
-        renderGearPanel();
-      });
-    } else {
-      div.innerHTML=`
-        <div class="gear-slot-header">
-          <span class="gear-slot-icon gear-slot-icon-empty">${slotIcon}</span>
-          <span class="gear-slot-name">${slot}</span>
-        </div>
-        <div class="gear-empty">— Empty —</div>
-      `;
-    }
-    equipmentWrap.appendChild(div);
-  });
-  slots.appendChild(equipmentWrap);
+.gear-slot-header{
+  display:flex;align-items:center;gap:8px;margin-bottom:6px;
 }
-
-// ═══════ PROFESSION SYSTEM ═══════════════════════════════
-// ═══════ PROFESSIONS ═══════════════════════════════════════════════
-// Three profession specializations, each crafting a different gear category.
-// Materials come from bag salvage (see salvageFromBag in the inventory section).
-// Profession XP is earned from salvaging AND from crafting, creating a
-// salvage → materials → craft → gear loop.
-//
-// Material flow (shared pool — any profession can use any material):
-//   scrap        : every salvage yields this. Primarily used by Weaponsmith.
-//   etherDust    : rare+ salvage. Primarily Armorer.
-//   runecore    : epic+ salvage. Primarily Ritualist.
-//   soulbond    : legendary+ only. Rare component for endgame crafts across all.
-//
-// Profession level determines which recipes are unlockable.
-let professions={
-  Weaponsmith:{level:1,xp:0,xpToNext:120,materials:{scrap:0,etherDust:0,runecore:0,soulbond:0}},
-  Armorer:    {level:1,xp:0,xpToNext:120,materials:{scrap:0,etherDust:0,runecore:0,soulbond:0}},
-  Ritualist:  {level:1,xp:0,xpToNext:120,materials:{scrap:0,etherDust:0,runecore:0,soulbond:0}},
-};
-
-// Recipes — structure:
-//   profLv: profession level required to unlock
-//   craftLv: base player level the crafted item scales to (uses current player level actually, but this tunes the rarity ceiling)
-//   slot: gear slot the crafted item fills
-//   rarity: the rarity of the crafted item
-//   baseStats: weighted budget — the recipe's "stat personality"
-//   cost: materials consumed
-//
-// Crafted items get random-ish stat values each craft, so re-crafting the same
-// recipe gives you different rolls (ARPG-style).
-const RECIPES={
-  Weaponsmith:[
-    {name:'Veilsteel Dagger',    profLv:1, rarity:'uncommon', slot:'Weapon', baseStats:{atk:14,crit:2}, cost:{scrap:4}},
-    {name:'Bone-Hilt Sword',     profLv:3, rarity:'rare',     slot:'Weapon', baseStats:{atk:28,sm:6},    cost:{scrap:8,etherDust:2}},
-    {name:'Wraith-Forged Blade', profLv:6, rarity:'rare',     slot:'Weapon', baseStats:{atk:36,crit:5,sm:4}, cost:{scrap:12,etherDust:4}},
-    {name:'Obsidian Reaver',     profLv:10,rarity:'epic',     slot:'Weapon', baseStats:{atk:55,crit:8,sm:10}, cost:{scrap:20,etherDust:8,runecore:2}},
-    {name:'Soulbound Scythe',    profLv:16,rarity:'legendary',slot:'Weapon', baseStats:{atk:85,crit:12,sm:18,lifeOnHit:4}, cost:{scrap:30,etherDust:15,runecore:6,soulbond:2}},
-  ],
-  Armorer:[
-    {name:'Drifter\'s Cowl',     profLv:1, rarity:'uncommon', slot:'Helmet', baseStats:{hp:60,res:2},   cost:{scrap:3,etherDust:1}},
-    {name:'Veilcloth Robes',     profLv:2, rarity:'uncommon', slot:'Chest',  baseStats:{hp:120,sm:4},   cost:{scrap:5,etherDust:2}},
-    {name:'Bone-Plate Hauberk',  profLv:5, rarity:'rare',     slot:'Chest',  baseStats:{hp:200,res:6,atk:8}, cost:{scrap:8,etherDust:5}},
-    {name:'Spirit-Weave Gloves', profLv:7, rarity:'rare',     slot:'Gloves', baseStats:{atk:14,crit:5,sm:6}, cost:{scrap:6,etherDust:4,runecore:1}},
-    {name:'Reaver\'s Warplate',  profLv:12,rarity:'epic',     slot:'Chest',  baseStats:{hp:340,res:10,atk:14,sm:10}, cost:{scrap:15,etherDust:10,runecore:3}},
-    {name:'Mantle of Undoing',   profLv:18,rarity:'legendary',slot:'Chest',  baseStats:{hp:520,res:15,atk:22,sm:22,lifeOnHit:6}, cost:{scrap:25,etherDust:18,runecore:8,soulbond:3}},
-  ],
-  Ritualist:[
-    {name:'Whisperbound Ring',   profLv:1, rarity:'uncommon', slot:'Ring',   baseStats:{sm:8,crit:3},   cost:{scrap:2,etherDust:2}},
-    {name:'Warden Sigil',        profLv:3, rarity:'rare',     slot:'Amulet', baseStats:{hp:80,sm:12,cdr:4}, cost:{scrap:4,etherDust:4,runecore:1}},
-    {name:'Hollow Chain Belt',   profLv:5, rarity:'rare',     slot:'Belt',   baseStats:{hp:120,sm:8,spiritBonus:1}, cost:{scrap:6,etherDust:5,runecore:1}},
-    {name:'Veilstep Boots',      profLv:8, rarity:'rare',     slot:'Boots',  baseStats:{hp:100,atk:10,crit:4}, cost:{scrap:6,etherDust:5,runecore:2}},
-    {name:'Ring of Severance',   profLv:14,rarity:'epic',     slot:'Ring',   baseStats:{atk:22,crit:8,sm:14,lifeOnHit:3}, cost:{scrap:10,etherDust:10,runecore:5}},
-    {name:'Soulwarden Amulet',   profLv:18,rarity:'legendary',slot:'Amulet', baseStats:{hp:250,sm:30,cdr:8,spiritBonus:2}, cost:{scrap:15,etherDust:15,runecore:8,soulbond:3}},
-  ],
-};
-
-function addProfXP(n,amt){
-  const p=professions[n]; if(!p)return;
-  p.xp+=amt;
-  while(p.xp>=p.xpToNext && p.level<20){
-    p.xp-=p.xpToNext;
-    p.level++;
-    p.xpToNext=p.level*120;
-    addFeed(`⚒ ${n} LV ${p.level}!`,'#9DC4B0');
-  }
+.gear-slot-icon{font-size:clamp(16px,1.6vw,20px);line-height:1;font-weight:700}
+.gear-slot-icon-empty{color:#4a3d5f;opacity:0.6}
+.gear-slot-name{
+  font-family:'Cinzel',serif;font-size:clamp(9px,0.95vw,11px);
+  letter-spacing:2px;color:#8a7aa8;flex:1;text-transform:uppercase;
 }
-
-function canCraft(n,r){
-  const m=professions[n].materials;
-  return Object.entries(r.cost).every(([k,v])=>(m[k]||0)>=v) && professions[n].level>=r.profLv;
+.gear-rarity-tag{
+  font-family:'Cinzel',serif;font-size:clamp(8px,0.8vw,10px);
+  padding:2px 7px;border:1px solid;border-radius:3px;
+  letter-spacing:1.5px;font-weight:600;
 }
-
-// Missing requirements for display — explains WHY a recipe is locked
-function craftBlockReasons(n,r){
-  const reasons=[];
-  if(professions[n].level<r.profLv)reasons.push(`Requires ${n} LV ${r.profLv}`);
-  const m=professions[n].materials;
-  Object.entries(r.cost).forEach(([k,v])=>{
-    const have=m[k]||0;
-    if(have<v)reasons.push(`${v-have} more ${MATERIAL_LABELS[k]||k}`);
-  });
-  return reasons;
+.gear-item-name{
+  font-family:'Cinzel',serif;font-size:clamp(12px,1.2vw,14px);
+  letter-spacing:1px;font-weight:700;
+  margin-bottom:6px;
 }
-
-// Rolls stat values for a craft. Variance of ±20% around the recipe's baseStats,
-// scaled up by player level so crafts at higher levels are stronger.
-function rollCraftedStats(recipe){
-  const lvFactor = 1 + Math.max(0, player.level-1) * 0.04; // +4% per level
-  const stats={};
-  Object.entries(recipe.baseStats).forEach(([k,base])=>{
-    const variance = 0.8 + Math.random() * 0.4; // 0.8 to 1.2
-    stats[k] = Math.ceil(base * lvFactor * variance);
-  });
-  return stats;
+.gear-crafted-badge{
+  font-size:clamp(8px,0.8vw,10px);
+  color:#9DC4B0;letter-spacing:1.5px;
+  padding:1px 6px;border-radius:2px;
+  background:rgba(157,196,176,0.15);
+  vertical-align:middle;margin-left:6px;font-weight:600;
 }
-
-function craft(n,r){
-  if(!canCraft(n,r)){
-    addFeed(`⚠ Cannot craft ${r.name}`,'#ef4444');
-    return;
-  }
-  // Spend materials
-  const m=professions[n].materials;
-  Object.entries(r.cost).forEach(([k,v])=>{m[k]=(m[k]||0)-v;});
-  // Craft XP — more for higher-tier recipes
-  const xpReward = {uncommon:40, rare:80, epic:160, legendary:320}[r.rarity] || 40;
-  addProfXP(n, xpReward);
-  // Build the crafted item
-  const crafted={
-    name:r.name,
-    slot:r.slot,
-    rarity:r.rarity,
-    stats:rollCraftedStats(r),
-    crafted:true, // mark so we can show "crafted" label in tooltip
-  };
-  // Route through acquireLoot — handles empty-slot auto-equip vs. bag routing
-  if(typeof acquireLoot==='function'){
-    acquireLoot(crafted);
-  } else {
-    // Fallback for very old code paths
-    tryEquip(crafted);
-  }
-  addFeed(`⚒ Crafted ${r.name} (+${xpReward} ${n} XP)`,'#9DC4B0');
-  if(typeof writeSave==='function')writeSave();
-  renderProfPanel();
+.gear-stats-block{
+  display:flex;flex-direction:column;gap:2px;
+  margin-bottom:4px;
 }
-function openProf(){renderProfPanel();document.getElementById('profPanel').style.display='flex';}
-function closeProf(){document.getElementById('profPanel').style.display='none';}
-function renderProfPanel(){
-  const cards=document.getElementById('profCards');
-  if(!cards)return;
-  cards.innerHTML='';
-  Object.entries(professions).forEach(([name,prof])=>{
-    const card=document.createElement('div');
-    card.className='prof-card';
-    const pct=prof.xp/prof.xpToNext*100;
-    // Render materials with labels and colors
-    const matsHtml=Object.entries(prof.materials)
-      .filter(([k,v])=>v>0 || ['scrap','etherDust','runecore','soulbond'].includes(k))
-      .map(([k,v])=>{
-        const label = MATERIAL_LABELS[k] || k;
-        const color = MATERIAL_COLORS[k] || '#9ca3af';
-        return `<span class="mat${v>0?' has':''}" style="color:${color}${v>0?'':'88'}">${label}: ${v}</span>`;
-      }).join('');
-    card.innerHTML=`
-      <div class="prof-name">⚒ ${name} — LV ${prof.level}</div>
-      <div class="prof-xp-row">
-        <div class="prof-xp-bg"><div class="prof-xp-fill" style="width:${pct}%"></div></div>
-        <span class="prof-xp-text">${prof.xp} / ${prof.xpToNext} XP</span>
-      </div>
-      <div class="mat-row">${matsHtml}</div>
-      <div class="recipe-list"></div>
-    `;
-    const recipeList=card.querySelector('.recipe-list');
-    (RECIPES[name]||[]).forEach(r=>{
-      const row=document.createElement('div');
-      row.className='recipe';
-      const canMake=canCraft(name,r);
-      const reasons=craftBlockReasons(name,r);
-      const rarityCol = RARITY_COLORS[r.rarity] || '#9ca3af';
-      const rarityLabel = RARITY_LABELS[r.rarity] || '?';
-      const icon = SLOT_ICONS[r.slot] || '✦';
-      // Stats preview — just keys and base numbers so player knows personality
-      const statsPreview = Object.entries(r.baseStats).map(([k,v])=>{
-        const lbl = (typeof STAT_LABELS!=='undefined'?STAT_LABELS[k]:null) || k;
-        return `+${v}-ish ${lbl}`;
-      }).join(' · ');
-      // Cost with material labels + color
-      const costHtml = Object.entries(r.cost).map(([k,v])=>{
-        const lbl = MATERIAL_LABELS[k] || k;
-        const col = MATERIAL_COLORS[k] || '#9ca3af';
-        const have = prof.materials[k] || 0;
-        const ok = have >= v;
-        return `<span style="color:${ok?col:'#ef4444'}">${v} ${lbl}</span>`;
-      }).join(' · ');
-      row.innerHTML=`
-        <div class="recipe-head">
-          <span class="recipe-icon" style="color:${rarityCol}">${icon}</span>
-          <span class="recipe-name" style="color:${rarityCol}">${r.name}</span>
-          <span class="recipe-rarity" style="background:${rarityCol}22;color:${rarityCol}">${rarityLabel}</span>
-        </div>
-        <div class="recipe-stats">${statsPreview}</div>
-        <div class="recipe-cost">${costHtml}</div>
-        ${!canMake && reasons.length ? `<div class="recipe-block">${reasons.join(' · ')}</div>` : ''}
-      `;
-      const btn=document.createElement('button');
-      btn.className='craft-btn';
-      btn.textContent = canMake ? 'CRAFT' : 'LOCKED';
-      btn.disabled = !canMake;
-      btn.onclick = ()=>craft(name,r);
-      row.appendChild(btn);
-      recipeList.appendChild(row);
-    });
-    cards.appendChild(card);
-  });
+.gear-stat-row{
+  font-size:clamp(10px,1vw,12px);
+  letter-spacing:0.3px;
 }
-
-
-// ═══════ TALENT SYSTEM ═══════════════════════════════════════
-// Per-talent rank tracking. learned[talentId] = currentRank (0 if unlearned).
-let talentState={
-  points:0,         // unspent talent points
-  pointsEarned:0,   // total points ever earned (used to validate on load)
-  learned:{},       // talentId -> rank
-};
-
-// Award points when the player levels up. Called from addXP().
-function awardTalentPoint(){
-  talentState.points+=1;
-  talentState.pointsEarned+=1;
-  addFeed('✦ +1 Talent Point','#c4b5fd');
-  // Alert the talent menu button so player notices they have unspent points
-  const btn=document.querySelector('[data-menu="talents"]');
-  if(btn)btn.classList.add('alert');
+.gear-set-line{
+  font-size:clamp(9px,0.9vw,11px);
+  color:#c084fc;font-style:italic;letter-spacing:0.5px;margin-top:4px;
 }
-
-// Look up how many points the player has spent in a specific branch
-function pointsInBranch(branchName){
-  const branch=TALENT_TREE[branchName];
-  if(!branch)return 0;
-  let total=0;
-  branch.talents.forEach(t=>{total+=talentState.learned[t.id]||0;});
-  return total;
+.gear-empty{
+  font-size:clamp(10px,1vw,12px);
+  color:#4a3d5f;font-style:italic;
+  text-align:center;padding:clamp(14px,1.8vw,20px);
 }
-
-// Attempt to spend a point on a talent. Returns true if successful.
-function learnTalent(branchName,talentId){
-  if(talentState.points<=0)return false;
-  const talent=TALENT_TREE[branchName]?.talents.find(t=>t.id===talentId);
-  if(!talent)return false;
-  const current=talentState.learned[talentId]||0;
-  if(current>=talent.maxRank)return false;
-  // Check gate — minimum points spent in this branch to unlock
-  if(pointsInBranch(branchName)<talent.gate)return false;
-  // Spend the point
-  talentState.learned[talentId]=current+1;
-  talentState.points-=1;
-  recalcStats();
-  renderTalentPanel(); // refresh UI
-  // Clear alert on menu button if no more unspent points
-  if(talentState.points<=0){
-    const btn=document.querySelector('[data-menu="talents"]');
-    if(btn)btn.classList.remove('alert');
-  }
-  return true;
+.gear-actions{
+  display:flex;gap:8px;margin-top:10px;
+  padding-top:10px;border-top:1px solid rgba(255,255,255,0.08);
 }
-
-// Wipe all spent talents and refund the points. Free respec for now.
-function resetTalents(){
-  if(!confirm('Reset all talents? All spent points will be returned.'))return;
-  talentState.learned={};
-  talentState.points=talentState.pointsEarned;
-  recalcStats();
-  renderTalentPanel();
-  addFeed('✦ Talents reset','#c4b5fd');
+.gear-action-btn{
+  flex:1;
+  font-family:'Cinzel',serif;font-size:clamp(9px,0.9vw,11px);
+  letter-spacing:1.5px;font-weight:700;
+  padding:clamp(6px,0.8vw,9px);
+  border-radius:4px;cursor:pointer;
+  transition:all 0.15s;
 }
-
-// Aggregate all talent effects into a single bonus object the engine reads.
-// Called every recalcStats(). The engine queries getTalentBonus(key) to apply effects.
-let _talentBonusCache={};
-function computeTalentBonuses(){
-  _talentBonusCache={};
-  Object.entries(TALENT_TREE).forEach(([branchName,branch])=>{
-    branch.talents.forEach(talent=>{
-      const rank=talentState.learned[talent.id]||0;
-      if(rank<=0)return;
-      const bonuses=talent.apply(rank);
-      Object.entries(bonuses).forEach(([k,v])=>{
-        _talentBonusCache[k]=(_talentBonusCache[k]||0)+v;
-      });
-    });
-  });
+.gear-action-move{
+  color:#60a5fa;background:transparent;
+  border:1px solid rgba(96,165,250,0.45);
 }
-function getTalentBonus(key){return _talentBonusCache[key]||0;}
-
-// Render the talent panel UI. Called whenever it opens or a talent is learned.
-function renderTalentPanel(){
-  const container=document.getElementById('talentTree');
-  if(!container)return;
-  container.innerHTML='';
-  // Points header
-  const header=document.createElement('div');
-  header.className='talent-header';
-  header.innerHTML=`
-    <div class="talent-points-label">Available Points: <span class="talent-points-num">${talentState.points}</span></div>
-    <button class="talent-reset-btn" id="_resetTalentsBtn">Reset All</button>
-  `;
-  container.appendChild(header);
-  const resetBtn=document.getElementById('_resetTalentsBtn');
-  if(resetBtn)resetBtn.addEventListener('click',resetTalents);
-  // Branches
-  Object.entries(TALENT_TREE).forEach(([branchName,branch])=>{
-    const spent=pointsInBranch(branchName);
-    const branchDiv=document.createElement('div');
-    branchDiv.className='talent-branch';
-    branchDiv.style.borderLeft=`3px solid ${branch.color}`;
-    branchDiv.innerHTML=`
-      <div class="talent-branch-hdr" style="color:${branch.color}">
-        <span class="talent-branch-icon">${branch.icon}</span>
-        <span class="talent-branch-name">${branchName}</span>
-        <span class="talent-branch-spent">${spent} pts</span>
-      </div>
-      <div class="talent-grid" id="tgrid-${branchName}"></div>
-    `;
-    container.appendChild(branchDiv);
-    const grid=branchDiv.querySelector(`#tgrid-${branchName}`);
-    branch.talents.forEach(talent=>{
-      const rank=talentState.learned[talent.id]||0;
-      const locked=spent<talent.gate;
-      const maxed=rank>=talent.maxRank;
-      const canLearn=!locked&&!maxed&&talentState.points>0;
-      const node=document.createElement('div');
-      node.className='talent-node';
-      if(rank>0)node.classList.add('learned');
-      if(locked)node.classList.add('locked');
-      if(maxed)node.classList.add('maxed');
-      if(canLearn)node.classList.add('available');
-      const effectText=rank>0?talent.effect(rank):talent.effect(1);
-      const gateText=locked?`<div class="tn-gate">Unlocks at ${talent.gate} pts</div>`:'';
-      node.innerHTML=`
-        <span class="tn-icon" style="color:${branch.color}">${talent.icon}</span>
-        <div class="tn-name">${talent.name}</div>
-        <div class="tn-desc">${talent.desc}</div>
-        <div class="tn-effect">${effectText}</div>
-        <div class="tn-rank">${rank}/${talent.maxRank}</div>
-        ${gateText}
-      `;
-      if(canLearn){
-        node.addEventListener('click',()=>learnTalent(branchName,talent.id));
-      }
-      grid.appendChild(node);
-    });
-  });
+.gear-action-move:hover{
+  background:rgba(96,165,250,0.15);border-color:#60a5fa;
+  box-shadow:0 0 10px rgba(96,165,250,0.3);
 }
-
-function openTalents(){
-  renderTalentPanel();
-  document.getElementById('talentPanel').style.display='flex';
+.gear-action-salvage{
+  color:#a78bfa;background:transparent;
+  border:1px solid rgba(167,139,250,0.45);
 }
-function closeTalents(){
-  document.getElementById('talentPanel').style.display='none';
-}
-
-
-// ═══════ DUNGEON PANEL UI ═══════════════════════════════════════
-function openDungeons(){
-  const list=document.getElementById('dungeonList');
-  if(!list)return;
-  list.innerHTML='';
-  DUNGEONS.forEach(d=>{
-    const card=document.createElement('div');
-    card.className='dungeon-card';
-    const locked=player.level<d.minLevel;
-    if(locked)card.classList.add('locked');
-    card.style.borderLeft=`3px solid ${d.color}`;
-    const tierNames={1:'Tier I',2:'Tier II',3:'Tier III'};
-    const rarityLabel={common:'COMMON',uncommon:'UNCOMMON',rare:'RARE',epic:'EPIC',legendary:'LEGENDARY',mythic:'MYTHIC'}[d.reward.minRarity];
-    card.innerHTML=`
-      <div class="dg-header">
-        <div class="dg-name" style="color:${d.color}">⚑ ${d.name}</div>
-        <div class="dg-tier" style="color:${d.color};border-color:${d.color}66">${tierNames[d.tier]||'T?'}</div>
-      </div>
-      <div class="dg-desc">${d.desc}</div>
-      <div class="dg-meta-row">
-        <span class="dg-meta">⚔ Level ${d.minLevel}+</span>
-        <span class="dg-meta">⊞ ${d.waves.length} waves + boss</span>
-        <span class="dg-meta" style="color:${d.color}">✦ ${rarityLabel}+ loot</span>
-      </div>
-      <div class="dg-rewards-row">
-        <span class="dg-reward">+${d.reward.bonusGold} gold</span>
-        <span class="dg-reward">+${d.reward.bonusXP} XP</span>
-      </div>
-      <button class="dg-enter-btn" ${locked?'disabled':''}>
-        ${locked?`LOCKED · Requires Level ${d.minLevel}`:'⚡ ENTER'}
-      </button>
-    `;
-    if(!locked){
-      const btn=card.querySelector('.dg-enter-btn');
-      if(btn)btn.addEventListener('click',()=>enterDungeon(d.id));
-    }
-    list.appendChild(card);
-  });
-  document.getElementById('dungeonPanel').style.display='flex';
-}
-function closeDungeons(){
-  const p=document.getElementById('dungeonPanel');
-  if(p)p.style.display='none';
-}
-
-
-// ═══════ INVENTORY PANEL UI ══════════════════════════════════════
-// Renders a 6×4 grid of bag slots. Tapping an item expands an inline tooltip
-// showing stats + diff vs currently equipped + EQUIP/DISCARD buttons.
-let _bagSelectedIndex=null; // index of currently-expanded item, or null
-
-function openInventory(){
-  _bagSelectedIndex=null;
-  const panel=document.getElementById('inventoryPanel');
-  if(!panel)return;
-  panel.style.display='flex';
-  renderInventory();
-}
-function closeInventory(){
-  const panel=document.getElementById('inventoryPanel');
-  if(panel)panel.style.display='none';
-  _bagSelectedIndex=null;
-}
-
-function renderInventory(){
-  const grid=document.getElementById('bagGrid');
-  const tooltip=document.getElementById('bagTooltip');
-  const countEl=document.getElementById('bagCountText');
-  if(!grid)return;
-
-  if(countEl)countEl.textContent=`${inventory.length} / ${INVENTORY_MAX}`;
-
-  // Classification-to-indicator mapping. Each slot gets a small visual based on
-  // whether it's an upgrade (▲ green), sidegrade (◆ gray), downgrade (▼ red),
-  // or slot is empty (✦ yellow — "wear this, nothing's there").
-  const UPGRADE_MARKS = {
-    'upgrade':    {symbol:'▲', color:'#22c55e', title:'Upgrade'},
-    'sidegrade':  {symbol:'◆', color:'#9ca3af', title:'Sidegrade'},
-    'downgrade':  {symbol:'▼', color:'#ef4444', title:'Downgrade'},
-    'empty-slot': {symbol:'✦', color:'#f59e0b', title:'Slot is empty — equip freely'},
-  };
-
-  // Render the grid
-  grid.innerHTML='';
-  for(let i=0;i<INVENTORY_MAX;i++){
-    const slot=document.createElement('div');
-    slot.className='bag-slot';
-    const item=inventory[i];
-    if(item){
-      const col=RARITY_COLORS[item.rarity]||'#9ca3af';
-      const icon=SLOT_ICONS[item.slot]||'✦';
-      const classification=classifyBagItem(item);
-      const mark=UPGRADE_MARKS[classification];
-      slot.classList.add('filled');
-      slot.style.borderColor=col;
-      slot.innerHTML=`
-        <span class="bag-slot-mark" style="color:${mark.color};text-shadow:0 0 8px ${mark.color}88" title="${mark.title}">${mark.symbol}</span>
-        <span class="bag-slot-icon" style="color:${col};text-shadow:0 0 8px ${col}66">${icon}</span>
-        <span class="bag-slot-rarity" style="background:${col}22;color:${col}">${RARITY_LABELS[item.rarity]||'?'}</span>
-      `;
-      if(i===_bagSelectedIndex)slot.classList.add('selected');
-      slot.addEventListener('click',()=>{
-        _bagSelectedIndex=(_bagSelectedIndex===i)?null:i;
-        renderInventory();
-      });
-    } else {
-      slot.classList.add('empty');
-    }
-    grid.appendChild(slot);
-  }
-
-  // Render the tooltip for the selected item — or hide it
-  if(tooltip){
-    if(_bagSelectedIndex===null||!inventory[_bagSelectedIndex]){
-      tooltip.style.display='none';
-    } else {
-      const item=inventory[_bagSelectedIndex];
-      const col=RARITY_COLORS[item.rarity]||'#9ca3af';
-      const current=equipped[item.slot];
-      const statLines=computeStatLines(item);        // raw stats on THIS item
-      const diffLines=current?computeStatDiff(item):null; // comparison vs equipped
-
-      // Classification banner
-      const classification=classifyBagItem(item);
-      const mark=UPGRADE_MARKS[classification];
-      const classBanner = current
-        ? `<div class="bag-tt-verdict" style="background:${mark.color}22;color:${mark.color};border-color:${mark.color}66">
-             ${mark.symbol} ${mark.title.toUpperCase()}
-           </div>`
-        : `<div class="bag-tt-verdict" style="background:${mark.color}22;color:${mark.color};border-color:${mark.color}66">
-             ${mark.symbol} ${mark.title.toUpperCase()}
-           </div>`;
-
-      // Raw stats section (always shown — answers "what does this item have?")
-      const statsHtml = statLines.length
-        ? statLines.map(l=>`<div class="bag-stat-line" style="color:${l.color}">${l.text}</div>`).join('')
-        : '<div class="bag-stat-line" style="color:#6b4d8a">— no stats —</div>';
-
-      // Comparison section (only shown if slot has equipped item)
-      const diffHtml = diffLines
-        ? diffLines.map(l=>`<div class="bag-stat-line" style="color:${l.color}">${l.text}</div>`).join('')
-        : '';
-
-      // Salvage yield preview
-      const salvage=salvageYieldFor(item);
-      const salvagePreview=Object.entries(salvage)
-        .map(([k,v])=>`<span style="color:${MATERIAL_COLORS[k]||'#fff'}">${v} ${MATERIAL_LABELS[k]||k}</span>`)
-        .join(' · ');
-
-      tooltip.innerHTML=`
-        <div class="bag-tooltip-header" style="border-color:${col}88">
-          <span class="bag-tt-name" style="color:${col};text-shadow:0 0 10px ${col}66">${item.name}</span>
-          <span class="bag-tt-rarity" style="background:${col}22;color:${col}">${RARITY_LABELS[item.rarity]||'?'}</span>
-        </div>
-        <div class="bag-tt-slot">${SLOT_ICONS[item.slot]||'✦'} ${item.slot.toUpperCase()}</div>
-        ${item.setName?`<div class="bag-tt-set">◈ ${item.setName} set</div>`:''}
-        ${classBanner}
-        <div class="bag-tt-section">
-          <div class="bag-tt-section-label">Item Stats</div>
-          ${statsHtml}
-        </div>
-        ${current?`<div class="bag-tt-section">
-          <div class="bag-tt-section-label">vs. Equipped (${current.name})</div>
-          ${diffHtml||'<div class="bag-stat-line" style="color:#6b4d8a">— identical —</div>'}
-        </div>`:''}
-        <div class="bag-tt-section bag-tt-salvage-preview">
-          <div class="bag-tt-section-label">Salvage Yield</div>
-          <div class="bag-stat-line">${salvagePreview}</div>
-        </div>
-        <div class="bag-tt-actions">
-          <button class="bag-btn bag-btn-equip">⚔ EQUIP</button>
-          <button class="bag-btn bag-btn-salvage">⚒ SALVAGE</button>
-          <button class="bag-btn bag-btn-discard">✗ DISCARD</button>
-        </div>
-      `;
-      tooltip.style.display='flex';
-      tooltip.style.borderColor=col+'55';
-      const idx=_bagSelectedIndex;
-      tooltip.querySelector('.bag-btn-equip').addEventListener('click',()=>equipFromBag(idx));
-      tooltip.querySelector('.bag-btn-salvage').addEventListener('click',()=>salvageFromBag(idx));
-      tooltip.querySelector('.bag-btn-discard').addEventListener('click',()=>discardFromBag(idx));
-    }
-  }
-}
-
-
-// ═══════ SHOP SYSTEM ═══════════════════════════════════════════════
-// Merchant with rotating gear inventory, consumables, mystery box, buyback slot.
-// Gear prices scale with rarity + player level so mid-game can afford mid-tier
-// items without trivializing endgame costs.
-// Inventory refreshes automatically every SHOP_REFRESH_MS, or instantly for gold.
-
-const SHOP_REFRESH_MS = 5 * 60 * 1000;   // auto-refresh every 5 minutes
-const SHOP_INSTANT_REFRESH_COST = 150;   // gold to refresh inventory on demand
-const SHOP_GEAR_COUNT = 6;               // how many gear slots the shop shows
-
-// Consumables catalog. Prices are flat (don't scale with level).
-const SHOP_CONSUMABLES = [
-  {
-    id:'potion_heal',name:'Veil-Touched Elixir',icon:'✦',
-    desc:'Instantly restores 50% of max HP.',
-    price:80,
-    onBuy:()=>{const heal=Math.ceil(player.maxHp*0.5);player.hp=Math.min(player.maxHp,player.hp+heal);addFeed(`✦ +${heal} HP`,'#22c55e');},
-  },
-  {
-    id:'potion_xp',name:'Scroll of Insight',icon:'◈',
-    desc:'Immediately grants XP equal to 40% of the amount needed for next level.',
-    price:220,
-    onBuy:()=>{const gain=Math.ceil(player.xpToNext*0.4);addXP(gain);addFeed(`◈ +${gain} XP`,'#60a5fa');},
-  },
-  {
-    id:'respec',name:'Veilwright Reforge',icon:'✧',
-    desc:'Resets all talent points, refunding them to spend again.',
-    price:500,
-    onBuy:()=>{
-      if(typeof talentState!=='undefined'){
-        const refunded=talentState.pointsEarned;
-        talentState.points=refunded;
-        talentState.learned={};
-        if(typeof recalcStats==='function')recalcStats();
-        addFeed(`✧ Talents refunded: ${refunded} points`,'#c084fc');
-      }
-    },
-  },
-];
-
-// Mystery box — random gear at escalating cost (one per day... or per shop refresh for now)
-let shopMysteryBoxUses = 0; // how many times bought this rotation
-function mysteryBoxCost(){ return 250 + shopMysteryBoxUses * 100; }
-
-// Shop state
-const shopState = {
-  gear: [],                 // array of gear items currently for sale
-  lastRefresh: 0,           // timestamp of last refresh
-  buyback: null,            // last discarded rare+ item, available to buy back
-  buybackPrice: 0,
-};
-
-// Compute a gear item's shop price from its rarity + level
-function priceForItem(item){
-  const rarityMult = {common:1,uncommon:2.5,rare:6,epic:14,legendary:35,mythic:80}[item.rarity] || 1;
-  const levelMult = 1 + Math.max(1, player.level) * 0.12;
-  return Math.ceil(45 * rarityMult * levelMult);
-}
-
-// Generate a fresh shop rotation of gear
-function refreshShop(silent = false){
-  shopState.gear = [];
-  // Bias the rotation toward items near player level + their rarities
-  for (let i = 0; i < SHOP_GEAR_COUNT; i++){
-    const item = rollLoot(player.level);
-    item.shopPrice = priceForItem(item);
-    shopState.gear.push(item);
-  }
-  shopState.lastRefresh = Date.now();
-  shopMysteryBoxUses = 0;
-  if (!silent) addFeed('✦ Shop inventory refreshed','#f59e0b');
-}
-
-// Call periodically (from the main game loop) to auto-refresh the shop
-function checkShopAutoRefresh(){
-  if (!shopState.lastRefresh) { refreshShop(true); return; }
-  if (Date.now() - shopState.lastRefresh >= SHOP_REFRESH_MS){
-    refreshShop(true);
-    addFeed('✦ Merchant has new wares','#f59e0b');
-    if (typeof updateShopBadge === 'function') updateShopBadge();
-  }
-}
-
-// Called from discardFromBag when a rare+ item is thrown away — offer buyback
-function queueBuyback(item){
-  const rarityTier = {common:0,uncommon:1,rare:2,epic:3,legendary:4,mythic:5}[item.rarity] || 0;
-  if (rarityTier < 2) return; // only rare+ goes to buyback
-  shopState.buyback = {...item};
-  // Buyback costs 2x normal shop price — emergency rescue, not farming
-  shopState.buybackPrice = priceForItem(item) * 2;
-}
-
-// Attempt a gear purchase. Returns true on success.
-function buyGearFromShop(index){
-  const item = shopState.gear[index];
-  if (!item) return false;
-  if (player.gold < item.shopPrice){
-    addFeed('⚠ Not enough gold','#ef4444');
-    return false;
-  }
-  // If bag is full AND slot is filled, can't take it
-  const slotEmpty = !equipped[item.slot];
-  const bagHasRoom = inventory.length < INVENTORY_MAX;
-  if (!slotEmpty && !bagHasRoom){
-    addFeed('⚠ Bag full — free a slot first','#ef4444');
-    return false;
-  }
-  player.gold -= item.shopPrice;
-  const bought = {...item};
-  delete bought.shopPrice;
-  acquireLoot(bought);
-  // Remove from shop rotation so it can't be bought twice
-  shopState.gear.splice(index, 1);
-  if (typeof writeSave === 'function') writeSave();
-  if (typeof renderShop === 'function') renderShop();
-  return true;
-}
-
-function buyConsumable(id){
-  const c = SHOP_CONSUMABLES.find(x => x.id === id);
-  if (!c) return false;
-  if (player.gold < c.price){
-    addFeed('⚠ Not enough gold','#ef4444');
-    return false;
-  }
-  player.gold -= c.price;
-  c.onBuy();
-  if (typeof writeSave === 'function') writeSave();
-  if (typeof renderShop === 'function') renderShop();
-  return true;
-}
-
-function buyMysteryBox(){
-  const cost = mysteryBoxCost();
-  if (player.gold < cost){
-    addFeed('⚠ Not enough gold','#ef4444');
-    return false;
-  }
-  // Check room before spending
-  const sample = rollLoot(player.level);
-  const slotEmpty = !equipped[sample.slot];
-  const bagHasRoom = inventory.length < INVENTORY_MAX;
-  if (!slotEmpty && !bagHasRoom){
-    addFeed('⚠ Bag full — free a slot first','#ef4444');
-    return false;
-  }
-  player.gold -= cost;
-  shopMysteryBoxUses++;
-  // 70% chance base tier, 25% chance one tier higher, 5% chance jackpot (legendary+)
-  const roll = Math.random();
-  let item;
-  if (roll < 0.05){
-    // Jackpot — roll legendary+
-    const legendaries = (typeof ITEM_POOL !== 'undefined' ? ITEM_POOL.filter(i => i.rarity === 'legendary' || i.rarity === 'mythic') : []);
-    item = legendaries.length ? {...legendaries[Math.floor(Math.random()*legendaries.length)]} : rollLoot(player.level+10);
-    addFeed('✦✦ JACKPOT! ✦✦','#f59e0b');
-  } else if (roll < 0.30){
-    item = rollLoot(player.level + 5);
-  } else {
-    item = rollLoot(player.level);
-  }
-  acquireLoot(item);
-  if (typeof writeSave === 'function') writeSave();
-  if (typeof renderShop === 'function') renderShop();
-  return true;
-}
-
-function buyBuyback(){
-  if (!shopState.buyback) return false;
-  if (player.gold < shopState.buybackPrice){
-    addFeed('⚠ Not enough gold','#ef4444');
-    return false;
-  }
-  const slotEmpty = !equipped[shopState.buyback.slot];
-  const bagHasRoom = inventory.length < INVENTORY_MAX;
-  if (!slotEmpty && !bagHasRoom){
-    addFeed('⚠ Bag full — free a slot first','#ef4444');
-    return false;
-  }
-  player.gold -= shopState.buybackPrice;
-  acquireLoot({...shopState.buyback});
-  shopState.buyback = null;
-  shopState.buybackPrice = 0;
-  if (typeof writeSave === 'function') writeSave();
-  if (typeof renderShop === 'function') renderShop();
-  return true;
-}
-
-function instantRefreshShop(){
-  if (player.gold < SHOP_INSTANT_REFRESH_COST){
-    addFeed('⚠ Not enough gold','#ef4444');
-    return;
-  }
-  player.gold -= SHOP_INSTANT_REFRESH_COST;
-  refreshShop(false);
-  if (typeof writeSave === 'function') writeSave();
-  if (typeof renderShop === 'function') renderShop();
-}
-
-function updateShopBadge(){
-  const btn = document.querySelector('[data-menu="shop"]');
-  if (!btn) return;
-  const existing = btn.querySelector('.menu-btn-badge');
-  // Show badge only if a new rotation is ready and shop hasn't been opened
-  // Simple: show badge if shop is never-opened since last refresh
-  if (shopState.gear.length > 0 && !shopState._opened){
-    if (existing) existing.textContent = '!';
-    else {
-      const b = document.createElement('span');
-      b.className = 'menu-btn-badge';
-      b.textContent = '!';
-      btn.appendChild(b);
-    }
-  } else if (existing){
-    existing.remove();
-  }
-}
-
-// ═══════ SHOP UI ═══════════════════════════════════════════════
-
-function openShop(){
-  checkShopAutoRefresh();
-  if (!shopState.gear.length) refreshShop(true);
-  shopState._opened = true;
-  updateShopBadge();
-  const panel = document.getElementById('shopPanel');
-  if (!panel) return;
-  panel.style.display = 'flex';
-  renderShop();
-}
-
-function closeShop(){
-  const panel = document.getElementById('shopPanel');
-  if (panel) panel.style.display = 'none';
-}
-
-function renderShop(){
-  const goldEl = document.getElementById('shopGold');
-  if (goldEl) goldEl.textContent = `${player.gold} G`;
-
-  // Time-until-next-refresh
-  const timerEl = document.getElementById('shopRefreshTimer');
-  if (timerEl){
-    if (!shopState.lastRefresh) timerEl.textContent = '';
-    else {
-      const msLeft = Math.max(0, SHOP_REFRESH_MS - (Date.now() - shopState.lastRefresh));
-      const mins = Math.floor(msLeft/60000);
-      const secs = Math.floor((msLeft%60000)/1000);
-      timerEl.textContent = `Next rotation in ${mins}:${secs.toString().padStart(2,'0')}`;
-    }
-  }
-
-  // Gear grid
-  const gearGrid = document.getElementById('shopGearGrid');
-  if (gearGrid){
-    gearGrid.innerHTML = '';
-    if (!shopState.gear.length){
-      gearGrid.innerHTML = '<div class="shop-empty">Merchant is restocking...</div>';
-    } else {
-      shopState.gear.forEach((item, idx) => {
-        const col = RARITY_COLORS[item.rarity] || '#9ca3af';
-        const label = RARITY_LABELS[item.rarity] || '?';
-        const icon = SLOT_ICONS[item.slot] || '✦';
-        // Brief stat summary
-        const statsSummary = Object.entries(item.stats || {})
-          .map(([k,v]) => `+${v} ${k}`).join(' · ') || '—';
-        const canAfford = player.gold >= item.shopPrice;
-        const card = document.createElement('div');
-        card.className = 'shop-gear-card' + (canAfford ? '' : ' disabled');
-        card.style.borderColor = col + 'aa';
-        card.innerHTML = `
-          <div class="shop-gear-top">
-            <span class="shop-gear-icon" style="color:${col};text-shadow:0 0 8px ${col}66">${icon}</span>
-            <span class="shop-gear-rarity" style="background:${col}22;color:${col}">${label}</span>
-          </div>
-          <div class="shop-gear-name" style="color:${col}">${item.name}</div>
-          <div class="shop-gear-slot">${item.slot}</div>
-          <div class="shop-gear-stats">${statsSummary}</div>
-          <button class="shop-buy-btn" ${canAfford?'':'disabled'}>${item.shopPrice} G</button>
-        `;
-        const btn = card.querySelector('.shop-buy-btn');
-        if (canAfford) btn.addEventListener('click', () => buyGearFromShop(idx));
-        gearGrid.appendChild(card);
-      });
-    }
-  }
-
-  // Consumables
-  const consumablesEl = document.getElementById('shopConsumables');
-  if (consumablesEl){
-    consumablesEl.innerHTML = '';
-    SHOP_CONSUMABLES.forEach(c => {
-      const canAfford = player.gold >= c.price;
-      const row = document.createElement('div');
-      row.className = 'shop-consumable' + (canAfford ? '' : ' disabled');
-      row.innerHTML = `
-        <div class="shop-consumable-icon">${c.icon}</div>
-        <div class="shop-consumable-info">
-          <div class="shop-consumable-name">${c.name}</div>
-          <div class="shop-consumable-desc">${c.desc}</div>
-        </div>
-        <button class="shop-buy-btn" ${canAfford?'':'disabled'}>${c.price} G</button>
-      `;
-      const btn = row.querySelector('.shop-buy-btn');
-      if (canAfford) btn.addEventListener('click', () => buyConsumable(c.id));
-      consumablesEl.appendChild(row);
-    });
-
-    // Mystery box — always visible, escalating cost
-    const mbCost = mysteryBoxCost();
-    const mbAfford = player.gold >= mbCost;
-    const mb = document.createElement('div');
-    mb.className = 'shop-consumable shop-mystery' + (mbAfford ? '' : ' disabled');
-    mb.innerHTML = `
-      <div class="shop-consumable-icon">?</div>
-      <div class="shop-consumable-info">
-        <div class="shop-consumable-name">Mystery Box</div>
-        <div class="shop-consumable-desc">Random gear. 5% chance of legendary+. Cost rises each buy this rotation.</div>
-      </div>
-      <button class="shop-buy-btn" ${mbAfford?'':'disabled'}>${mbCost} G</button>
-    `;
-    const mbBtn = mb.querySelector('.shop-buy-btn');
-    if (mbAfford) mbBtn.addEventListener('click', () => buyMysteryBox());
-    consumablesEl.appendChild(mb);
-  }
-
-  // Buyback slot
-  const bbEl = document.getElementById('shopBuyback');
-  if (bbEl){
-    if (!shopState.buyback){
-      bbEl.innerHTML = '<div class="shop-empty">No recently discarded items</div>';
-    } else {
-      const item = shopState.buyback;
-      const col = RARITY_COLORS[item.rarity] || '#9ca3af';
-      const canAfford = player.gold >= shopState.buybackPrice;
-      bbEl.innerHTML = `
-        <div class="shop-consumable shop-buyback-item${canAfford?'':' disabled'}" style="border-color:${col}88">
-          <div class="shop-consumable-icon" style="color:${col}">${SLOT_ICONS[item.slot]||'✦'}</div>
-          <div class="shop-consumable-info">
-            <div class="shop-consumable-name" style="color:${col}">${item.name}</div>
-            <div class="shop-consumable-desc">Recently discarded — recover at 2× price.</div>
-          </div>
-          <button class="shop-buy-btn" ${canAfford?'':'disabled'}>${shopState.buybackPrice} G</button>
-        </div>
-      `;
-      const btn = bbEl.querySelector('.shop-buy-btn');
-      if (canAfford) btn.addEventListener('click', () => buyBuyback());
-    }
-  }
+.gear-action-salvage:hover{
+  background:rgba(167,139,250,0.15);border-color:#a78bfa;
+  box-shadow:0 0 10px rgba(167,139,250,0.3);
 }
