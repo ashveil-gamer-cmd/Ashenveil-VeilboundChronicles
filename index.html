@@ -87,6 +87,7 @@
 <div id="menuBar">
   <div class="menu-btn" onclick="openGear()">⚔ GEAR</div>
   <div class="menu-btn" data-menu="talents" onclick="openTalents()">✦ TALENTS</div>
+  <div class="menu-btn" onclick="openDungeons()">⚑ DUNGEON</div>
   <div class="menu-btn" onclick="openProf()">♆ PROF</div>
 </div>
 
@@ -97,6 +98,21 @@
     <button class="panel-close" onclick="closeTalents()">← BACK</button>
   </div>
   <div id="talentTree"></div>
+</div>
+
+<!-- DUNGEON PANEL -->
+<div id="dungeonPanel">
+  <div class="panel-header">
+    <h2>⚑ DUNGEONS</h2>
+    <button class="panel-close" onclick="closeDungeons()">← BACK</button>
+  </div>
+  <div id="dungeonList"></div>
+</div>
+
+<!-- DUNGEON STATUS OVERLAY (shown while in a dungeon run) -->
+<div id="dungeonStatus" style="display:none">
+  <div class="dungeon-status-title">Dungeon</div>
+  <div class="dungeon-status-sub">Wave 1/3</div>
 </div>
 
 <div id="setProgress"></div>
