@@ -262,19 +262,215 @@ let envProps=[];
 // ═══════ ENVIRONMENT GENERATION ══════════════════════════
 // Note: envProps is declared above in GAME STATE section
 function rngF(s){return((s*16807)%2147483647)/2147483647;}
+// Collision radius table — how big an invisible circle each prop has.
+// Expressed as fraction of the prop's visual size (p.sz).
+// Props not in this table have NO collision (purely decorative).
+// Trunk-base defaults: big obstacles ~35-40%, small chunky ones ~30%.
+const COLLISION_RADIUS={
+  realTree:0.28,     // trunk only, canopy is air
+  deadTree:0.20,     // skinny gnarled tree
+  rockCluster:0.40,  // chunky cluster, tricky to pass through
+  boulder:0.50,      // big solid stone
+  stoneRuin:0.45,    // wall fragment, wide
+  fallenLog:0.55,    // long wide obstacle
+  cryptPillar:0.30,  // solid column
+  obsidianPillar:0.30,
+  sarcophagus:0.40,  // medium chunky
+  cryptTomb:0.35,
+  ashObelisk:0.35,
+  // Everything else (grass, mushroom, water, bones, flecks, arches, torches) = no collision
+};
+
 function generateEnvironment(){
   envProps=[];
-  const z=getActiveTheme();let s=7919;
-  z.props.forEach((type,ti)=>{
-    const cnt=z.counts[ti]||30;
-    for(let i=0;i<cnt;i++){
-      s=(s*1013+i*31+ti*97)%99991+1;
-      envProps.push({x:(rngF(s)*0.88+0.06)*WORLD_W,y:(rngF(s*3+7)*0.88+0.06)*WORLD_H,
-        type,sz:16+rngF(s*5)*42,rot:rngF(s*7)*Math.PI*2,seed:s});
+  const z=getActiveTheme();
+  // Seed so it's deterministic per zone/dungeon
+  const seedBase=(z.id||'').split('').reduce((a,c)=>a*31+c.charCodeAt(0),7919);
+  const rnd=srand(seedBase+1);
+  const propTypes=z.props||[];
+  const counts=z.counts||[];
+  // Combine into a list of (type, targetCount) pairs
+  const typeBuckets=propTypes.map((t,i)=>({type:t,remaining:counts[i]||30}));
+
+  // ─── PHASE 1: CLUSTERED HOTSPOTS ───
+  // Generate 18-25 hotspot centers. Each spawns a dense cluster of 6-14 props.
+  // Clusters prefer "big" props (trees, rocks, ruins) as anchors plus scattered
+  // smaller props (grass, mushrooms) around them.
+  const hotspotCount=18+Math.floor(rnd()*7);
+  for(let h=0;h<hotspotCount;h++){
+    const hx=(0.08+rnd()*0.84)*WORLD_W;
+    const hy=(0.08+rnd()*0.84)*WORLD_H;
+    const clusterSize=6+Math.floor(rnd()*9); // 6-14 props per cluster
+    const clusterRadius=90+rnd()*130; // tight to medium spread
+    // Pick a "theme" prop type for this cluster — biases which props appear
+    const anchorType=typeBuckets[Math.floor(rnd()*typeBuckets.length)]?.type;
+    for(let c=0;c<clusterSize;c++){
+      // Pick a type for this prop — 40% anchor type, 60% random from zone pool
+      let chosenType;
+      if(anchorType && rnd()<0.4){
+        chosenType=anchorType;
+      } else {
+        // Prefer buckets with remaining count
+        const avail=typeBuckets.filter(b=>b.remaining>0);
+        if(!avail.length)break;
+        const pick=avail[Math.floor(rnd()*avail.length)];
+        chosenType=pick.type;
+      }
+      // Find the bucket and decrement
+      const bucket=typeBuckets.find(b=>b.type===chosenType);
+      if(!bucket||bucket.remaining<=0)continue;
+      bucket.remaining--;
+      // Position with falloff — more dense at center, looser at edge
+      const ca=rnd()*Math.PI*2;
+      const cd=rnd()*rnd()*clusterRadius; // squared gives center bias
+      const px=Math.max(40,Math.min(WORLD_W-40,hx+Math.cos(ca)*cd));
+      const py=Math.max(40,Math.min(WORLD_H-40,hy+Math.sin(ca)*cd));
+      const sz=16+rnd()*42;
+      envProps.push({
+        x:px,y:py,type:chosenType,
+        sz,rot:rnd()*Math.PI*2,seed:Math.floor(rnd()*99991)+1,
+        collRadius:(COLLISION_RADIUS[chosenType]||0)*sz,
+      });
+    }
+  }
+
+  // ─── PHASE 2: PATH-EDGE SCATTER ───
+  // For each path point, scatter small decorative props (grass, mushrooms, flecks)
+  // along both sides — makes paths look "worn" and "walked."
+  if(terrainFeatures&&terrainFeatures.paths){
+    const edgeProps=['grassTuft','mushroom','boneHeap'].filter(t=>propTypes.includes(t));
+    terrainFeatures.paths.forEach(path=>{
+      path.points.forEach((pt,i)=>{
+        if(i===0||i===path.points.length-1)return;
+        // 6-10 props scattered along each side of this path segment
+        const edgeCount=6+Math.floor(rnd()*5);
+        for(let e=0;e<edgeCount;e++){
+          if(!edgeProps.length)break;
+          const chosenType=edgeProps[Math.floor(rnd()*edgeProps.length)];
+          const bucket=typeBuckets.find(b=>b.type===chosenType);
+          if(!bucket||bucket.remaining<=0)continue;
+          bucket.remaining--;
+          // Perpendicular offset from path — random side, 50-140px out
+          const side=rnd()<0.5?1:-1;
+          const offset=(50+rnd()*90)*side;
+          // Perpendicular direction: rotate by 90deg
+          const prev=path.points[i-1];
+          const dx=pt.x-prev.x, dy=pt.y-prev.y;
+          const len=Math.sqrt(dx*dx+dy*dy)||1;
+          const perpX=-dy/len, perpY=dx/len;
+          const px=Math.max(40,Math.min(WORLD_W-40,pt.x+perpX*offset+(rnd()-0.5)*30));
+          const py=Math.max(40,Math.min(WORLD_H-40,pt.y+perpY*offset+(rnd()-0.5)*30));
+          const sz=14+rnd()*26;
+          envProps.push({
+            x:px,y:py,type:chosenType,
+            sz,rot:rnd()*Math.PI*2,seed:Math.floor(rnd()*99991)+1,
+            collRadius:(COLLISION_RADIUS[chosenType]||0)*sz,
+          });
+        }
+      });
+    });
+  }
+
+  // ─── PHASE 3: DRAIN REMAINING BUDGET as random scatter ───
+  // Any leftover count goes into random uniform scatter to fill gaps
+  typeBuckets.forEach(bucket=>{
+    while(bucket.remaining>0){
+      bucket.remaining--;
+      const px=(0.06+rnd()*0.88)*WORLD_W;
+      const py=(0.06+rnd()*0.88)*WORLD_H;
+      const sz=16+rnd()*42;
+      envProps.push({
+        x:px,y:py,type:bucket.type,
+        sz,rot:rnd()*Math.PI*2,seed:Math.floor(rnd()*99991)+1,
+        collRadius:(COLLISION_RADIUS[bucket.type]||0)*sz,
+      });
     }
   });
+
+  // Build spatial grid for fast collision lookup. Only props with collRadius>0
+  // are indexed — the rest are purely decorative.
+  buildPropSpatialGrid();
+
   // Also regenerate terrain features (paths, patches) for the current theme
   if(typeof generateTerrainFeatures==='function')generateTerrainFeatures();
+}
+
+// ═══════ PROP COLLISION SYSTEM ═══════════════════════════
+// Spatial grid for fast "which props are near this point" queries.
+// Bucket size chosen so 2-4 big props fit per cell typically.
+const PROP_GRID_SIZE=160; // px per cell
+let propGrid={}; // key "gx,gy" → array of props with collision
+
+function buildPropSpatialGrid(){
+  propGrid={};
+  envProps.forEach(p=>{
+    if(!p.collRadius||p.collRadius<=0)return;
+    const gx=Math.floor(p.x/PROP_GRID_SIZE);
+    const gy=Math.floor(p.y/PROP_GRID_SIZE);
+    const key=gx+','+gy;
+    if(!propGrid[key])propGrid[key]=[];
+    propGrid[key].push(p);
+  });
+}
+
+// Returns the first prop at (x,y) that collides with a circle of radius r,
+// or null if the position is clear. Also returns null for the spatial grid
+// not being built yet (safety fallback).
+function getPropCollisionAt(x,y,r){
+  if(!propGrid)return null;
+  const gx=Math.floor(x/PROP_GRID_SIZE);
+  const gy=Math.floor(y/PROP_GRID_SIZE);
+  // Check the 3x3 neighborhood of grid cells
+  for(let dx=-1;dx<=1;dx++){
+    for(let dy=-1;dy<=1;dy++){
+      const bucket=propGrid[(gx+dx)+','+(gy+dy)];
+      if(!bucket)continue;
+      for(let i=0;i<bucket.length;i++){
+        const p=bucket[i];
+        const ddx=x-p.x, ddy=y-p.y;
+        const minDist=r+p.collRadius;
+        if(ddx*ddx+ddy*ddy<minDist*minDist)return p;
+      }
+    }
+  }
+  return null;
+}
+
+// Resolves a proposed player movement against prop collisions.
+// Returns the final {x,y} after collision resolution.
+// Strategy: try full move → if blocked, try x-only → if blocked, try y-only → if blocked, stay.
+// This creates a "slide along walls" feel.
+function resolvePlayerMovement(fromX,fromY,toX,toY,radius){
+  // Full move
+  if(!getPropCollisionAt(toX,toY,radius)){
+    return {x:toX,y:toY};
+  }
+  // Try x only
+  if(!getPropCollisionAt(toX,fromY,radius)){
+    return {x:toX,y:fromY};
+  }
+  // Try y only
+  if(!getPropCollisionAt(fromX,toY,radius)){
+    return {x:fromX,y:toY};
+  }
+  // Blocked both ways — stay put
+  return {x:fromX,y:fromY};
+}
+
+// Finds a clear point within a max radius of a target point. Used for
+// enemy spawning and teleport-in placements so we don't spawn inside props.
+function findClearPosition(cx,cy,r,maxAttempts=16){
+  if(!getPropCollisionAt(cx,cy,r))return {x:cx,y:cy};
+  for(let i=0;i<maxAttempts;i++){
+    const a=Math.random()*Math.PI*2;
+    const d=40+Math.random()*100;
+    const nx=cx+Math.cos(a)*d;
+    const ny=cy+Math.sin(a)*d;
+    if(nx<40||nx>WORLD_W-40||ny<40||ny>WORLD_H-40)continue;
+    if(!getPropCollisionAt(nx,ny,r))return {x:nx,y:ny};
+  }
+  // Fallback — just return the original even if blocked
+  return {x:cx,y:cy};
 }
 
 function drawEnvironment(now){
@@ -283,7 +479,7 @@ function drawEnvironment(now){
 }
 
 function drawProp(p,now){
-  const z=curZone,s=p.sz,seed=p.seed;
+  const z=getActiveTheme(),s=p.sz,seed=p.seed;
   ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.rot);
   switch(p.type){
     case 'ashStone':
@@ -428,6 +624,343 @@ function drawProp(p,now){
       ctx.lineTo(s*.5,0);ctx.stroke();
       ctx.globalAlpha=.2;ctx.strokeStyle='rgba(255,100,0,0.4)';ctx.lineWidth=.6;
       ctx.beginPath();ctx.moveTo(-s*.35,s*.06);ctx.lineTo(s*.35,-s*.06);ctx.stroke();ctx.globalAlpha=1;break;
+
+    // ═══ NEW NATURAL PROPS ═══
+    // These use real-world colors (brown bark, green leaves, gray stone, white bone)
+    // rather than zone-tinted variations. Canopy color can vary per zone via the
+    // `canopyTint` theme property for things like dead trees vs live trees.
+    case 'realTree':{
+      // Get the canopy color from active theme — lets zones have different foliage
+      const canopy=z.canopyTint||'#2d5a2d';      // default green
+      const canopyDark=z.canopyDark||'#1a3a1a';   // shadow side
+      const trunk=z.trunkColor||'#3a2814';
+      const trunkShadow='#1a0f06';
+      // Ground shadow below the tree (oval, offset down-right for sun angle)
+      ctx.fillStyle='rgba(0,0,0,0.45)';
+      ctx.beginPath();ctx.ellipse(s*.08,s*.52,s*.52,s*.18,0,0,Math.PI*2);ctx.fill();
+      // Sway amount for this tree (seed-based so each sways at different offset)
+      const sway=Math.sin(now/1400+seed*0.01)*3;
+      // Trunk — brown tapered rectangle
+      ctx.fillStyle=trunk;
+      ctx.beginPath();
+      ctx.moveTo(-s*.08,s*.5);
+      ctx.lineTo(-s*.04+sway*0.3,-s*.1);
+      ctx.lineTo(s*.04+sway*0.3,-s*.1);
+      ctx.lineTo(s*.08,s*.5);
+      ctx.closePath();ctx.fill();
+      // Trunk shadow on left
+      ctx.fillStyle=trunkShadow;
+      ctx.beginPath();
+      ctx.moveTo(-s*.08,s*.5);
+      ctx.lineTo(-s*.04+sway*0.3,-s*.1);
+      ctx.lineTo(-s*.01+sway*0.3,-s*.1);
+      ctx.lineTo(-s*.03,s*.5);
+      ctx.closePath();ctx.fill();
+      // Canopy — layered circles for volume
+      ctx.fillStyle=canopyDark;
+      ctx.beginPath();ctx.arc(sway,-s*.25,s*.48,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle=canopy;
+      ctx.beginPath();ctx.arc(-s*.15+sway,-s*.3,s*.32,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.arc(s*.18+sway,-s*.28,s*.35,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.arc(sway*0.5,-s*.5,s*.28,0,Math.PI*2);ctx.fill();
+      // Highlight on canopy (upper-left catches light)
+      ctx.fillStyle='rgba(255,255,255,0.08)';
+      ctx.beginPath();ctx.arc(-s*.18+sway,-s*.45,s*.14,0,Math.PI*2);ctx.fill();
+      break;
+    }
+    case 'deadTree':{
+      // A gnarled dead tree — brown-gray, bare branches, no canopy
+      const trunk='#2a1a0c';
+      const branch='#3a2818';
+      ctx.fillStyle='rgba(0,0,0,0.4)';
+      ctx.beginPath();ctx.ellipse(s*.06,s*.48,s*.32,s*.12,0,0,Math.PI*2);ctx.fill();
+      const sway=Math.sin(now/1600+seed*0.01)*2.5;
+      // Trunk
+      ctx.strokeStyle=trunk;ctx.lineWidth=s*.09;ctx.lineCap='round';
+      ctx.beginPath();
+      ctx.moveTo(0,s*.5);
+      ctx.quadraticCurveTo(sway*0.5,s*.1,sway-s*.06,-s*.2);
+      ctx.stroke();
+      // Branches
+      ctx.strokeStyle=branch;ctx.lineWidth=s*.035;
+      ctx.beginPath();ctx.moveTo(sway-s*.06,-s*.2);ctx.lineTo(sway-s*.3,-s*.5);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(sway-s*.06,-s*.2);ctx.lineTo(sway+s*.3,-s*.55);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(sway-s*.06,-s*.35);ctx.lineTo(sway-s*.45,-s*.65);ctx.stroke();
+      // Smaller twigs
+      ctx.strokeStyle=branch;ctx.lineWidth=s*.018;
+      ctx.beginPath();ctx.moveTo(sway-s*.3,-s*.5);ctx.lineTo(sway-s*.5,-s*.6);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(sway+s*.3,-s*.55);ctx.lineTo(sway+s*.45,-s*.75);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(sway-s*.06,-s*.2);ctx.lineTo(sway+s*.08,-s*.6);ctx.stroke();
+      break;
+    }
+    case 'rockCluster':{
+      // 3-5 gray stones clustered with shadows and highlights
+      const baseGray='#4a4a52';
+      const shadowGray='#2a2a32';
+      const highlightGray='#6a6a72';
+      // Ground shadow pool
+      ctx.fillStyle='rgba(0,0,0,0.4)';
+      ctx.beginPath();ctx.ellipse(0,s*.05,s*.55,s*.18,0,0,Math.PI*2);ctx.fill();
+      // 3-5 rocks of varying sizes, deterministic by seed
+      const rockCount=3+Math.floor(rngF(seed)*3);
+      for(let i=0;i<rockCount;i++){
+        const ra=rngF(seed+i*17)*Math.PI*2;
+        const rd=rngF(seed+i*23)*s*.3;
+        const rx=Math.cos(ra)*rd;
+        const ry=Math.sin(ra)*rd*0.5; // flatter vertical distribution
+        const rs=s*(.15+rngF(seed+i*41)*.22);
+        // Dark base
+        ctx.fillStyle=shadowGray;
+        ctx.beginPath();ctx.ellipse(rx,ry+rs*0.3,rs*1.05,rs*0.55,0,0,Math.PI*2);ctx.fill();
+        // Main stone body
+        ctx.fillStyle=baseGray;
+        ctx.beginPath();ctx.ellipse(rx,ry,rs,rs*0.7,0,0,Math.PI*2);ctx.fill();
+        // Highlight
+        ctx.fillStyle=highlightGray;
+        ctx.beginPath();ctx.ellipse(rx-rs*0.25,ry-rs*0.3,rs*0.5,rs*0.3,0,0,Math.PI*2);ctx.fill();
+      }
+      break;
+    }
+    case 'grassTuft':{
+      // Tufts of green grass blades
+      const grass=z.grassColor||'#4a7c3a';
+      const grassDark=z.grassDark||'#2d4a22';
+      ctx.strokeStyle=grassDark;ctx.lineWidth=1.6;ctx.lineCap='round';
+      const bladeCount=5+Math.floor(rngF(seed)*4);
+      for(let i=0;i<bladeCount;i++){
+        const ba=(rngF(seed+i*7)-0.5)*Math.PI*0.6-Math.PI/2; // mostly upward
+        const bl=s*(.25+rngF(seed+i*11)*.35);
+        ctx.beginPath();
+        ctx.moveTo(0,0);
+        ctx.lineTo(Math.cos(ba)*bl,Math.sin(ba)*bl);
+        ctx.stroke();
+      }
+      ctx.strokeStyle=grass;ctx.lineWidth=1.2;
+      for(let i=0;i<bladeCount;i++){
+        const ba=(rngF(seed+i*7+1)-0.5)*Math.PI*0.6-Math.PI/2;
+        const bl=s*(.2+rngF(seed+i*11+1)*.3);
+        ctx.beginPath();
+        ctx.moveTo(0,0);
+        ctx.lineTo(Math.cos(ba)*bl*0.9,Math.sin(ba)*bl*0.9);
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'stoneRuin':{
+      // Broken gray stone wall fragment — moss-covered at base
+      const stone='#5a5a64';
+      const stoneDark='#353540';
+      const moss=z.mossColor||'#3a5a2a';
+      // Ground shadow
+      ctx.fillStyle='rgba(0,0,0,0.45)';
+      ctx.beginPath();ctx.ellipse(0,s*.45,s*.55,s*.15,0,0,Math.PI*2);ctx.fill();
+      // Main stone wall — jagged top
+      ctx.fillStyle=stone;
+      ctx.beginPath();
+      ctx.moveTo(-s*.4,s*.5);
+      ctx.lineTo(-s*.4,-s*.1);
+      ctx.lineTo(-s*.25,-s*.25);
+      ctx.lineTo(-s*.05,-s*.15);
+      ctx.lineTo(s*.15,-s*.35);
+      ctx.lineTo(s*.28,-s*.22);
+      ctx.lineTo(s*.4,-s*.3);
+      ctx.lineTo(s*.4,s*.5);
+      ctx.closePath();
+      ctx.fill();
+      // Shadow side (left is darker)
+      ctx.fillStyle=stoneDark;
+      ctx.beginPath();
+      ctx.moveTo(-s*.4,s*.5);
+      ctx.lineTo(-s*.4,-s*.1);
+      ctx.lineTo(-s*.25,-s*.25);
+      ctx.lineTo(-s*.15,-s*.2);
+      ctx.lineTo(-s*.15,s*.5);
+      ctx.closePath();
+      ctx.fill();
+      // Stone block lines (horizontal mortar joints)
+      ctx.strokeStyle=stoneDark;ctx.lineWidth=1.2;
+      ctx.beginPath();ctx.moveTo(-s*.4,s*.1);ctx.lineTo(s*.4,s*.1);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(-s*.4,s*.3);ctx.lineTo(s*.4,s*.3);ctx.stroke();
+      // Moss at the base
+      ctx.fillStyle=moss;
+      ctx.globalAlpha=0.75;
+      ctx.beginPath();ctx.ellipse(-s*.15,s*.48,s*.2,s*.08,0,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.ellipse(s*.12,s*.5,s*.15,s*.06,0,0,Math.PI*2);ctx.fill();
+      ctx.globalAlpha=1;
+      break;
+    }
+    case 'boneHeap':{
+      // White/cream real bone pile — skulls and ribs, not stylized
+      ctx.fillStyle='rgba(0,0,0,0.35)';
+      ctx.beginPath();ctx.ellipse(0,s*.25,s*.55,s*.15,0,0,Math.PI*2);ctx.fill();
+      // Scattered ribs (long white curves)
+      ctx.strokeStyle='#d4ccb8';ctx.lineWidth=2.2;ctx.lineCap='round';
+      for(let i=0;i<3;i++){
+        const ra=rngF(seed+i*7)*Math.PI*2;
+        const rx=Math.cos(ra)*s*.3;
+        const ry=Math.sin(ra)*s*.12;
+        const rl=s*(.2+rngF(seed+i*11)*.15);
+        ctx.save();
+        ctx.translate(rx,ry);
+        ctx.rotate(ra);
+        ctx.beginPath();
+        ctx.arc(0,0,rl,-Math.PI*0.35,Math.PI*0.35);
+        ctx.stroke();
+        ctx.restore();
+      }
+      // A skull in the middle
+      ctx.fillStyle='#e8dfc8';
+      ctx.beginPath();ctx.arc(0,0,s*.18,0,Math.PI*2);ctx.fill();
+      // Skull eye sockets
+      ctx.fillStyle='#2a2418';
+      ctx.beginPath();ctx.arc(-s*.06,-s*.02,s*.04,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.arc(s*.06,-s*.02,s*.04,0,Math.PI*2);ctx.fill();
+      // Nose cavity
+      ctx.beginPath();
+      ctx.moveTo(-s*.015,s*.02);
+      ctx.lineTo(0,s*.08);
+      ctx.lineTo(s*.015,s*.02);
+      ctx.closePath();
+      ctx.fill();
+      // Small highlight on skull
+      ctx.fillStyle='rgba(255,255,255,0.3)';
+      ctx.beginPath();ctx.arc(-s*.08,-s*.08,s*.04,0,Math.PI*2);ctx.fill();
+      break;
+    }
+    case 'waterPond':{
+      // Blue pond/puddle — always blue regardless of zone, with shimmer animation
+      // Dark outer rim (muddy edge)
+      ctx.fillStyle='rgba(30,30,35,0.6)';
+      ctx.beginPath();ctx.ellipse(0,0,s*.7,s*.42,0,0,Math.PI*2);ctx.fill();
+      // Water body — blue gradient
+      const wg=ctx.createRadialGradient(0,-s*.05,0,0,0,s*.6);
+      wg.addColorStop(0,'#3d7a9e');
+      wg.addColorStop(0.6,'#2a5878');
+      wg.addColorStop(1,'#1a3850');
+      ctx.fillStyle=wg;
+      ctx.beginPath();ctx.ellipse(0,0,s*.62,s*.35,0,0,Math.PI*2);ctx.fill();
+      // Animated sparkles on the surface — slow shimmer
+      ctx.fillStyle='rgba(180,220,255,0.6)';
+      for(let i=0;i<4;i++){
+        const sa=seed*0.01+i*1.7+now*0.0008;
+        const sx2=Math.cos(sa)*s*.38;
+        const sy2=Math.sin(sa)*s*.2;
+        const sr2=1.5+Math.sin(now*0.003+seed+i)*0.8;
+        if(sr2>0.6){
+          ctx.beginPath();ctx.arc(sx2,sy2,sr2,0,Math.PI*2);ctx.fill();
+        }
+      }
+      // Small bright highlight
+      ctx.fillStyle='rgba(220,240,255,0.3)';
+      ctx.beginPath();ctx.ellipse(-s*.15,-s*.1,s*.18,s*.06,0,0,Math.PI*2);ctx.fill();
+      break;
+    }
+    case 'fallenLog':{
+      // Horizontal fallen log — brown wood with darker rings
+      const wood='#3a2410';
+      const woodLight='#5a3820';
+      const woodDark='#1a0f06';
+      // Shadow on ground
+      ctx.fillStyle='rgba(0,0,0,0.35)';
+      ctx.beginPath();ctx.ellipse(0,s*.12,s*.7,s*.12,0,0,Math.PI*2);ctx.fill();
+      // Main log body (long ellipse)
+      ctx.fillStyle=wood;
+      ctx.beginPath();ctx.ellipse(0,0,s*.65,s*.15,0,0,Math.PI*2);ctx.fill();
+      // Highlight on top
+      ctx.fillStyle=woodLight;
+      ctx.beginPath();ctx.ellipse(0,-s*.05,s*.58,s*.06,0,0,Math.PI*2);ctx.fill();
+      // Tree rings on both ends
+      ctx.fillStyle=woodDark;
+      ctx.beginPath();ctx.ellipse(-s*.62,0,s*.08,s*.15,0,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.ellipse(s*.62,0,s*.08,s*.15,0,0,Math.PI*2);ctx.fill();
+      // Ring details
+      ctx.strokeStyle=wood;ctx.lineWidth=1;
+      ctx.beginPath();ctx.ellipse(-s*.62,0,s*.05,s*.1,0,0,Math.PI*2);ctx.stroke();
+      ctx.beginPath();ctx.ellipse(s*.62,0,s*.05,s*.1,0,0,Math.PI*2);ctx.stroke();
+      // Bark texture lines
+      ctx.strokeStyle=woodDark;ctx.lineWidth=0.8;
+      for(let i=0;i<4;i++){
+        const bx=-s*.45+i*s*.3;
+        ctx.beginPath();ctx.moveTo(bx,-s*.1);ctx.lineTo(bx+s*.03,s*.1);ctx.stroke();
+      }
+      break;
+    }
+    case 'mushroom':{
+      // Red/white cap mushroom cluster (fly agaric style) — 2-4 mushrooms
+      const capColor=z.mushroomCap||'#a83f3f';
+      const stem='#ddcfb8';
+      const spotColor='#f4ecd8';
+      const mushCount=2+Math.floor(rngF(seed)*3);
+      for(let i=0;i<mushCount;i++){
+        const ma=rngF(seed+i*19)*Math.PI*2;
+        const md=rngF(seed+i*29)*s*.18;
+        const mx=Math.cos(ma)*md;
+        const my=Math.sin(ma)*md*0.4;
+        const ms=s*(.18+rngF(seed+i*37)*.14);
+        // Ground shadow
+        ctx.fillStyle='rgba(0,0,0,0.35)';
+        ctx.beginPath();ctx.ellipse(mx,my+ms*0.45,ms*0.5,ms*0.12,0,0,Math.PI*2);ctx.fill();
+        // Stem
+        ctx.fillStyle=stem;
+        ctx.fillRect(mx-ms*0.12,my-ms*0.15,ms*0.24,ms*0.55);
+        // Cap
+        ctx.fillStyle=capColor;
+        ctx.beginPath();
+        ctx.arc(mx,my-ms*0.1,ms*0.55,Math.PI,0);
+        ctx.fill();
+        // Cap shadow underside
+        ctx.fillStyle='rgba(60,20,20,0.5)';
+        ctx.fillRect(mx-ms*0.45,my-ms*0.1,ms*0.9,ms*0.08);
+        // White spots on cap
+        ctx.fillStyle=spotColor;
+        ctx.beginPath();ctx.arc(mx-ms*0.2,my-ms*0.2,ms*0.07,0,Math.PI*2);ctx.fill();
+        ctx.beginPath();ctx.arc(mx+ms*0.15,my-ms*0.3,ms*0.06,0,Math.PI*2);ctx.fill();
+        ctx.beginPath();ctx.arc(mx+ms*0.25,my-ms*0.12,ms*0.05,0,Math.PI*2);ctx.fill();
+      }
+      break;
+    }
+    case 'boulder':{
+      // Single large gray boulder — bigger, more detailed than rockCluster's rocks
+      const stone='#545458';
+      const stoneDark='#2a2a30';
+      const stoneLight='#70707a';
+      const stoneMoss=z.mossColor||'#3a5a2a';
+      // Ground shadow
+      ctx.fillStyle='rgba(0,0,0,0.55)';
+      ctx.beginPath();ctx.ellipse(s*.08,s*.5,s*.7,s*.18,0,0,Math.PI*2);ctx.fill();
+      // Base dark shadow
+      ctx.fillStyle=stoneDark;
+      ctx.beginPath();
+      ctx.ellipse(0,s*.15,s*.75,s*.55,0,0,Math.PI*2);
+      ctx.fill();
+      // Main stone body
+      ctx.fillStyle=stone;
+      ctx.beginPath();
+      ctx.ellipse(0,0,s*.65,s*.48,0,0,Math.PI*2);
+      ctx.fill();
+      // Top highlight face
+      ctx.fillStyle=stoneLight;
+      ctx.beginPath();
+      ctx.ellipse(-s*.12,-s*.18,s*.38,s*.25,0,0,Math.PI*2);
+      ctx.fill();
+      // Crack details
+      ctx.strokeStyle=stoneDark;ctx.lineWidth=1.2;
+      ctx.beginPath();
+      ctx.moveTo(-s*.3,-s*.1);
+      ctx.lineTo(-s*.1,s*.1);
+      ctx.lineTo(s*.15,s*.05);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(s*.2,-s*.15);
+      ctx.lineTo(s*.35,-s*.02);
+      ctx.stroke();
+      // Moss patch on top
+      ctx.fillStyle=stoneMoss;
+      ctx.globalAlpha=0.7;
+      ctx.beginPath();ctx.ellipse(s*.15,-s*.25,s*.22,s*.08,0.3,0,Math.PI*2);ctx.fill();
+      ctx.globalAlpha=1;
+      break;
+    }
   }
   ctx.restore();
 }
@@ -744,8 +1277,11 @@ function spawnEnemy(typeOverride=null){
   if(living>=MAX_ENEMIES)return;
   const angle=Math.random()*Math.PI*2;
   const d=300+Math.random()*260;
-  const x=Math.max(60,Math.min(WORLD_W-60,player.x+Math.cos(angle)*d));
-  const y=Math.max(60,Math.min(WORLD_H-60,player.y+Math.sin(angle)*d));
+  let x=Math.max(60,Math.min(WORLD_W-60,player.x+Math.cos(angle)*d));
+  let y=Math.max(60,Math.min(WORLD_H-60,player.y+Math.sin(angle)*d));
+  // Nudge away from any collidable prop so enemies don't spawn stuck
+  const clear=findClearPosition(x,y,22);
+  x=clear.x;y=clear.y;
   let typeData;
   if(typeOverride)typeData=ENEMY_TYPES.find(t=>t.type===typeOverride)||ENEMY_TYPES[0];
   else{
@@ -815,6 +1351,10 @@ function enterDungeon(dungeonId){
   // Regenerate environment props for the new theme — this is what makes the
   // dungeon look visually different from the open world
   generateEnvironment();
+  // AFTER props exist, nudge player to a clear spot if center is blocked
+  const clear=findClearPosition(player.x,player.y,22);
+  player.x=clear.x;player.y=clear.y;
+  camX=player.x;camY=player.y;
   // Spawn first wave immediately
   spawnDungeonWave(0);
   // UI feedback — show dungeon HUD, hide zone label (dungeon HUD replaces it)
@@ -842,8 +1382,11 @@ function spawnDungeonWave(waveIndex){
       const isElite=i<wave.elites;
       const angle=Math.random()*Math.PI*2;
       const dist=340+Math.random()*80;
-      const x=Math.max(60,Math.min(WORLD_W-60,player.x+Math.cos(angle)*dist));
-      const y=Math.max(60,Math.min(WORLD_H-60,player.y+Math.sin(angle)*dist));
+      let x=Math.max(60,Math.min(WORLD_W-60,player.x+Math.cos(angle)*dist));
+      let y=Math.max(60,Math.min(WORLD_H-60,player.y+Math.sin(angle)*dist));
+      // Nudge away from collidable props
+      const clear=findClearPosition(x,y,22);
+      x=clear.x;y=clear.y;
       const hs=enemyHpScale(player.level),ds=enemyDmgScale(player.level);
       const base=player.level<=5?150:player.level<=10?175:200;
       enemies.push({
@@ -868,8 +1411,11 @@ function spawnDungeonBoss(){
   const base=player.level<=5?150:player.level<=10?175:200;
   // Spawn boss directly in front of player for a heroic entrance
   const angle=player.facing||0;
-  const x=player.x+Math.cos(angle)*280;
-  const y=player.y+Math.sin(angle)*280;
+  let x=player.x+Math.cos(angle)*280;
+  let y=player.y+Math.sin(angle)*280;
+  // Boss is large — use bigger radius to make sure it lands clear
+  const clear=findClearPosition(x,y,Math.max(40,typeData.r*bd.sizeMult*0.5));
+  x=clear.x;y=clear.y;
   const boss={
     id:enemyId++,x,y,vx:0,vy:0,
     hp:base*hs*typeData.hp*bd.hpMult,
@@ -983,9 +1529,13 @@ function exitDungeon(success){
   // Clear velocity + reset AFK waypoint so player doesn't immediately drift away
   player.vx=0;player.vy=0;
   player.lastInput=performance.now(); // prevents AFK pathing for a few seconds
-  if(typeof setAfkWaypoint==='function')setAfkWaypoint();
   // Regenerate environment with open-world theme (getActiveTheme() now returns curZone)
   generateEnvironment();
+  // AFTER regenerating, nudge player clear in case a prop is now at returnX/Y
+  const clear=findClearPosition(player.x,player.y,22);
+  player.x=clear.x;player.y=clear.y;
+  camX=player.x;camY=player.y;
+  if(typeof setAfkWaypoint==='function')setAfkWaypoint();
   // Hide dungeon HUD, restore normal zone label
   const overlay=document.getElementById('dungeonStatus');
   if(overlay)overlay.style.display='none';
@@ -1284,8 +1834,17 @@ function setAfkWaypoint(){
   if(next===-1){player.visitedSectors.fill(false);next=Math.floor(Math.random()*9);}
   player.sector=next;
   const col=next%3,row=Math.floor(next/3),sw=WORLD_W/3,sh=WORLD_H/3;
-  player.afkWpX=col*sw+100+Math.random()*(sw-200);
-  player.afkWpY=row*sh+100+Math.random()*(sh-200);
+  // Try up to 8 points within the chosen sector until we find a clear one.
+  // Falls back to the last attempt if nothing clear was found — avoids infinite loops.
+  let wx=col*sw+100+Math.random()*(sw-200);
+  let wy=row*sh+100+Math.random()*(sh-200);
+  for(let tries=0;tries<8;tries++){
+    if(!getPropCollisionAt(wx,wy,18))break;
+    wx=col*sw+100+Math.random()*(sw-200);
+    wy=row*sh+100+Math.random()*(sh-200);
+  }
+  player.afkWpX=wx;
+  player.afkWpY=wy;
 }
 
 // ═══════ ABILITY CASTS ══════════════════════════════════
@@ -1635,7 +2194,7 @@ function showLevelUp(){
   setTimeout(()=>b.style.display='none',2600);
   addFeed(`✦ LEVEL ${player.level} ✦`,'#c084fc');
 }
-function respawn(){player.hp=player.maxHp;player.isDead=false;player.iframes=3000;player.x=WORLD_W/2;player.y=WORLD_H/2;enemies=[];spirits=[];player._cheatDeathUsed=false;document.getElementById('deathScreen').style.display='none';addFeed('RISEN FROM THE VEIL','#9DC4B0');}
+function respawn(){player.hp=player.maxHp;player.isDead=false;player.iframes=3000;player.x=WORLD_W/2;player.y=WORLD_H/2;const _rc=findClearPosition(player.x,player.y,22);player.x=_rc.x;player.y=_rc.y;enemies=[];spirits=[];player._cheatDeathUsed=false;document.getElementById('deathScreen').style.display='none';addFeed('RISEN FROM THE VEIL','#9DC4B0');}
 
 // ═══════ UPDATE ═════════════════════════════════════════
 function update(dt,now){
@@ -1670,8 +2229,14 @@ function update(dt,now){
     player.facing=Math.atan2(my,mx);
   } else{player.vx*=0.78;player.vy*=0.78;}
 
-  player.x=Math.max(30,Math.min(WORLD_W-30,player.x+player.vx*dt));
-  player.y=Math.max(30,Math.min(WORLD_H-30,player.y+player.vy*dt));
+  // Proposed next position — clamped to world bounds
+  const proposedX=Math.max(30,Math.min(WORLD_W-30,player.x+player.vx*dt));
+  const proposedY=Math.max(30,Math.min(WORLD_H-30,player.y+player.vy*dt));
+  // Resolve against prop collisions — player slides along prop edges rather than
+  // stopping dead. Player collision radius ~18px matches their visible body.
+  const resolved=resolvePlayerMovement(player.x,player.y,proposedX,proposedY,18);
+  player.x=resolved.x;
+  player.y=resolved.y;
   player.glowPulse+=dt*2.2;
   if(player.iframes>0)player.iframes-=dt*1000;
   if(player.hitFlash>0)player.hitFlash-=dt;
