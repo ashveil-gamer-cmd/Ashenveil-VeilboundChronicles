@@ -753,6 +753,8 @@ function killEnemy(e){
     const col=rarityColors[item.rarity]||'#9ca3af';
     const life=rarityLife[item.rarity]||0.6;
     pushGroundFX({type:'beam',x:e.x,y:e.y,r:40,maxR:40,color:col,life,maxLife:life});
+    // Save on any loot drop so players never lose their gear to a closed tab
+    if(typeof writeSave==='function')writeSave();
   }
   // Death burst
   for(let i=0;i<14;i++){const a=Math.random()*Math.PI*2;particles.push({x:e.x,y:e.y,vx:Math.cos(a)*90,vy:Math.sin(a)*90-60,life:1.0,maxLife:1.0,color:e.typeData.color,size:3+Math.random()*4,soul:true});}
@@ -762,13 +764,17 @@ function killEnemy(e){
 
 function addXP(amt){
   player.xp+=amt;
+  let leveledUp=false;
   while(player.xp>=player.xpToNext&&player.level<MAX_LEVEL){
     player.xp-=player.xpToNext;player.level++;player.xpToNext=xpForLevel(player.level);
     player.maxHp=computeMaxHp(player.level);player.hp=Math.min(player.hp+player.maxHp*0.3,player.maxHp);
     player.attack=computeAttack(player.level)+player.soulMastery*0.5;
     SFX.levelUp();showLevelUp();checkZone();
     if(player.level%5===0){professions.Spiritweaving.materials.hollowShards++;addProfXP('Spiritweaving',10);}
+    leveledUp=true;
   }
+  // Save the moment they level up — protect player progress from a closed tab
+  if(leveledUp&&typeof writeSave==='function')writeSave();
 }
 
 // ═══════ VFX ════════════════════════════════════════════
@@ -1013,17 +1019,57 @@ function update(dt,now){
     if(e.dead)return;
     if(e.hitFlash>0)e.hitFlash-=dt;
     const dx=player.x-e.x,dy=player.y-e.y,d=Math.sqrt(dx*dx+dy*dy)||1;
-    if(d>e.size+24){e.x+=dx/d*e.speed*dt;e.y+=dy/d*e.speed*dt;}
-    if(d<e.size+30&&now-e.lastAttack>1150){
-      e.lastAttack=now;
-      if(player.iframes<=0){player.hp-=e.attack;player.hitFlash=0.18;player.iframes=220;screenShake(6,130);SFX.playerHit();
-        if(player.hp<=0){player.hp=0;player.isDead=true;document.getElementById('deathStats').textContent=`${kills} slain · Level ${player.level}`;document.getElementById('deathScreen').style.display='flex';}
+    // Move toward player if out of attack range
+    if(d>e.size+24)e.chargingUntil=0; // cancel windup if player moves out
+    if(d>e.size+24&&!e.chargingUntil){e.x+=dx/d*e.speed*dt;e.y+=dy/d*e.speed*dt;}
+    // Begin attack windup when in range
+    if(d<e.size+30&&!e.chargingUntil&&now-e.lastAttack>1150){
+      const windupMs=e.isElite?900:700; // elites take longer to wind up — bigger hit
+      e.chargingUntil=now+windupMs;
+      e.attackRange=(e.size+40); // snapshot range at cast time
+      // Spawn telegraph FX that follows the enemy and marks the danger zone
+      pushGroundFX({
+        type:'telegraph',x:e.x,y:e.y,
+        r:e.attackRange,maxR:e.attackRange,
+        color:e.isElite?'#fbbf24':'#ef4444',
+        life:windupMs/1000,maxLife:windupMs/1000,
+        follow:e,
+        pulse:true,
+      });
+    }
+    // Resolve attack at end of windup
+    if(e.chargingUntil&&now>=e.chargingUntil){
+      e.chargingUntil=0;e.lastAttack=now;
+      // Recompute distance now — player may have dodged out of range
+      const ndx=player.x-e.x,ndy=player.y-e.y,nd=Math.sqrt(ndx*ndx+ndy*ndy)||1;
+      if(nd<=e.attackRange&&player.iframes<=0){
+        player.hp-=e.attack;player.hitFlash=0.18;player.iframes=220;
+        screenShake(e.isElite?10:6,e.isElite?180:130);SFX.playerHit();
+        // Impact bloom at player location for hit feedback
+        pushGroundFX({type:'bloom',x:player.x,y:player.y,r:60,maxR:60,color:'#ef4444',life:0.3,maxLife:0.3});
+        if(player.hp<=0){
+          player.hp=0;player.isDead=true;
+          document.getElementById('deathStats').textContent=`${kills} slain · Level ${player.level}`;
+          document.getElementById('deathScreen').style.display='flex';
+          if(typeof writeSave==='function')writeSave();
+        }
       }
     }
     // Track nearest elite for boss bar
     if(e.isElite&&(!bossTarget||e.isElite)){
       const bd=dist2(player.x,player.y,e.x,e.y);
       if(bd<500)bossTarget=e;
+    }
+    // Elite rim light — spawn occasionally so every elite has a persistent warm aura
+    if(e.isElite&&(!e.nextRim||now>=e.nextRim)){
+      e.nextRim=now+600;
+      pushGroundFX({
+        type:'rimlight',x:e.x,y:e.y,
+        r:e.size*2.8,maxR:e.size*2.8,
+        color:'#fbbf24',
+        life:0.9,maxLife:0.9,
+        follow:e,
+      });
     }
   });
   enemies=enemies.filter(e=>!e.dead);
@@ -1038,10 +1084,14 @@ function update(dt,now){
   // Particles
   particles=particles.filter(p=>{p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;if(p.soul)p.vy-=dt*38;p.vx*=0.92;p.vy*=0.92;return p.life>0;});
   dmgTexts=dmgTexts.filter(d=>{d.life-=dt;d.wy+=d.vy*dt;d.wx+=d.vx*dt;d.vy*=0.9;return d.life>0;});
+  updateGroundFX(dt,now);
   if(shakeTimer>0)shakeTimer-=dt*1000;else shakeAmt*=0.75;
 
   camX+=(player.x-camX)*Math.min(1,dt*5.5);
   camY+=(player.y-camY)*Math.min(1,dt*5.5);
+
+  // Periodic autosave — cheap, skip during death screen
+  if(!player.isDead)maybeAutoSave(now);
 }
 
 // ═══════ RENDER ═════════════════════════════════════════
@@ -1054,6 +1104,9 @@ function render(now){
 
   ctx.save();
   ctx.translate(W/2-camX+sx,H/2-camY+sy);
+
+  // Ground FX — render on the floor BEFORE entities so characters stand on top
+  drawGroundFX(now);
 
   // Veilmark rings on enemies (behind them)
   enemies.forEach(e=>{
@@ -1163,8 +1216,137 @@ function loop(ts){
   requestAnimationFrame(loop);
 }
 
+// ═══════ SAVE / LOAD ═══════════════════════════════════════
+// Save format is versioned. Bumping SAVE_VERSION lets us change shape later
+// without breaking old saves — loadSave() gracefully handles missing fields.
+const SAVE_KEY='ashenveil_save_v1';
+const SAVE_VERSION=1;
+let lastSaveTime=0;
+const AUTOSAVE_INTERVAL=10000; // ms — save every 10s during play
+
+function buildSave(){
+  return {
+    v:SAVE_VERSION,
+    savedAt:Date.now(),
+    player:{
+      level:player.level,xp:player.xp,xpToNext:player.xpToNext,
+      hp:player.hp,maxHp:player.maxHp,
+      gold:player.gold,attack:player.attack,
+      soulMastery:player.soulMastery,maxBonds:player.maxBonds,
+    },
+    stats:{kills},
+    zoneId:curZone?.id||1,
+    equipped:JSON.parse(JSON.stringify(equipped)), // deep clone so mutations don't corrupt save
+    professions:JSON.parse(JSON.stringify(professions)),
+  };
+}
+
+function writeSave(){
+  try{
+    const data=buildSave();
+    localStorage.setItem(SAVE_KEY,JSON.stringify(data));
+    lastSaveTime=performance.now();
+    return true;
+  }catch(e){
+    // localStorage can fail in private mode or when full — fail silent, don't crash game
+    console.warn('Save failed:',e);
+    return false;
+  }
+}
+
+function readSave(){
+  try{
+    const raw=localStorage.getItem(SAVE_KEY);
+    if(!raw)return null;
+    const data=JSON.parse(raw);
+    if(!data||typeof data!=='object')return null;
+    if(data.v!==SAVE_VERSION)return null; // future: handle migration here
+    return data;
+  }catch(e){
+    console.warn('Save read failed:',e);
+    return null;
+  }
+}
+
+function hasSave(){return readSave()!==null;}
+
+function deleteSave(){
+  try{localStorage.removeItem(SAVE_KEY);}catch(e){}
+}
+
+// Apply a loaded save to the live game state. Called from startGame when continuing.
+function applySave(data){
+  // Player — use `?? default` so missing fields fall back safely
+  player.level=data.player?.level??1;
+  player.xp=data.player?.xp??0;
+  player.xpToNext=data.player?.xpToNext??xpForLevel(player.level);
+  player.maxHp=data.player?.maxHp??computeMaxHp(player.level);
+  player.hp=Math.min(data.player?.hp??player.maxHp,player.maxHp);
+  player.gold=data.player?.gold??0;
+  player.attack=data.player?.attack??computeAttack(player.level);
+  player.soulMastery=data.player?.soulMastery??0;
+  player.maxBonds=data.player?.maxBonds??MAX_SPIRITS;
+  // Kills
+  kills=data.stats?.kills??0;
+  // Zone
+  const zoneId=data.zoneId??1;
+  curZone=ZONES.find(z=>z.id===zoneId)||ZONES[0];
+  // Equipped gear
+  if(data.equipped){
+    Object.keys(equipped).forEach(slot=>{
+      equipped[slot]=data.equipped[slot]||null;
+    });
+  }
+  // Professions
+  if(data.professions){
+    Object.keys(professions).forEach(pname=>{
+      const saved=data.professions[pname];
+      if(saved){
+        professions[pname].level=saved.level??1;
+        professions[pname].xp=saved.xp??0;
+        professions[pname].xpToNext=saved.xpToNext??120;
+        if(saved.materials){
+          Object.keys(professions[pname].materials).forEach(m=>{
+            professions[pname].materials[m]=saved.materials[m]??0;
+          });
+        }
+      }
+    });
+  }
+  // Recalc derived stats after equipping gear
+  recalcStats();
+  checkSetBonuses();
+}
+
+// Hook save triggers into the game loop. Called from update() each frame.
+// Saves periodically during play — cheap operation, negligible cost.
+function maybeAutoSave(now){
+  if(now-lastSaveTime>AUTOSAVE_INTERVAL){writeSave();}
+}
+
+// Refresh the title screen's buttons based on whether a save exists.
+// Shows "Continue" + "New Game" if save present; just "Enter the Veil" if not.
+function refreshTitleButtons(){
+  const startBtn=document.getElementById('startBtn');
+  const continueBtn=document.getElementById('continueBtn');
+  const newGameBtn=document.getElementById('newGameBtn');
+  if(!continueBtn||!newGameBtn||!startBtn)return;
+  if(hasSave()){
+    const save=readSave();
+    const lv=save?.player?.level||1;
+    startBtn.style.display='none';
+    continueBtn.style.display='inline-block';
+    newGameBtn.style.display='inline-block';
+    continueBtn.textContent=`⚡ CONTINUE — LV ${lv}`;
+  } else {
+    startBtn.style.display='inline-block';
+    continueBtn.style.display='none';
+    newGameBtn.style.display='none';
+  }
+}
+
 // ═══════ START ═══════════════════════════════════════════
-function startGame(){
+function startGame(continueFromSave=false){
   getAC(); // unlock audio context on user gesture
   document.getElementById('titleScreen').style.display='none';
   ['hud','abilityBar','feedLog','spiritPanel','menuBar','zoneLabel','minimap'].forEach(id=>{
@@ -1172,8 +1354,16 @@ function startGame(){
     document.getElementById(id).style.display=
       (id==='abilityBar'||id==='menuBar')?'flex':'block';
   });
-  player.maxHp=computeMaxHp(1);player.hp=player.maxHp;
-  player.attack=computeAttack(1);player.maxBonds=MAX_SPIRITS;
+  // Apply saved state BEFORE baseline init so baseline doesn't overwrite it
+  if(continueFromSave){
+    const save=readSave();
+    if(save){applySave(save);}
+    else {continueFromSave=false;} // save mysteriously gone — fall through to new game
+  }
+  if(!continueFromSave){
+    player.maxHp=computeMaxHp(1);player.hp=player.maxHp;
+    player.attack=computeAttack(1);player.maxBonds=MAX_SPIRITS;
+  }
   setAfkWaypoint();
   generateEnvironment();
   drawAbilityIcons();
@@ -1181,14 +1371,38 @@ function startGame(){
   for(let i=0;i<8;i++)setTimeout(()=>spawnEnemy(),i*400);
   running=true;lastTime=performance.now();
   requestAnimationFrame(loop);
-  addFeed('THE VEIL CALLS YOU','#c084fc');
-  addFeed('WASD/Arrow keys · Q W E R abilities','#3d2555');
+  if(continueFromSave){
+    addFeed(`✦ WELCOME BACK · LV ${player.level}`,'#c084fc');
+  } else {
+    addFeed('THE VEIL CALLS YOU','#c084fc');
+    addFeed('WASD/Arrow keys · Q W E R abilities','#3d2555');
+  }
+  lastSaveTime=performance.now(); // prevent immediate auto-save on load
+}
+
+function newGameConfirm(){
+  const save=readSave();
+  const lv=save?.player?.level||0;
+  // Only confirm if there's significant progress to lose
+  if(lv>=3){
+    if(!confirm(`Start a new game?\n\nYour Level ${lv} Hollowcaller will be permanently deleted.`))return;
+  }
+  deleteSave();
+  refreshTitleButtons();
+  startGame(false);
 }
 
 // ═══════ INPUT ═══════════════════════════════════════════
 document.addEventListener('keydown',e=>{keys[e.key]=true;player.lastInput=performance.now();});
 document.addEventListener('keyup',e=>{keys[e.key]=false;});
-document.getElementById('startBtn').addEventListener('click',startGame);
+document.getElementById('startBtn').addEventListener('click',()=>startGame(false));
+// New continue/newgame buttons — only present if HTML has been updated
+const _continueBtn=document.getElementById('continueBtn');
+if(_continueBtn)_continueBtn.addEventListener('click',()=>startGame(true));
+const _newGameBtn=document.getElementById('newGameBtn');
+if(_newGameBtn)_newGameBtn.addEventListener('click',newGameConfirm);
+// Paint correct buttons on page load
+refreshTitleButtons();
 
 canvas.addEventListener('touchstart',e=>{
   e.preventDefault();
