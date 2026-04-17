@@ -2676,13 +2676,14 @@ function killEnemy(e){
       spawnDmgText(player.x,player.y-30,`+${actualHeal}`,'#22c55e',false);
     }
   }
-  // Materials
-  if(Math.random()<0.09){professions.Spiritweaving.materials.soulWisps++;addProfXP('Spiritweaving',2);addFeed('+Soul Wisp','#9DC4B048');}
-  if(e.isElite&&Math.random()<0.28){professions.Spiritweaving.materials.veilCloth++;addProfXP('Spiritweaving',6);}
-  if(e.isElite){professions.Veilstalking.materials.predatorMarks++;addProfXP('Veilstalking',14);}
-  if(e.isElite&&Math.random()<0.18){professions.Veilstalking.materials.trophyShards++;}
-  if(Math.random()<0.05){professions.Veilscribing.materials.veilDust++;addProfXP('Veilscribing',1);}
-  if(e.veilmarkStacks>0&&Math.random()<0.14){professions.Spiritweaving.materials.paleEssence++;addProfXP('Spiritweaving',5);}
+  // Materials — small-chance drops on every kill, feeds all professions via creditMaterial
+  // (which internally adds to shared material pool). Uses the new unified material names.
+  if(Math.random()<0.09){creditMaterial('scrap',1);addFeed('+1 Scrap','#9ca3af');}
+  if(e.isElite&&Math.random()<0.28){creditMaterial('scrap',2);}
+  if(e.isElite){creditMaterial('etherDust',1);}
+  if(e.isElite&&Math.random()<0.18){creditMaterial('etherDust',1);}
+  if(Math.random()<0.05){creditMaterial('scrap',1);}
+  if(e.veilmarkStacks>0&&Math.random()<0.14){creditMaterial('etherDust',1);}
   // Loot
   if(Math.random()<(e.isElite?0.38:0.07)){
     const item=rollLoot(player.level);tryEquip(item);
@@ -2723,7 +2724,7 @@ function addXP(amt){
     else{player.maxHp=computeMaxHp(player.level);player.attack=computeAttack(player.level)+player.soulMastery*0.5;}
     player.hp=Math.min(player.hp+player.maxHp*0.3,player.maxHp);
     SFX.levelUp();showLevelUp();checkZone();
-    if(player.level%5===0){professions.Spiritweaving.materials.hollowShards++;addProfXP('Spiritweaving',10);}
+    if(player.level%5===0){creditMaterial('runecore',1);addFeed('+1 Runecore','#c084fc');}
     leveledUp=true;
   }
   // Save the moment they level up — protect player progress from a closed tab
