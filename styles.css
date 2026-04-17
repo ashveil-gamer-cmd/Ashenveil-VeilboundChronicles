@@ -1,7 +1,6 @@
-
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#000;overflow:hidden;font-family:'Crimson Text',serif;touch-action:none;user-select:none}
-canvas{display:block;position:fixed;top:0;left:0}
+canvas#c{display:block;position:fixed;top:0;left:0}
 
 /* ═══════════════════════════════════════════════════════════
    UI ZONE MAP — nothing overlaps because each element lives in
@@ -37,6 +36,19 @@ canvas{display:block;position:fixed;top:0;left:0}
   box-shadow:0 0 30px #c084fc20,inset 0 1px 0 rgba(255,255,255,0.1)
 }
 #startBtn:hover{border-color:#c084fc;box-shadow:0 0 50px #c084fc40,inset 0 1px 0 rgba(255,255,255,0.15);color:#fff;transform:translateY(-1px)}
+#continueBtn{
+  font-family:'Cinzel',serif;font-size:0.9rem;letter-spacing:0.35em;text-transform:uppercase;
+  color:#fff;background:linear-gradient(135deg,#4c1d95 0%,#2d1060 100%);
+  border:1px solid #c084fc;padding:16px 56px;cursor:pointer;transition:all 0.4s;
+  box-shadow:0 0 40px #c084fc40,inset 0 1px 0 rgba(255,255,255,0.15)
+}
+#continueBtn:hover{box-shadow:0 0 60px #c084fc66,inset 0 1px 0 rgba(255,255,255,0.2);transform:translateY(-1px)}
+#newGameBtn{
+  font-family:'Cinzel',serif;font-size:0.65rem;letter-spacing:0.3em;text-transform:uppercase;
+  color:#6b4d8a;background:transparent;border:1px solid #3d2555;
+  padding:10px 32px;cursor:pointer;transition:all 0.3s;margin-top:12px;display:block
+}
+#newGameBtn:hover{color:#c084fc;border-color:#c084fc50}
 .title-lore{font-size:clamp(0.65rem,1.5vw,0.8rem);color:#3d2555;letter-spacing:1px;margin-top:3em;font-style:italic;max-width:420px;text-align:center;line-height:1.8}
 
 /* ─── HUD (TOP-LEFT ZONE, reserved top:0-100px, left:0-200px) ─── */
