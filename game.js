@@ -746,13 +746,23 @@ function killEnemy(e){
   if(e.veilmarkStacks>0&&Math.random()<0.14){professions.Spiritweaving.materials.paleEssence++;addProfXP('Spiritweaving',5);}
   // Loot
   if(Math.random()<(e.isElite?0.38:0.07)){
-    const item=rollLoot(player.level);tryEquip(item);SFX.pickup();
+    const item=rollLoot(player.level);tryEquip(item);
+    // Rarity-tiered pickup sound
+    const rarityToSFX={common:'pickupCommon',uncommon:'pickupUncommon',rare:'pickupRare',epic:'pickupEpic',legendary:'pickupLegendary',mythic:'pickupMythic'};
+    const sfxName=rarityToSFX[item.rarity]||'pickup';
+    (SFX[sfxName]||SFX.pickup)();
     // Loot beam — colored column of light matching rarity, scales in intensity
     const rarityColors={common:'#9ca3af',uncommon:'#22c55e',rare:'#60a5fa',epic:'#c084fc',legendary:'#f59e0b',mythic:'#ff6b6b'};
     const rarityLife={common:0.6,uncommon:0.9,rare:1.3,epic:1.8,legendary:2.6,mythic:3.2};
     const col=rarityColors[item.rarity]||'#9ca3af';
     const life=rarityLife[item.rarity]||0.6;
     pushGroundFX({type:'beam',x:e.x,y:e.y,r:40,maxR:40,color:col,life,maxLife:life});
+    // For higher rarities, add a bigger drop bloom + screen shake to make the drop feel significant
+    const dramaTier={common:0,uncommon:0,rare:1,epic:2,legendary:3,mythic:4}[item.rarity]||0;
+    if(dramaTier>=1){
+      pushGroundFX({type:'bloom',x:e.x,y:e.y,r:100+dramaTier*40,maxR:100+dramaTier*40,color:col,life:0.4+dramaTier*0.1,maxLife:0.4+dramaTier*0.1});
+    }
+    if(dramaTier>=2)screenShake(4+dramaTier*2,200);
     // Save on any loot drop so players never lose their gear to a closed tab
     if(typeof writeSave==='function')writeSave();
   }
