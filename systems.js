@@ -51,6 +51,9 @@ const INVENTORY_MAX=24;
 let inventory=[]; // array of full item objects
 
 // Called by combat drop logic. Decides: auto-equip if slot empty, else route to bag.
+// If bag is full, common/uncommon items auto-salvage into materials so AFK drops
+// aren't silently lost. Rare+ items WARN the player but don't auto-consume — the
+// player should make that decision.
 function acquireLoot(item){
   const current=equipped[item.slot];
   const col=RARITY_COLORS[item.rarity]||'#9ca3af';
@@ -69,8 +72,25 @@ function acquireLoot(item){
     addFeed(`${icon} ${label} ${item.name} → bag (${inventory.length}/${INVENTORY_MAX})`,col);
     updateInventoryBadge();
   } else {
-    // Bag full — warn player. Item is lost unless they clear space.
-    addFeed(`⚠ BAG FULL — ${item.name} lost!`,'#ef4444');
+    // Bag full — behavior depends on rarity
+    const rarityTier={common:0,uncommon:1,rare:2,epic:3,legendary:4,mythic:5}[item.rarity]||0;
+    if(rarityTier<=1){
+      // Common/uncommon — auto-salvage silently into materials so AFK doesn't waste them
+      const yields=salvageYieldFor(item);
+      Object.entries(yields).forEach(([mat,qty])=>creditMaterial(mat,qty));
+      // Small profession XP even from auto-salvage so AFK contributes to crafting
+      const salvageXP = {common:5, uncommon:10}[item.rarity] || 5;
+      Object.keys(professions).forEach(p=>addProfXP(p, salvageXP));
+      const gained=Object.entries(yields).map(([k,v])=>`+${v} ${MATERIAL_LABELS[k]}`).join(' ');
+      addFeed(`⚒ Bag full — auto-salvaged ${item.name} (${gained})`,'#a78bfa');
+    } else {
+      // Rare+ — warn player loud and clear, do NOT consume (they deserve a decision)
+      addFeed(`⚠ BAG FULL — ${label} ${item.name} LOST! Clear space in your bag!`,'#ef4444');
+      // Emergency pop-up via a ground FX so player notices mid-AFK
+      if(typeof pushGroundFX==='function'&&typeof player!=='undefined'){
+        pushGroundFX({type:'bloom',x:player.x,y:player.y,r:200,maxR:200,color:'#ef4444',life:1.2,maxLife:1.2});
+      }
+    }
   }
 }
 
@@ -134,31 +154,121 @@ function updateInventoryBadge(){
   }
 }
 
-// Compute a stat-diff line for the tooltip: "+15 HP" in green, "-4 Crit" in red.
-// Compares the bag item's stats against whatever is currently equipped in the same slot.
+// ═══════ STAT DISPLAY + UPGRADE CLASSIFICATION ═════════════════════
+// Uses the STAT_LABELS + formatStat helpers defined below for consistent stat names.
+
+// Returns the raw stats on an item as tooltip lines. Used when NO item is equipped
+// in that slot yet — show what the item IS, not what it adds over nothing.
+function computeStatLines(item){
+  const lines=[];
+  Object.entries(item.stats||{}).forEach(([k,v])=>{
+    if(!v)return;
+    const label=(typeof STAT_LABELS!=='undefined'?STAT_LABELS[k]:null)||k;
+    lines.push({text:`+${v} ${label}`, color:'#d4c896'});
+  });
+  return lines;
+}
+
+// Compare a bag item's stats to what's equipped. Returns diff lines for tooltip.
 function computeStatDiff(item){
   const current=equipped[item.slot];
-  const statLabels={sm:'Soul Mastery',atk:'Attack',hp:'HP',crit:'Crit',
-                    cdr:'CDR',res:'Resist',lifeOnHit:'Life/Hit',spiritBonus:'Spirit'};
   const lines=[];
   const allKeys=new Set([...Object.keys(item.stats||{}),...(current?Object.keys(current.stats||{}):[])]);
   allKeys.forEach(k=>{
     const newVal=item.stats[k]||0;
     const oldVal=current?(current.stats[k]||0):0;
     const diff=newVal-oldVal;
-    if(diff===0&&newVal===0)return;
-    const label=statLabels[k]||k;
-    if(!current){
-      // No current equipped — show as pure gain
-      lines.push({text:`+${newVal} ${label}`,color:'#22c55e'});
-    } else {
-      const sign=diff>=0?'+':'';
-      const col=diff>0?'#22c55e':(diff<0?'#ef4444':'#9ca3af');
-      lines.push({text:`${sign}${diff} ${label}`,color:col});
-    }
+    if(diff===0 && newVal===0)return;
+    const label=(typeof STAT_LABELS!=='undefined'?STAT_LABELS[k]:null)||k;
+    const sign=diff>=0?'+':'';
+    const col=diff>0?'#22c55e':(diff<0?'#ef4444':'#9ca3af');
+    lines.push({text:`${sign}${diff} ${label}`, color:col});
   });
   return lines;
 }
+
+// Classify whether a bag item would be an upgrade, sidegrade, or downgrade vs equipped.
+// Returns: 'upgrade' | 'sidegrade' | 'downgrade' | 'empty-slot'
+// Logic: sum weighted stat values. Weights reflect Hollowcaller priorities
+// (Soul Mastery > HP > Attack > Crit). Stat weight table kept small so it's tunable.
+const STAT_WEIGHTS = {
+  sm:2.5, atk:1.2, hp:0.2, crit:1.5, cdr:2.0, res:0.8,
+  lifeOnHit:1.8, spiritBonus:3.0,
+};
+function classifyBagItem(item){
+  const current=equipped[item.slot];
+  if(!current)return 'empty-slot';
+  const score = stats => Object.entries(stats||{}).reduce((s,[k,v])=>s+v*(STAT_WEIGHTS[k]||1), 0);
+  const newScore = score(item.stats);
+  const oldScore = score(current.stats);
+  if(newScore > oldScore * 1.08) return 'upgrade';
+  if(newScore < oldScore * 0.92) return 'downgrade';
+  return 'sidegrade';
+}
+
+// ═══════ SALVAGE SYSTEM ══════════════════════════════════════════════
+// Converts bag items into profession materials. Rarity determines material
+// type + quantity. Materials flow into existing professions system so salvage
+// is meaningful and not just "delete but with a different name."
+const SALVAGE_YIELDS = {
+  common:     { scrap:1 },
+  uncommon:   { scrap:2 },
+  rare:       { scrap:2, etherDust:1 },
+  epic:       { etherDust:2, runecore:1 },
+  legendary:  { runecore:2, soulbond:1 },
+  mythic:     { runecore:3, soulbond:2 },
+};
+const MATERIAL_LABELS = {
+  scrap:'Scrap Metal', etherDust:'Ether Dust',
+  runecore:'Runecore', soulbond:'Soulbond Shard',
+};
+const MATERIAL_COLORS = {
+  scrap:'#9ca3af', etherDust:'#60a5fa',
+  runecore:'#c084fc', soulbond:'#f59e0b',
+};
+
+// Preview what a salvage would yield — used for tooltip display.
+function salvageYieldFor(item){
+  return SALVAGE_YIELDS[item.rarity] || {scrap:1};
+}
+
+// Execute salvage on a bag item. Removes from bag, credits materials + prof XP.
+function salvageFromBag(invIndex){
+  const item=inventory[invIndex];
+  if(!item)return;
+  const rarityTier={common:0,uncommon:1,rare:2,epic:3,legendary:4,mythic:5}[item.rarity]||0;
+  // Rare+ still confirms — player might want to keep or sell via buyback
+  if(rarityTier>=2){
+    const yields=salvageYieldFor(item);
+    const yieldSummary=Object.entries(yields).map(([k,v])=>`${v} ${MATERIAL_LABELS[k]}`).join(', ');
+    if(!confirm(`Salvage ${item.name}?\n\nThis ${RARITY_LABELS[item.rarity]||'item'} will be broken down into: ${yieldSummary}`))return;
+  }
+  const yields=salvageYieldFor(item);
+  Object.entries(yields).forEach(([mat,qty])=>{
+    creditMaterial(mat, qty);
+  });
+  // Profession XP — scales with rarity. Salvage feeds ALL professions a little.
+  const salvageXP = {common:5, uncommon:10, rare:25, epic:60, legendary:150, mythic:300}[item.rarity] || 5;
+  Object.keys(professions).forEach(p=>addProfXP(p, salvageXP));
+  inventory.splice(invIndex,1);
+  const gained=Object.entries(yields).map(([k,v])=>`+${v} ${MATERIAL_LABELS[k]}`).join(' · ');
+  addFeed(`⚒ Salvaged ${item.name} → ${gained} (+${salvageXP} prof XP)`,'#a78bfa');
+  if(typeof writeSave==='function')writeSave();
+  updateInventoryBadge();
+  renderInventory();
+}
+
+// Credits materials to professions. All 3 professions share the same material
+// pool so this just adds to all of them — each profession has its own copy of
+// each material (no single shared pool) because save/load treats them per-prof.
+function creditMaterial(material, qty){
+  if(typeof professions==='undefined')return;
+  Object.values(professions).forEach(p=>{
+    if(!p.materials)p.materials={};
+    p.materials[material] = (p.materials[material]||0) + qty;
+  });
+}
+
 function recalcStats(){
   // Refresh aggregated talent bonuses first — all the layers below query them
   if(typeof computeTalentBonuses==='function')computeTalentBonuses();
@@ -243,56 +353,197 @@ function openGear(){
 function closeGear(){document.getElementById('gearPanel').style.display='none';}
 
 // ═══════ PROFESSION SYSTEM ═══════════════════════════════
+// ═══════ PROFESSIONS ═══════════════════════════════════════════════
+// Three profession specializations, each crafting a different gear category.
+// Materials come from bag salvage (see salvageFromBag in the inventory section).
+// Profession XP is earned from salvaging AND from crafting, creating a
+// salvage → materials → craft → gear loop.
+//
+// Material flow (shared pool — any profession can use any material):
+//   scrap        : every salvage yields this. Primarily used by Weaponsmith.
+//   etherDust    : rare+ salvage. Primarily Armorer.
+//   runecore    : epic+ salvage. Primarily Ritualist.
+//   soulbond    : legendary+ only. Rare component for endgame crafts across all.
+//
+// Profession level determines which recipes are unlockable.
 let professions={
-  Spiritweaving:{level:1,xp:0,xpToNext:120,materials:{soulWisps:0,veilCloth:0,hollowShards:0,paleEssence:0}},
-  Veilscribing:{level:1,xp:0,xpToNext:120,materials:{veilDust:0,paleInk:0,runeFrag:0}},
-  Veilstalking:{level:1,xp:0,xpToNext:120,materials:{predatorMarks:0,trophyShards:0,veilBlood:0}},
+  Weaponsmith:{level:1,xp:0,xpToNext:120,materials:{scrap:0,etherDust:0,runecore:0,soulbond:0}},
+  Armorer:    {level:1,xp:0,xpToNext:120,materials:{scrap:0,etherDust:0,runecore:0,soulbond:0}},
+  Ritualist:  {level:1,xp:0,xpToNext:120,materials:{scrap:0,etherDust:0,runecore:0,soulbond:0}},
 };
+
+// Recipes — structure:
+//   profLv: profession level required to unlock
+//   craftLv: base player level the crafted item scales to (uses current player level actually, but this tunes the rarity ceiling)
+//   slot: gear slot the crafted item fills
+//   rarity: the rarity of the crafted item
+//   baseStats: weighted budget — the recipe's "stat personality"
+//   cost: materials consumed
+//
+// Crafted items get random-ish stat values each craft, so re-crafting the same
+// recipe gives you different rolls (ARPG-style).
 const RECIPES={
-  Spiritweaving:[
-    {name:'Veilbound Cowl',cost:{soulWisps:8,veilCloth:2},profLv:1,result:'Veilbound Cowl'},
-    {name:'Haunted Vestments',cost:{soulWisps:14,veilCloth:3},profLv:1,result:'Haunted Vestments'},
-    {name:'Pale Grasp',cost:{soulWisps:8,hollowShards:3},profLv:3,result:'Pale Grasp'},
-    {name:'Dirge Treads',cost:{soulWisps:10,hollowShards:3},profLv:3,result:'Dirge Treads'},
-    {name:'Wraith Conduit',cost:{veilCloth:6,hollowShards:4,paleEssence:8},profLv:5,result:'Wraith Conduit'},
+  Weaponsmith:[
+    {name:'Veilsteel Dagger',    profLv:1, rarity:'uncommon', slot:'Weapon', baseStats:{atk:14,crit:2}, cost:{scrap:4}},
+    {name:'Bone-Hilt Sword',     profLv:3, rarity:'rare',     slot:'Weapon', baseStats:{atk:28,sm:6},    cost:{scrap:8,etherDust:2}},
+    {name:'Wraith-Forged Blade', profLv:6, rarity:'rare',     slot:'Weapon', baseStats:{atk:36,crit:5,sm:4}, cost:{scrap:12,etherDust:4}},
+    {name:'Obsidian Reaver',     profLv:10,rarity:'epic',     slot:'Weapon', baseStats:{atk:55,crit:8,sm:10}, cost:{scrap:20,etherDust:8,runecore:2}},
+    {name:'Soulbound Scythe',    profLv:16,rarity:'legendary',slot:'Weapon', baseStats:{atk:85,crit:12,sm:18,lifeOnHit:4}, cost:{scrap:30,etherDust:15,runecore:6,soulbond:2}},
   ],
-  Veilscribing:[
-    {name:"Pale Ink (×3)",cost:{veilDust:4},profLv:1,result:'paleInk',qty:3},
-    {name:"Spirit's Touch",cost:{veilDust:4},profLv:1,result:'enchant_spirit'},
-    {name:'Hollow Core',cost:{veilDust:4,paleInk:2},profLv:3,result:'enchant_core'},
+  Armorer:[
+    {name:'Drifter\'s Cowl',     profLv:1, rarity:'uncommon', slot:'Helmet', baseStats:{hp:60,res:2},   cost:{scrap:3,etherDust:1}},
+    {name:'Veilcloth Robes',     profLv:2, rarity:'uncommon', slot:'Chest',  baseStats:{hp:120,sm:4},   cost:{scrap:5,etherDust:2}},
+    {name:'Bone-Plate Hauberk',  profLv:5, rarity:'rare',     slot:'Chest',  baseStats:{hp:200,res:6,atk:8}, cost:{scrap:8,etherDust:5}},
+    {name:'Spirit-Weave Gloves', profLv:7, rarity:'rare',     slot:'Gloves', baseStats:{atk:14,crit:5,sm:6}, cost:{scrap:6,etherDust:4,runecore:1}},
+    {name:'Reaver\'s Warplate',  profLv:12,rarity:'epic',     slot:'Chest',  baseStats:{hp:340,res:10,atk:14,sm:10}, cost:{scrap:15,etherDust:10,runecore:3}},
+    {name:'Mantle of Undoing',   profLv:18,rarity:'legendary',slot:'Chest',  baseStats:{hp:520,res:15,atk:22,sm:22,lifeOnHit:6}, cost:{scrap:25,etherDust:18,runecore:8,soulbond:3}},
   ],
-  Veilstalking:[
-    {name:"Hunter's Draught",cost:{predatorMarks:4},profLv:1,result:'hunters_draught'},
-    {name:'Trophy Totem',cost:{predatorMarks:6,trophyShards:3},profLv:1,result:'trophy_totem'},
-    {name:'Blood Rite',cost:{predatorMarks:8,veilBlood:8},profLv:5,result:'blood_rite'},
+  Ritualist:[
+    {name:'Whisperbound Ring',   profLv:1, rarity:'uncommon', slot:'Ring',   baseStats:{sm:8,crit:3},   cost:{scrap:2,etherDust:2}},
+    {name:'Warden Sigil',        profLv:3, rarity:'rare',     slot:'Amulet', baseStats:{hp:80,sm:12,cdr:4}, cost:{scrap:4,etherDust:4,runecore:1}},
+    {name:'Hollow Chain Belt',   profLv:5, rarity:'rare',     slot:'Belt',   baseStats:{hp:120,sm:8,spiritBonus:1}, cost:{scrap:6,etherDust:5,runecore:1}},
+    {name:'Veilstep Boots',      profLv:8, rarity:'rare',     slot:'Boots',  baseStats:{hp:100,atk:10,crit:4}, cost:{scrap:6,etherDust:5,runecore:2}},
+    {name:'Ring of Severance',   profLv:14,rarity:'epic',     slot:'Ring',   baseStats:{atk:22,crit:8,sm:14,lifeOnHit:3}, cost:{scrap:10,etherDust:10,runecore:5}},
+    {name:'Soulwarden Amulet',   profLv:18,rarity:'legendary',slot:'Amulet', baseStats:{hp:250,sm:30,cdr:8,spiritBonus:2}, cost:{scrap:15,etherDust:15,runecore:8,soulbond:3}},
   ],
 };
-function addProfXP(n,amt){const p=professions[n];p.xp+=amt;while(p.xp>=p.xpToNext&&p.level<20){p.xp-=p.xpToNext;p.level++;p.xpToNext=p.level*120;addFeed(`${n} LV ${p.level}!`,'#9DC4B0');}}
-function canCraft(n,r){const m=professions[n].materials;return Object.entries(r.cost).every(([k,v])=>(m[k]||0)>=v)&&professions[n].level>=r.profLv;}
+
+function addProfXP(n,amt){
+  const p=professions[n]; if(!p)return;
+  p.xp+=amt;
+  while(p.xp>=p.xpToNext && p.level<20){
+    p.xp-=p.xpToNext;
+    p.level++;
+    p.xpToNext=p.level*120;
+    addFeed(`⚒ ${n} LV ${p.level}!`,'#9DC4B0');
+  }
+}
+
+function canCraft(n,r){
+  const m=professions[n].materials;
+  return Object.entries(r.cost).every(([k,v])=>(m[k]||0)>=v) && professions[n].level>=r.profLv;
+}
+
+// Missing requirements for display — explains WHY a recipe is locked
+function craftBlockReasons(n,r){
+  const reasons=[];
+  if(professions[n].level<r.profLv)reasons.push(`Requires ${n} LV ${r.profLv}`);
+  const m=professions[n].materials;
+  Object.entries(r.cost).forEach(([k,v])=>{
+    const have=m[k]||0;
+    if(have<v)reasons.push(`${v-have} more ${MATERIAL_LABELS[k]||k}`);
+  });
+  return reasons;
+}
+
+// Rolls stat values for a craft. Variance of ±20% around the recipe's baseStats,
+// scaled up by player level so crafts at higher levels are stronger.
+function rollCraftedStats(recipe){
+  const lvFactor = 1 + Math.max(0, player.level-1) * 0.04; // +4% per level
+  const stats={};
+  Object.entries(recipe.baseStats).forEach(([k,base])=>{
+    const variance = 0.8 + Math.random() * 0.4; // 0.8 to 1.2
+    stats[k] = Math.ceil(base * lvFactor * variance);
+  });
+  return stats;
+}
+
 function craft(n,r){
-  if(!canCraft(n,r))return;
+  if(!canCraft(n,r)){
+    addFeed(`⚠ Cannot craft ${r.name}`,'#ef4444');
+    return;
+  }
+  // Spend materials
   const m=professions[n].materials;
   Object.entries(r.cost).forEach(([k,v])=>{m[k]=(m[k]||0)-v;});
-  addProfXP(n,50);
-  const found=ITEM_POOL.find(i=>i.name===r.result);
-  if(found)tryEquip({...found});else addFeed(`CRAFTED: ${r.name}`,'#9DC4B0');
+  // Craft XP — more for higher-tier recipes
+  const xpReward = {uncommon:40, rare:80, epic:160, legendary:320}[r.rarity] || 40;
+  addProfXP(n, xpReward);
+  // Build the crafted item
+  const crafted={
+    name:r.name,
+    slot:r.slot,
+    rarity:r.rarity,
+    stats:rollCraftedStats(r),
+    crafted:true, // mark so we can show "crafted" label in tooltip
+  };
+  // Route through acquireLoot — handles empty-slot auto-equip vs. bag routing
+  if(typeof acquireLoot==='function'){
+    acquireLoot(crafted);
+  } else {
+    // Fallback for very old code paths
+    tryEquip(crafted);
+  }
+  addFeed(`⚒ Crafted ${r.name} (+${xpReward} ${n} XP)`,'#9DC4B0');
+  if(typeof writeSave==='function')writeSave();
   renderProfPanel();
 }
 function openProf(){renderProfPanel();document.getElementById('profPanel').style.display='flex';}
 function closeProf(){document.getElementById('profPanel').style.display='none';}
 function renderProfPanel(){
-  const cards=document.getElementById('profCards');cards.innerHTML='';
+  const cards=document.getElementById('profCards');
+  if(!cards)return;
+  cards.innerHTML='';
   Object.entries(professions).forEach(([name,prof])=>{
-    const card=document.createElement('div');card.className='prof-card';
+    const card=document.createElement('div');
+    card.className='prof-card';
     const pct=prof.xp/prof.xpToNext*100;
-    const matsHtml=Object.entries(prof.materials).map(([k,v])=>`<span class="mat${v>0?' has':''}">${k}: ${v}</span>`).join('');
-    card.innerHTML=`<div class="prof-name">${name} — LV ${prof.level}</div><div class="prof-xp-bg"><div class="prof-xp-fill" style="width:${pct}%"></div></div><div class="mat-row">${matsHtml}</div>`;
+    // Render materials with labels and colors
+    const matsHtml=Object.entries(prof.materials)
+      .filter(([k,v])=>v>0 || ['scrap','etherDust','runecore','soulbond'].includes(k))
+      .map(([k,v])=>{
+        const label = MATERIAL_LABELS[k] || k;
+        const color = MATERIAL_COLORS[k] || '#9ca3af';
+        return `<span class="mat${v>0?' has':''}" style="color:${color}${v>0?'':'88'}">${label}: ${v}</span>`;
+      }).join('');
+    card.innerHTML=`
+      <div class="prof-name">⚒ ${name} — LV ${prof.level}</div>
+      <div class="prof-xp-row">
+        <div class="prof-xp-bg"><div class="prof-xp-fill" style="width:${pct}%"></div></div>
+        <span class="prof-xp-text">${prof.xp} / ${prof.xpToNext} XP</span>
+      </div>
+      <div class="mat-row">${matsHtml}</div>
+      <div class="recipe-list"></div>
+    `;
+    const recipeList=card.querySelector('.recipe-list');
     (RECIPES[name]||[]).forEach(r=>{
-      const row=document.createElement('div');row.className='recipe';
-      const cost=Object.entries(r.cost).map(([k,v])=>`${v} ${k}`).join(', ');
-      row.innerHTML=`<span class="recipe-name">${r.name}</span> <span class="recipe-cost">${cost}</span>`;
-      const btn=document.createElement('button');btn.className='craft-btn';btn.textContent='CRAFT';btn.disabled=!canCraft(name,r);
-      btn.onclick=()=>craft(name,r);row.appendChild(btn);card.appendChild(row);
+      const row=document.createElement('div');
+      row.className='recipe';
+      const canMake=canCraft(name,r);
+      const reasons=craftBlockReasons(name,r);
+      const rarityCol = RARITY_COLORS[r.rarity] || '#9ca3af';
+      const rarityLabel = RARITY_LABELS[r.rarity] || '?';
+      const icon = SLOT_ICONS[r.slot] || '✦';
+      // Stats preview — just keys and base numbers so player knows personality
+      const statsPreview = Object.entries(r.baseStats).map(([k,v])=>{
+        const lbl = (typeof STAT_LABELS!=='undefined'?STAT_LABELS[k]:null) || k;
+        return `+${v}-ish ${lbl}`;
+      }).join(' · ');
+      // Cost with material labels + color
+      const costHtml = Object.entries(r.cost).map(([k,v])=>{
+        const lbl = MATERIAL_LABELS[k] || k;
+        const col = MATERIAL_COLORS[k] || '#9ca3af';
+        const have = prof.materials[k] || 0;
+        const ok = have >= v;
+        return `<span style="color:${ok?col:'#ef4444'}">${v} ${lbl}</span>`;
+      }).join(' · ');
+      row.innerHTML=`
+        <div class="recipe-head">
+          <span class="recipe-icon" style="color:${rarityCol}">${icon}</span>
+          <span class="recipe-name" style="color:${rarityCol}">${r.name}</span>
+          <span class="recipe-rarity" style="background:${rarityCol}22;color:${rarityCol}">${rarityLabel}</span>
+        </div>
+        <div class="recipe-stats">${statsPreview}</div>
+        <div class="recipe-cost">${costHtml}</div>
+        ${!canMake && reasons.length ? `<div class="recipe-block">${reasons.join(' · ')}</div>` : ''}
+      `;
+      const btn=document.createElement('button');
+      btn.className='craft-btn';
+      btn.textContent = canMake ? 'CRAFT' : 'LOCKED';
+      btn.disabled = !canMake;
+      btn.onclick = ()=>craft(name,r);
+      row.appendChild(btn);
+      recipeList.appendChild(row);
     });
     cards.appendChild(card);
   });
@@ -517,7 +768,17 @@ function renderInventory(){
 
   if(countEl)countEl.textContent=`${inventory.length} / ${INVENTORY_MAX}`;
 
-  // Render the grid — 24 slots, empty or filled
+  // Classification-to-indicator mapping. Each slot gets a small visual based on
+  // whether it's an upgrade (▲ green), sidegrade (◆ gray), downgrade (▼ red),
+  // or slot is empty (✦ yellow — "wear this, nothing's there").
+  const UPGRADE_MARKS = {
+    'upgrade':    {symbol:'▲', color:'#22c55e', title:'Upgrade'},
+    'sidegrade':  {symbol:'◆', color:'#9ca3af', title:'Sidegrade'},
+    'downgrade':  {symbol:'▼', color:'#ef4444', title:'Downgrade'},
+    'empty-slot': {symbol:'✦', color:'#f59e0b', title:'Slot is empty — equip freely'},
+  };
+
+  // Render the grid
   grid.innerHTML='';
   for(let i=0;i<INVENTORY_MAX;i++){
     const slot=document.createElement('div');
@@ -526,9 +787,12 @@ function renderInventory(){
     if(item){
       const col=RARITY_COLORS[item.rarity]||'#9ca3af';
       const icon=SLOT_ICONS[item.slot]||'✦';
+      const classification=classifyBagItem(item);
+      const mark=UPGRADE_MARKS[classification];
       slot.classList.add('filled');
       slot.style.borderColor=col;
       slot.innerHTML=`
+        <span class="bag-slot-mark" style="color:${mark.color};text-shadow:0 0 8px ${mark.color}88" title="${mark.title}">${mark.symbol}</span>
         <span class="bag-slot-icon" style="color:${col};text-shadow:0 0 8px ${col}66">${icon}</span>
         <span class="bag-slot-rarity" style="background:${col}22;color:${col}">${RARITY_LABELS[item.rarity]||'?'}</span>
       `;
@@ -551,8 +815,36 @@ function renderInventory(){
       const item=inventory[_bagSelectedIndex];
       const col=RARITY_COLORS[item.rarity]||'#9ca3af';
       const current=equipped[item.slot];
-      const diff=computeStatDiff(item);
-      const diffHtml=diff.map(d=>`<div class="bag-stat-line" style="color:${d.color}">${d.text}</div>`).join('');
+      const statLines=computeStatLines(item);        // raw stats on THIS item
+      const diffLines=current?computeStatDiff(item):null; // comparison vs equipped
+
+      // Classification banner
+      const classification=classifyBagItem(item);
+      const mark=UPGRADE_MARKS[classification];
+      const classBanner = current
+        ? `<div class="bag-tt-verdict" style="background:${mark.color}22;color:${mark.color};border-color:${mark.color}66">
+             ${mark.symbol} ${mark.title.toUpperCase()}
+           </div>`
+        : `<div class="bag-tt-verdict" style="background:${mark.color}22;color:${mark.color};border-color:${mark.color}66">
+             ${mark.symbol} ${mark.title.toUpperCase()}
+           </div>`;
+
+      // Raw stats section (always shown — answers "what does this item have?")
+      const statsHtml = statLines.length
+        ? statLines.map(l=>`<div class="bag-stat-line" style="color:${l.color}">${l.text}</div>`).join('')
+        : '<div class="bag-stat-line" style="color:#6b4d8a">— no stats —</div>';
+
+      // Comparison section (only shown if slot has equipped item)
+      const diffHtml = diffLines
+        ? diffLines.map(l=>`<div class="bag-stat-line" style="color:${l.color}">${l.text}</div>`).join('')
+        : '';
+
+      // Salvage yield preview
+      const salvage=salvageYieldFor(item);
+      const salvagePreview=Object.entries(salvage)
+        .map(([k,v])=>`<span style="color:${MATERIAL_COLORS[k]||'#fff'}">${v} ${MATERIAL_LABELS[k]||k}</span>`)
+        .join(' · ');
+
       tooltip.innerHTML=`
         <div class="bag-tooltip-header" style="border-color:${col}88">
           <span class="bag-tt-name" style="color:${col};text-shadow:0 0 10px ${col}66">${item.name}</span>
@@ -560,13 +852,22 @@ function renderInventory(){
         </div>
         <div class="bag-tt-slot">${SLOT_ICONS[item.slot]||'✦'} ${item.slot.toUpperCase()}</div>
         ${item.setName?`<div class="bag-tt-set">◈ ${item.setName} set</div>`:''}
+        ${classBanner}
         <div class="bag-tt-section">
-          <div class="bag-tt-section-label">${current?'vs. Equipped':'Stats'}</div>
-          ${diffHtml||'<div class="bag-stat-line" style="color:#6b4d8a">— no stats —</div>'}
+          <div class="bag-tt-section-label">Item Stats</div>
+          ${statsHtml}
         </div>
-        ${current?`<div class="bag-tt-current">Currently: ${current.name}</div>`:''}
+        ${current?`<div class="bag-tt-section">
+          <div class="bag-tt-section-label">vs. Equipped (${current.name})</div>
+          ${diffHtml||'<div class="bag-stat-line" style="color:#6b4d8a">— identical —</div>'}
+        </div>`:''}
+        <div class="bag-tt-section bag-tt-salvage-preview">
+          <div class="bag-tt-section-label">Salvage Yield</div>
+          <div class="bag-stat-line">${salvagePreview}</div>
+        </div>
         <div class="bag-tt-actions">
           <button class="bag-btn bag-btn-equip">⚔ EQUIP</button>
+          <button class="bag-btn bag-btn-salvage">⚒ SALVAGE</button>
           <button class="bag-btn bag-btn-discard">✗ DISCARD</button>
         </div>
       `;
@@ -574,6 +875,7 @@ function renderInventory(){
       tooltip.style.borderColor=col+'55';
       const idx=_bagSelectedIndex;
       tooltip.querySelector('.bag-btn-equip').addEventListener('click',()=>equipFromBag(idx));
+      tooltip.querySelector('.bag-btn-salvage').addEventListener('click',()=>salvageFromBag(idx));
       tooltip.querySelector('.bag-btn-discard').addEventListener('click',()=>discardFromBag(idx));
     }
   }
