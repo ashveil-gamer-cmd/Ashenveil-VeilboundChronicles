@@ -347,6 +347,146 @@ function drawAbilityIcons(){
     },
   ];
 
+  // Ironwake icon set — 5 melee/guardian themed icons.
+  // Style-matched to Hollowcaller (same iconBG helper, rune accents) but warm/red palette.
+  const icons_ironwake = [
+    // ═══ 0: ANCHOR STRIKE — cleaving arc sword ═══
+    (x)=>{
+      x.clearRect(0,0,S,S);
+      iconBG(x,'#ef4444','#2a0a10','#0a0005');
+      // Sweeping arc — the cleave path
+      x.strokeStyle='#ef4444';x.lineWidth=2.5;x.shadowColor='#ef4444';x.shadowBlur=8;
+      x.beginPath();x.arc(CX,CY+8,18,Math.PI*1.1,Math.PI*1.9);x.stroke();
+      x.shadowBlur=0;
+      // Vertical sword down the center
+      x.fillStyle='#d4c896';
+      x.fillRect(CX-1.5,CY-18,3,26); // blade
+      x.fillStyle='#8b6914';
+      x.fillRect(CX-5,CY+7,10,3); // crossguard
+      x.fillRect(CX-1.5,CY+10,3,6); // hilt
+      // Spark particles at tip
+      x.fillStyle='#fff4a0';
+      [[CX-3,CY-20],[CX+3,CY-19],[CX,CY-24]].forEach(([px,py])=>{
+        x.beginPath();x.arc(px,py,1.5,0,Math.PI*2);x.fill();
+      });
+    },
+    // ═══ 1: BULWARK — shield with radiant guard ═══
+    (x)=>{
+      x.clearRect(0,0,S,S);
+      iconBG(x,'#d4c896','#231e10','#08060a');
+      // Shield shape (kite)
+      x.fillStyle='#b8a05a';x.shadowColor='#d4c896';x.shadowBlur=6;
+      x.beginPath();
+      x.moveTo(CX,CY-16);
+      x.quadraticCurveTo(CX+14,CY-14,CX+12,CY);
+      x.quadraticCurveTo(CX+10,CY+12,CX,CY+18);
+      x.quadraticCurveTo(CX-10,CY+12,CX-12,CY);
+      x.quadraticCurveTo(CX-14,CY-14,CX,CY-16);
+      x.closePath();x.fill();
+      x.shadowBlur=0;
+      // Shield boss — golden dot center
+      x.fillStyle='#fff4a0';
+      x.beginPath();x.arc(CX,CY-2,3,0,Math.PI*2);x.fill();
+      // Emanating rays outward
+      x.strokeStyle='#fff4a0aa';x.lineWidth=1;
+      for(let i=0;i<6;i++){
+        const a=i*Math.PI/3;
+        x.beginPath();
+        x.moveTo(CX+Math.cos(a)*14,CY+Math.sin(a)*14);
+        x.lineTo(CX+Math.cos(a)*20,CY+Math.sin(a)*20);
+        x.stroke();
+      }
+    },
+    // ═══ 2: GROUND SHATTER — cracked earth + impact ═══
+    (x)=>{
+      x.clearRect(0,0,S,S);
+      iconBG(x,'#fbbf24','#2a1a05','#080500');
+      // Impact burst lines radiating from center
+      x.strokeStyle='#fbbf24';x.lineWidth=2;x.shadowColor='#fbbf24';x.shadowBlur=8;
+      for(let i=0;i<8;i++){
+        const a=i*Math.PI/4;
+        x.beginPath();
+        x.moveTo(CX+Math.cos(a)*5,CY+Math.sin(a)*5);
+        x.lineTo(CX+Math.cos(a)*18,CY+Math.sin(a)*18);
+        x.stroke();
+      }
+      x.shadowBlur=0;
+      // Cracks in the ground (zigzag)
+      x.strokeStyle='#b8860b';x.lineWidth=1.5;
+      x.beginPath();
+      x.moveTo(CX-15,CY+10);x.lineTo(CX-8,CY+14);x.lineTo(CX-3,CY+11);x.lineTo(CX+5,CY+15);x.lineTo(CX+14,CY+12);
+      x.stroke();
+      // Center impact glow
+      const g=x.createRadialGradient(CX,CY,0,CX,CY,10);
+      g.addColorStop(0,'#fff4a0');g.addColorStop(1,'#fbbf2400');
+      x.fillStyle=g;x.beginPath();x.arc(CX,CY,10,0,Math.PI*2);x.fill();
+    },
+    // ═══ 3: RETRIBUTION — shield with reflected arrow ═══
+    (x)=>{
+      x.clearRect(0,0,S,S);
+      iconBG(x,'#a78bfa','#1a0d2e','#06020a');
+      // Shield silhouette — smaller, purple-tinted
+      x.strokeStyle='#a78bfa';x.lineWidth=2;x.shadowColor='#a78bfa';x.shadowBlur=6;
+      x.beginPath();
+      x.moveTo(CX,CY-12);
+      x.quadraticCurveTo(CX+10,CY-10,CX+9,CY+2);
+      x.quadraticCurveTo(CX+7,CY+11,CX,CY+15);
+      x.quadraticCurveTo(CX-7,CY+11,CX-9,CY+2);
+      x.quadraticCurveTo(CX-10,CY-10,CX,CY-12);
+      x.closePath();x.stroke();
+      x.shadowBlur=0;
+      // Reflected beams shooting OUTWARD (the reflection)
+      x.strokeStyle='#c084fc';x.lineWidth=2;
+      [[-1,-1],[1,-1],[-1.2,0.3],[1.2,0.3]].forEach(([dx,dy])=>{
+        const a=Math.atan2(dy,dx);
+        x.beginPath();
+        x.moveTo(CX+dx*11,CY+dy*11);
+        x.lineTo(CX+Math.cos(a)*22,CY+Math.sin(a)*22);
+        x.stroke();
+        // arrowhead
+        x.fillStyle='#c084fc';
+        x.beginPath();
+        x.arc(CX+Math.cos(a)*22,CY+Math.sin(a)*22,2,0,Math.PI*2);x.fill();
+      });
+    },
+    // ═══ 4: IRONWAKE'S FURY — charging figure with trail ═══
+    (x)=>{
+      x.clearRect(0,0,S,S);
+      iconBG(x,'#ff4400','#2a0a00','#0a0300');
+      // Motion-blur trail behind (lines from left)
+      x.strokeStyle='#ff440055';x.lineWidth=1.5;
+      for(let i=0;i<5;i++){
+        x.beginPath();
+        x.moveTo(6,CY-8+i*3);
+        x.lineTo(18,CY-8+i*3);
+        x.stroke();
+      }
+      // Forward-leaning armored figure
+      x.fillStyle='#8b2e1f';x.shadowColor='#ff4400';x.shadowBlur=8;
+      // Body/torso, angled forward
+      x.save();
+      x.translate(CX+4,CY);
+      x.rotate(0.15); // slight forward lean
+      x.fillRect(-5,-10,10,14); // torso
+      x.fillStyle='#d4c896';
+      x.fillRect(-3,-16,6,7); // head/helm
+      // Sword held forward
+      x.strokeStyle='#fff4a0';x.lineWidth=2;
+      x.beginPath();x.moveTo(2,-4);x.lineTo(14,-12);x.stroke();
+      x.restore();
+      x.shadowBlur=0;
+      // Fire burst at leading edge
+      x.fillStyle='#fff4a0';
+      [[CX+18,CY-10,2],[CX+20,CY-6,1.5],[CX+19,CY-3,2.5]].forEach(([px,py,pr])=>{
+        x.beginPath();x.arc(px,py,pr,0,Math.PI*2);x.fill();
+      });
+    },
+  ];
+
+  // Pick the icon set based on current class
+  const activeIcons = (player.classId === 'ironwake') ? icons_ironwake : icons;
+  const cls = CLASS_DEFS[player.classId] || CLASS_DEFS.hollowcaller;
+
   for(let i=0;i<5;i++){
     const c=document.getElementById('ic'+i);
     if(c){
@@ -354,7 +494,12 @@ function drawAbilityIcons(){
       // reset any inherited state from previous frame
       x.setTransform(1,0,0,1,0,0);
       x.globalAlpha=1;x.shadowBlur=0;
-      icons[i](x);
+      activeIcons[i](x);
+    }
+    // Update the ability label under the icon
+    const lbl=document.getElementById('abName'+i);
+    if(lbl && cls.abilities[i]){
+      lbl.textContent = cls.abilities[i].name;
     }
   }
 }
@@ -365,7 +510,66 @@ let running=false,lastTime=0,kills=0;
 let camX=WORLD_W/2,camY=WORLD_H/2;
 let bossTarget=null;
 
+// ═══════ CLASSES ════════════════════════════════════════════════════
+// Two playable classes, each with radically different stats, resources,
+// abilities, and playstyle. Class is chosen at new game and saved.
+// Ability cooldowns defined here; actual ability logic lives in the ability-
+// handler section further down.
+const CLASS_DEFS = {
+  hollowcaller: {
+    id: 'hollowcaller',
+    name: 'Hollowcaller',
+    tagline: 'Ranged Summoner',
+    description: 'Commands spirits from afar. Glass cannon — fragile but deals massive burst damage through spirit detonations.',
+    baseHp: 1000,
+    baseAtk: 15,
+    speedMult: 1.0,
+    resourceName: 'Spirit',
+    resourceColor: '#c084fc',
+    attackRange: 220,      // ranged auto-attack distance
+    abilities: [
+      // Existing Hollowcaller abilities: Raise Spirit, Veilmark, Detonate, Wrath Tide, Soul Nova
+      {id:'raise',    name:'Raise Spirit',  cd:1000, icon:'spirit'},
+      {id:'veilmark', name:'Veilmark',      cd:3000, icon:'mark'},
+      {id:'detonate', name:'Detonate',      cd:4000, icon:'detonate'},
+      {id:'wrath',    name:'Wrath Tide',    cd:8000, icon:'wrath'},
+      {id:'nova',     name:'Soul Nova',     cd:12000,icon:'nova'},
+    ],
+  },
+  ironwake: {
+    id: 'ironwake',
+    name: 'Ironwake',
+    tagline: 'Bound Guardian',
+    description: 'Melee juggernaut. Walks into enemies and absorbs blows. Builds Wrath from damage taken, unleashes devastating armored strikes.',
+    baseHp: 2000,          // 2x Hollowcaller
+    baseAtk: 20,           // 1.3x Hollowcaller
+    speedMult: 0.75,       // slower movement
+    resourceName: 'Wrath',
+    resourceColor: '#ef4444',
+    attackRange: 85,       // melee range — much shorter
+    abilities: [
+      {id:'anchor',       name:'Anchor Strike',    cd:1500,  icon:'anchor'},
+      {id:'bulwark',      name:'Bulwark',          cd:4000,  icon:'bulwark'},
+      {id:'shatter',      name:'Ground Shatter',   cd:8000,  icon:'shatter'},
+      {id:'retribution',  name:'Retribution',      cd:12000, icon:'retribution'},
+      {id:'fury',         name:"Ironwake's Fury",  cd:25000, icon:'fury'},
+    ],
+  },
+};
+
+// Shortcut: returns the currently-active class definition for player
+function getPlayerClass(){
+  return CLASS_DEFS[player.classId] || CLASS_DEFS.hollowcaller;
+}
+
 let player={
+  // Class system — defaults to hollowcaller for saves from before class system existed
+  classId:'hollowcaller',
+  wrath:0, wrathMax:100,   // Ironwake resource (unused by Hollowcaller)
+  bulwarkUntil:0,          // Ironwake: Bulwark active window
+  retributionUntil:0,      // Ironwake: Retribution active window
+  furyChargeUntil:0,       // Ironwake: Fury channel window
+  // Base player fields
   x:WORLD_W/2,y:WORLD_H/2,hp:1000,maxHp:1000,attack:15,
   level:1,xp:0,xpToNext:165,gold:0,
   vx:0,vy:0,facing:0,
@@ -380,7 +584,7 @@ let player={
 
 let spirits=[],enemies=[],particles=[],dmgTexts=[],groundFX=[];
 let spiritId=0,enemyId=0;
-let abilityCDs=[0,0,0,0];
+let abilityCDs=[0,0,0,0,0];
 let spawnTimer=0;
 let keys={},touchJoy={active:false,startX:0,startY:0,dx:0,dy:0},joyId=null;
 let shakeTimer=0,shakeAmt=0;
@@ -1754,10 +1958,24 @@ function resolveBossAbility(boss){
       if(alongLine>0 && alongLine<=ab.lineLength && perpLine<=ab.lineWidth/2){
         // Player is in the danger zone
         if(player.iframes<=0){
-          player.hp=Math.max(0,player.hp-dmg);
+          const now=performance.now();
+          let finalDmg = dmg;
+          if(player.classId==='ironwake' && player.bulwarkUntil && now < player.bulwarkUntil){
+            finalDmg *= 0.3;
+            spawnDmgText(player.x, player.y-20, 'BLOCKED', '#d4c896', false);
+          }
+          if(player.classId==='ironwake' && player.retributionUntil && now < player.retributionUntil){
+            if(!boss.dead)hitEnemy(boss, finalDmg*0.5, false, player.x, player.y);
+            spawnDmgText(boss.x, boss.y-boss.size, 'REFLECT', '#a78bfa', false);
+          }
+          player.hp=Math.max(0,player.hp-finalDmg);
+          if(player.classId==='ironwake'){
+            const wrathGain = (player.bulwarkUntil && now < player.bulwarkUntil) ? 20 : 10;
+            player.wrath = Math.min(player.wrathMax, (player.wrath||0) + wrathGain);
+          }
           player.hitFlash=0.4;
           player.iframes=400;
-          addFeed(`-${Math.ceil(dmg)} · Fire Cross`,'#ff4400');
+          addFeed(`-${Math.ceil(finalDmg)} · Fire Cross`,'#ff4400');
           screenShake(12,300);
         }
       }
@@ -2193,11 +2411,13 @@ function setAfkWaypoint(){
 function _tb(k){return typeof getTalentBonus==='function'?getTalentBonus(k):0;}
 
 // Compute effective cooldown for an ability after all CDR talents.
-// idx 0 = Raise (also gets raiseCdrPct bonus), others just get generic cdrPct.
+// Reads from the current class's ability definitions.
 function effectiveCD(idx){
-  let base=ABILITY_CDS[idx]||16000;
+  const cls = CLASS_DEFS[player.classId] || CLASS_DEFS.hollowcaller;
+  let base = cls.abilities[idx]?.cd || ABILITY_CDS[idx] || 16000;
   let cdrPct=_tb('cdrPct');
-  if(idx===0)cdrPct+=_tb('raiseCdrPct');
+  // Hollowcaller Raise-specific CDR bonus (only applies to its slot 0)
+  if(idx===0 && player.classId==='hollowcaller')cdrPct+=_tb('raiseCdrPct');
   return base*(1-Math.min(cdrPct,70)/100); // cap CDR at 70% to prevent infinite loops
 }
 
@@ -2216,6 +2436,11 @@ function damageMult(){
 function playerCast(idx){
   const now=performance.now();
   if(now<abilityCDs[idx]||player.isDead)return;
+  // Route to class-specific ability handler
+  if(player.classId==='ironwake'){
+    return castIronwake(idx, now);
+  }
+  // Default: Hollowcaller (existing behavior)
   if(idx===0){
     // Raise — summon one spirit, or two with Echoing Call talent
     const doubles=_tb('raiseDoubles')>0;
@@ -2281,6 +2506,127 @@ function playerCast(idx){
     pushGroundFX({type:'ring',x:player.x,y:player.y,maxR:460,r:30,color:'#fbbf24',life:0.8,maxLife:0.8,expand:true});
     pushGroundFX({type:'scorch',x:player.x,y:player.y,r:440,maxR:440,color:'#fbbf24',life:2.2,maxLife:2.2});
     addFeed(`★ SOUL NOVA — ${hits} STRUCK · ${Math.round(dmg)}`,'#fbbf24');
+  }
+}
+
+// ═══════ IRONWAKE ABILITIES ═════════════════════════════════════════
+// Melee juggernaut. Abilities focus on area melee strikes, damage reduction,
+// threat-based counters, and decisive commitments. Wrath resource builds from
+// taking damage — see applyPlayerHit hook.
+function castIronwake(idx, now){
+  const cls = CLASS_DEFS.ironwake;
+  if(idx===0){
+    // Anchor Strike — 180° cleave in facing direction, short range, high damage
+    const range = 120;
+    const dmg = player.attack * 1.8 * damageMult();
+    const dir = player.facing || 0;
+    let hits = 0;
+    enemies.forEach(e=>{
+      if(e.dead)return;
+      const dx = e.x - player.x, dy = e.y - player.y;
+      const d = Math.sqrt(dx*dx + dy*dy);
+      if(d > range) return;
+      // Angle from player to enemy
+      const ang = Math.atan2(dy, dx);
+      let diff = ang - dir;
+      while(diff > Math.PI) diff -= Math.PI*2;
+      while(diff < -Math.PI) diff += Math.PI*2;
+      if(Math.abs(diff) > Math.PI/2) return; // 180° arc = 90° each side
+      hitEnemy(e, dmg, false, player.x, player.y);
+      hits++;
+    });
+    abilityCDs[0] = now + effectiveCD(0);
+    // Visual: sweeping arc FX in facing direction
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:range, r:30, color:'#ef4444', life:0.4, maxLife:0.4, expand:true});
+    pushGroundFX({type:'bloom', x:player.x+Math.cos(dir)*60, y:player.y+Math.sin(dir)*60, r:90, maxR:90, color:'#ef4444', life:0.35, maxLife:0.35});
+    screenShake(8, 180);
+    if(typeof SFX!=='undefined' && SFX.hit) SFX.hit();
+    addFeed(`⚔ ANCHOR STRIKE — ${hits} HIT`, '#ef4444');
+  }
+  else if(idx===1){
+    // Bulwark — raise shield. 70% damage reduction for 2s, double wrath gain from hits.
+    player.bulwarkUntil = now + 2000;
+    abilityCDs[1] = now + effectiveCD(1);
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:120, maxR:120, color:'#8b7355', life:0.5, maxLife:0.5, follow:player});
+    pushGroundFX({type:'rimlight', x:player.x, y:player.y, r:80, maxR:80, color:'#d4c896', life:2, maxLife:2, follow:player});
+    addFeed(`🛡 BULWARK RAISED`, '#d4c896');
+    if(typeof SFX!=='undefined' && SFX.hit) SFX.hit();
+  }
+  else if(idx===2){
+    // Ground Shatter — AoE stun + heavy damage in 280px radius
+    const radius = 280;
+    const dmg = player.attack * 2.2 * damageMult();
+    let hits = 0;
+    enemies.forEach(e=>{
+      if(e.dead) return;
+      const d = dist2(player.x, player.y, e.x, e.y);
+      if(d > radius) return;
+      hitEnemy(e, dmg, false, player.x, player.y);
+      // Stun: cancel windup, push lastAttack forward so they can't attack for 1.2s
+      e.chargingUntil = 0;
+      e.lastAttack = now + 200; // delay their next attack window
+      e.stunUntil = now + 1200;
+      hits++;
+    });
+    abilityCDs[2] = now + effectiveCD(2);
+    screenShake(16, 400);
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:radius, r:20, color:'#fbbf24', life:0.6, maxLife:0.6, expand:true});
+    pushGroundFX({type:'scorch', x:player.x, y:player.y, r:radius-40, maxR:radius-40, color:'#b8860b', life:1.4, maxLife:1.4});
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:180, maxR:180, color:'#fff4a0', life:0.3, maxLife:0.3});
+    if(typeof SFX!=='undefined' && SFX.detonate) SFX.detonate();
+    addFeed(`💥 GROUND SHATTER — ${hits} STUNNED`, '#fbbf24');
+  }
+  else if(idx===3){
+    // Retribution — reflect 50% damage for 5s
+    player.retributionUntil = now + 5000;
+    abilityCDs[3] = now + effectiveCD(3);
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:180, maxR:180, color:'#a78bfa', life:0.6, maxLife:0.6});
+    pushGroundFX({type:'rimlight', x:player.x, y:player.y, r:110, maxR:110, color:'#a78bfa', life:5, maxLife:5, follow:player});
+    addFeed(`◈ RETRIBUTION ACTIVE`, '#a78bfa');
+    if(typeof SFX!=='undefined' && SFX.veilmark) SFX.veilmark();
+  }
+  else if(idx===4){
+    // Ironwake's Fury — charge 400px forward in facing direction, hit all in path
+    const charge = 400;
+    const dmg = player.attack * 3.5 * damageMult();
+    const dir = player.facing || 0;
+    const startX = player.x, startY = player.y;
+    const endX = player.x + Math.cos(dir)*charge;
+    const endY = player.y + Math.sin(dir)*charge;
+    // Hit everything in a line between start and end
+    let hits = 0;
+    enemies.forEach(e=>{
+      if(e.dead) return;
+      // Project enemy position onto charge line
+      const px = e.x - startX, py = e.y - startY;
+      const projAlong = px*Math.cos(dir) + py*Math.sin(dir); // how far along the line
+      const perpLine = Math.abs(px*(-Math.sin(dir)) + py*Math.cos(dir)); // perpendicular distance
+      if(projAlong > 0 && projAlong <= charge && perpLine < 100){
+        hitEnemy(e, dmg, false, startX, startY);
+        // Knockdown: big lastAttack delay
+        e.chargingUntil = 0;
+        e.lastAttack = now + 500;
+        e.stunUntil = now + 1800;
+        hits++;
+      }
+    });
+    // Teleport player to end of charge (only if clear)
+    if(typeof findClearPosition==='function'){
+      const clear = findClearPosition(endX, endY, 22);
+      player.x = clear.x;
+      player.y = clear.y;
+    } else {
+      player.x = endX; player.y = endY;
+    }
+    if(typeof camX!=='undefined'){ camX = player.x; camY = player.y; }
+    abilityCDs[4] = now + effectiveCD(4);
+    screenShake(22, 600);
+    // Visual trail
+    pushGroundFX({type:'line', x:startX, y:startY, endX:player.x, endY:player.y, width:150, color:'#ff4400', life:1.2, maxLife:1.2});
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:200, maxR:200, color:'#ff4400', life:0.4, maxLife:0.4});
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:280, r:20, color:'#ff4400', life:0.7, maxLife:0.7, expand:true});
+    if(typeof SFX!=='undefined' && SFX.eliteDeath) SFX.eliteDeath();
+    addFeed(`★ IRONWAKE'S FURY — ${hits} STRUCK`, '#ff4400');
   }
 }
 
@@ -2606,10 +2952,12 @@ function update(dt,now){
   if(touchJoy.active){ix=touchJoy.dx;iy=touchJoy.dy;}
   if(ix!==0||iy!==0)player.lastInput=now;
   const isAfk=now-player.lastInput>AFK_IDLE;
+  // Class-specific speed multiplier — Ironwake is slower than Hollowcaller
+  const classSpdMult = (CLASS_DEFS[player.classId]||CLASS_DEFS.hollowcaller).speedMult || 1.0;
 
   if(ix!==0||iy!==0){
     const m=Math.sqrt(ix*ix+iy*iy)||1;
-    const spdMult=1+_tb('moveSpdPct')/100;
+    const spdMult=(1+_tb('moveSpdPct')/100) * classSpdMult;
     player.vx=(ix/m)*PLAYER_SPEED*spdMult;player.vy=(iy/m)*PLAYER_SPEED*spdMult;
     player.facing=Math.atan2(iy,ix);
   } else if(isAfk){
@@ -2619,7 +2967,7 @@ function update(dt,now){
     let mx=tx,my=ty,md=d;
     if(ne){mx=ne.x-player.x;my=ne.y-player.y;md=Math.sqrt(mx*mx+my*my)||1;}
     if(d<80||player.afkTimer>player.afkCommit){player.visitedSectors[player.sector]=true;setAfkWaypoint();}
-    const spdMult=1+_tb('moveSpdPct')/100;
+    const spdMult=(1+_tb('moveSpdPct')/100) * classSpdMult;
     const spd=(ne&&md<320?PLAYER_SPEED*0.9:PLAYER_SPEED*0.72)*spdMult;
     player.vx=(mx/md)*spd;player.vy=(my/md)*spd;
     player.facing=Math.atan2(my,mx);
@@ -2637,13 +2985,15 @@ function update(dt,now){
   if(player.iframes>0)player.iframes-=dt*1000;
   if(player.hitFlash>0)player.hitFlash-=dt;
 
-  // Auto attack
+  // Auto attack — uses class attack range (Hollowcaller 220, Ironwake 85)
+  const classAttackRange = (CLASS_DEFS[player.classId]||CLASS_DEFS.hollowcaller).attackRange || ATTACK_RANGE;
   if(now-player.lastAttack>ATTACK_CD){
-    const t=getNearestEnemy(ATTACK_RANGE);
+    const t=getNearestEnemy(classAttackRange);
     if(t){player.lastAttack=now;hitEnemy(t,player.attack);SFX.hit();
-      // Attack arc particles
+      // Attack arc particles — Ironwake red, Hollowcaller purple
+      const arcColor = player.classId==='ironwake' ? '#ef4444' : '#c084fc';
       const dx=t.x-player.x,dy=t.y-player.y,d=Math.sqrt(dx*dx+dy*dy)||1;
-      for(let i=0;i<4;i++)particles.push({x:player.x+dx/d*(40+i*30),y:player.y+dy/d*(40+i*30),vx:(Math.random()-0.5)*60,vy:(Math.random()-0.5)*60,life:0.25,maxLife:0.25,color:'#c084fc',size:2+Math.random()*2});
+      for(let i=0;i<4;i++)particles.push({x:player.x+dx/d*(40+i*30),y:player.y+dy/d*(40+i*30),vx:(Math.random()-0.5)*60,vy:(Math.random()-0.5)*60,life:0.25,maxLife:0.25,color:arcColor,size:2+Math.random()*2});
     }
   }
 
@@ -2689,6 +3039,11 @@ function update(dt,now){
     }
     // Boss doesn't move while actively casting — locks in place to commit to ability
     if(e.abilityCasting){return;}
+    // Ironwake stun — enemy is frozen, no movement, no attack windup
+    if(e.stunUntil && now < e.stunUntil){
+      e.chargingUntil = 0;
+      return;
+    }
     const dx=player.x-e.x,dy=player.y-e.y,d=Math.sqrt(dx*dx+dy*dy)||1;
     // Move toward player if out of attack range
     if(d>e.size+24)e.chargingUntil=0; // cancel windup if player moves out
@@ -2716,8 +3071,24 @@ function update(dt,now){
       if(nd<=e.attackRange&&player.iframes<=0){
         // Apply damage reduction talent
         const dmgReducePct=_tb('dmgReducePct');
-        const incomingDmg=e.attack*(1-Math.min(dmgReducePct,80)/100);
+        let incomingDmg=e.attack*(1-Math.min(dmgReducePct,80)/100);
+        // Ironwake Bulwark — 70% damage reduction during active window
+        if(player.classId==='ironwake' && player.bulwarkUntil && now < player.bulwarkUntil){
+          incomingDmg *= 0.3;
+          spawnDmgText(player.x, player.y-20, 'BLOCKED', '#d4c896', false);
+        }
+        // Ironwake Retribution — reflect 50% of damage back at attacker
+        if(player.classId==='ironwake' && player.retributionUntil && now < player.retributionUntil){
+          const reflectDmg = incomingDmg * 0.5;
+          if(!e.dead)hitEnemy(e, reflectDmg, false, player.x, player.y);
+          spawnDmgText(e.x, e.y-e.size, 'REFLECT', '#a78bfa', false);
+        }
         player.hp-=incomingDmg;
+        // Ironwake Wrath generation — hits build wrath. Bulwark doubles rate.
+        if(player.classId==='ironwake'){
+          const wrathGain = (player.bulwarkUntil && now < player.bulwarkUntil) ? 20 : 10;
+          player.wrath = Math.min(player.wrathMax, (player.wrath||0) + wrathGain);
+        }
         player.hitFlash=0.18;player.iframes=220;
         screenShake(e.isElite?10:6,e.isElite?180:130);SFX.playerHit();
         pushGroundFX({type:'bloom',x:player.x,y:player.y,r:60,maxR:60,color:'#ef4444',life:0.3,maxLife:0.3});
@@ -2880,24 +3251,61 @@ function render(now){
 
 // ═══════ HUD UPDATE ═════════════════════════════════════
 function updateHUD(now){
+  const isIronwake = player.classId === 'ironwake';
   document.getElementById('hpFill').style.width=(player.hp/player.maxHp*100)+'%';
   document.getElementById('xpFill').style.width=(player.xp/player.xpToNext*100)+'%';
-  const sc=spirits.filter(s=>!s.dead).length;
-  document.getElementById('spFill').style.width=(sc/(player.maxBonds||MAX_SPIRITS)*100)+'%';
+  // Class name + portrait icon update
+  const nameEl=document.getElementById('hudClassName');
+  const portraitEl=document.getElementById('hudPortrait');
+  if(nameEl){
+    const cls = CLASS_DEFS[player.classId] || CLASS_DEFS.hollowcaller;
+    nameEl.textContent = cls.name.toUpperCase();
+  }
+  if(portraitEl){
+    portraitEl.textContent = isIronwake ? '⚔' : '🔮';
+  }
+  // Show Spirit bar for Hollowcaller, Wrath bar for Ironwake
+  const spRow = document.getElementById('spRow');
+  const wrathRow = document.getElementById('wrathRow');
+  if(spRow) spRow.style.display = isIronwake ? 'none' : 'flex';
+  if(wrathRow) wrathRow.style.display = isIronwake ? 'flex' : 'none';
+  if(isIronwake){
+    const wrathFill=document.getElementById('wrathFill');
+    if(wrathFill) wrathFill.style.width = ((player.wrath||0)/(player.wrathMax||100)*100)+'%';
+  } else {
+    const sc=spirits.filter(s=>!s.dead).length;
+    document.getElementById('spFill').style.width=(sc/(player.maxBonds||MAX_SPIRITS)*100)+'%';
+  }
   document.getElementById('levelBadge').textContent=`LV ${player.level}`;
   document.getElementById('hpNum').textContent=`${Math.ceil(player.hp)}`;
   document.getElementById('goldLabel').textContent=`💰 ${player.gold} G`;
-  // Spirit pips
-  const sp=document.getElementById('spiritPanel');sp.innerHTML='';
-  const mb=player.maxBonds||MAX_SPIRITS;
-  for(let i=0;i<mb;i++){const d=document.createElement('div');d.className='spip'+(i<sc?'':' dead');d.style.animationDelay=(i*0.18)+'s';sp.appendChild(d);}
-  // Ability CDs
-  for(let i=0;i<4;i++){
-    const rem=Math.max(0,abilityCDs[i]-now),pct=rem/ABILITY_CDS[i];
-    document.getElementById('ov'+i).style.height=(pct*100)+'%';
+  // Spirit pips — only shown for Hollowcaller
+  const sp=document.getElementById('spiritPanel');
+  if(sp){
+    if(isIronwake){
+      sp.style.display='none';
+    } else {
+      sp.style.display='';
+      const sc=spirits.filter(s=>!s.dead).length;
+      sp.innerHTML='';
+      const mb=player.maxBonds||MAX_SPIRITS;
+      for(let i=0;i<mb;i++){const d=document.createElement('div');d.className='spip'+(i<sc?'':' dead');d.style.animationDelay=(i*0.18)+'s';sp.appendChild(d);}
+    }
+  }
+  // Ability CDs — iterate through all 5 slots, using class-specific cooldowns
+  const cls = CLASS_DEFS[player.classId] || CLASS_DEFS.hollowcaller;
+  for(let i=0;i<5;i++){
+    const baseCD = cls.abilities[i]?.cd || ABILITY_CDS[i] || 1000;
+    const rem=Math.max(0,abilityCDs[i]-now);
+    const pct=baseCD>0?rem/baseCD:0;
+    const ov=document.getElementById('ov'+i);
+    if(ov) ov.style.height=(pct*100)+'%';
     const cdEl=document.getElementById('cd'+i);
-    if(rem>0){cdEl.style.opacity='1';cdEl.textContent=Math.ceil(rem/1000)+'s';}else cdEl.style.opacity='0';
-    document.getElementById('ab'+i).classList.toggle('ready',rem<=0);
+    if(cdEl){
+      if(rem>0){cdEl.style.opacity='1';cdEl.textContent=Math.ceil(rem/1000)+'s';}else cdEl.style.opacity='0';
+    }
+    const abEl=document.getElementById('ab'+i);
+    if(abEl) abEl.classList.toggle('ready',rem<=0);
   }
 }
 
@@ -2926,6 +3334,8 @@ function buildSave(){
       hp:player.hp,maxHp:player.maxHp,
       gold:player.gold,attack:player.attack,
       soulMastery:player.soulMastery,maxBonds:player.maxBonds,
+      classId:player.classId||'hollowcaller',
+      wrath:player.wrath||0,
     },
     stats:{kills},
     zoneId:curZone?.id||1,
@@ -2972,6 +3382,10 @@ function deleteSave(){
 
 // Apply a loaded save to the live game state. Called from startGame when continuing.
 function applySave(data){
+  // Class — restore FIRST so HP/attack compute functions use correct multipliers
+  player.classId=data.player?.classId||'hollowcaller';
+  player.wrath=data.player?.wrath||0;
+  player.bulwarkUntil=0; player.retributionUntil=0; player.furyChargeUntil=0;
   // Player — use `?? default` so missing fields fall back safely
   player.level=data.player?.level??1;
   player.xp=data.player?.xp??0;
@@ -3152,12 +3566,84 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden)emergencySa
 window.addEventListener('pagehide',emergencySave);
 // Fires when the browser loses focus (desktop)
 window.addEventListener('blur',emergencySave);
-document.getElementById('startBtn').addEventListener('click',()=>startGame(false));
+// Start flow: if starting a new game (no continue), show class-select first.
+// Continue-from-save goes straight into the game with the saved class.
+document.getElementById('startBtn').addEventListener('click',()=>openClassSelect());
 // New continue/newgame buttons — only present if HTML has been updated
 const _continueBtn=document.getElementById('continueBtn');
 if(_continueBtn)_continueBtn.addEventListener('click',()=>startGame(true));
 const _newGameBtn=document.getElementById('newGameBtn');
-if(_newGameBtn)_newGameBtn.addEventListener('click',newGameConfirm);
+if(_newGameBtn)_newGameBtn.addEventListener('click',()=>{
+  if(newGameConfirmCheck())openClassSelect();
+});
+
+// Class-select screen: shows both classes as big cards, player picks one, then starts game.
+function openClassSelect(){
+  const titleScr = document.getElementById('titleScreen');
+  const classScr = document.getElementById('classSelectScreen');
+  if(titleScr) titleScr.style.display='none';
+  if(classScr) classScr.style.display='flex';
+  renderClassSelect();
+}
+function closeClassSelect(){
+  const titleScr = document.getElementById('titleScreen');
+  const classScr = document.getElementById('classSelectScreen');
+  if(classScr) classScr.style.display='none';
+  if(titleScr) titleScr.style.display='flex';
+}
+function renderClassSelect(){
+  const grid = document.getElementById('classSelectGrid');
+  if(!grid) return;
+  grid.innerHTML='';
+  Object.values(CLASS_DEFS).forEach(cls=>{
+    const card = document.createElement('div');
+    card.className = 'class-card';
+    card.style.borderColor = cls.resourceColor + '66';
+    card.innerHTML = `
+      <div class="class-card-icon" style="color:${cls.resourceColor};text-shadow:0 0 20px ${cls.resourceColor}88">${cls.id==='hollowcaller'?'🜲':'⚔'}</div>
+      <div class="class-card-name" style="color:${cls.resourceColor}">${cls.name.toUpperCase()}</div>
+      <div class="class-card-tagline">${cls.tagline}</div>
+      <div class="class-card-desc">${cls.description}</div>
+      <div class="class-card-stats">
+        <div class="class-stat"><span class="class-stat-label">HP</span><span class="class-stat-val">${cls.baseHp}</span></div>
+        <div class="class-stat"><span class="class-stat-label">Attack</span><span class="class-stat-val">${cls.baseAtk}</span></div>
+        <div class="class-stat"><span class="class-stat-label">Speed</span><span class="class-stat-val">${Math.round(cls.speedMult*100)}%</span></div>
+        <div class="class-stat"><span class="class-stat-label">Range</span><span class="class-stat-val">${cls.attackRange}px</span></div>
+        <div class="class-stat"><span class="class-stat-label">Resource</span><span class="class-stat-val" style="color:${cls.resourceColor}">${cls.resourceName}</span></div>
+      </div>
+      <button class="class-card-choose" style="color:${cls.resourceColor};border-color:${cls.resourceColor}66">CHOOSE ${cls.name.toUpperCase()}</button>
+    `;
+    card.querySelector('.class-card-choose').addEventListener('click',()=>{
+      chooseClass(cls.id);
+    });
+    grid.appendChild(card);
+  });
+  const cancelBtn = document.getElementById('classSelectCancelBtn');
+  if(cancelBtn){
+    cancelBtn.onclick = ()=>closeClassSelect();
+  }
+}
+function chooseClass(classId){
+  // Clear any in-progress save — new game always starts fresh
+  try{ localStorage.removeItem(SAVE_KEY); }catch(e){}
+  // Set class on player BEFORE startGame computes stats
+  player.classId = classId;
+  player.wrath = 0;
+  player.bulwarkUntil = 0;
+  player.retributionUntil = 0;
+  player.furyChargeUntil = 0;
+  // Hide class-select, start game fresh
+  const classScr = document.getElementById('classSelectScreen');
+  if(classScr) classScr.style.display='none';
+  startGame(false);
+}
+
+// Helper: check if user confirms New Game when a save exists.
+// Returns true if user accepted (proceed with New Game), false if declined.
+function newGameConfirmCheck(){
+  if(!hasSave()) return true;
+  return confirm('Starting a new game will overwrite your current save. Are you sure?');
+}
 // Paint correct buttons on page load
 refreshTitleButtons();
 
