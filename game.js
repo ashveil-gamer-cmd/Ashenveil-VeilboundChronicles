@@ -273,6 +273,8 @@ function generateEnvironment(){
         type,sz:16+rngF(s*5)*42,rot:rngF(s*7)*Math.PI*2,seed:s});
     }
   });
+  // Also regenerate terrain features (paths, patches) for the current theme
+  if(typeof generateTerrainFeatures==='function')generateTerrainFeatures();
 }
 
 function drawEnvironment(now){
@@ -545,7 +547,6 @@ function drawSpirit(s,t){
 // ═══════ BACKGROUND & FOG ═══════════════════════════════
 function drawBackground(now){}// kept for compat
 function drawGroundPlane(now){}// kept for compat
-
 // Returns the currently active visual theme. In a dungeon, uses the dungeon's
 // theme; in the open world, uses the current zone. This is the single source
 // of truth for all environmental rendering.
@@ -556,25 +557,157 @@ function getActiveTheme(){
   return curZone;
 }
 
+// ═══════ TERRAIN GENERATION ═══════════════════════════════════
+// Procedural terrain features (patches of different ground, paths). Generated
+// once at zone entry, cached in terrainFeatures. Deterministic per zone so it
+// doesn't swim around between frames.
+let terrainFeatures={patches:[],paths:[]};
+
+// Deterministic pseudo-random from a seed — same seed always gives same output.
+function srand(seed){
+  let s=seed;
+  return ()=>{s=(s*1664525+1013904223)|0;return ((s>>>0)%1000000)/1000000;};
+}
+
+function generateTerrainFeatures(){
+  terrainFeatures.patches=[];
+  terrainFeatures.paths=[];
+  const z=getActiveTheme();
+  // Seed differs by zone so each looks unique but stable within a session
+  const seedBase=(z.id||'').split('').reduce((a,c)=>a*31+c.charCodeAt(0),7919);
+  const rnd=srand(seedBase);
+  // Layer 1: ~18 large soft ground patches of slightly varied color (big blobs)
+  for(let i=0;i<18;i++){
+    terrainFeatures.patches.push({
+      x:rnd()*WORLD_W,y:rnd()*WORLD_H,
+      rx:280+rnd()*520,ry:180+rnd()*380,
+      color:z.patchA||'rgba(0,0,0,0.2)',
+      rotate:rnd()*Math.PI,
+      layer:'large',
+    });
+  }
+  // Layer 2: ~32 medium patches of a slightly different tint (variety)
+  for(let i=0;i<32;i++){
+    terrainFeatures.patches.push({
+      x:rnd()*WORLD_W,y:rnd()*WORLD_H,
+      rx:90+rnd()*180,ry:60+rnd()*120,
+      color:z.patchB||'rgba(255,255,255,0.03)',
+      rotate:rnd()*Math.PI,
+      layer:'medium',
+    });
+  }
+  // Layer 3: ~140 small detail patches (pebbles, moss, cracks feel)
+  for(let i=0;i<140;i++){
+    terrainFeatures.patches.push({
+      x:rnd()*WORLD_W,y:rnd()*WORLD_H,
+      rx:16+rnd()*32,ry:10+rnd()*22,
+      color:z.patchC||'rgba(255,255,255,0.04)',
+      rotate:rnd()*Math.PI,
+      layer:'small',
+    });
+  }
+  // Paths: 2-3 winding paths cutting through the world.
+  // Each is a series of 8-12 connected points with variable width.
+  if(z.hasPaths!==false){  // default yes unless theme opts out
+    const pathCount=2+Math.floor(rnd()*2);
+    for(let p=0;p<pathCount;p++){
+      const points=[];
+      // Start on one edge, end on the opposite
+      const startEdge=Math.floor(rnd()*4);
+      let sx,sy,ex,ey;
+      if(startEdge===0){sx=rnd()*WORLD_W;sy=0;ex=rnd()*WORLD_W;ey=WORLD_H;}
+      else if(startEdge===1){sx=WORLD_W;sy=rnd()*WORLD_H;ex=0;ey=rnd()*WORLD_H;}
+      else if(startEdge===2){sx=rnd()*WORLD_W;sy=WORLD_H;ex=rnd()*WORLD_W;ey=0;}
+      else{sx=0;sy=rnd()*WORLD_H;ex=WORLD_W;ey=rnd()*WORLD_H;}
+      const steps=10+Math.floor(rnd()*4);
+      for(let s=0;s<=steps;s++){
+        const t=s/steps;
+        // Base interpolation + sinusoidal wander for a curving path
+        const wobble=(rnd()-0.5)*WORLD_W*0.18;
+        const wobble2=(rnd()-0.5)*WORLD_H*0.18;
+        points.push({
+          x:sx+(ex-sx)*t+Math.sin(t*Math.PI*1.3+p)*WORLD_W*0.09+wobble,
+          y:sy+(ey-sy)*t+Math.cos(t*Math.PI*1.1+p*2)*WORLD_H*0.09+wobble2,
+          width:50+rnd()*42,
+        });
+      }
+      terrainFeatures.paths.push({points,color:z.pathColor||'rgba(140,110,80,0.18)'});
+    }
+  }
+}
+
 function drawWorld(now){
   const z=getActiveTheme();
-  // Zone-specific sky gradient
+  // Zone-specific sky gradient (background behind everything)
   const sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,z.skyA);sky.addColorStop(.5,z.skyB);sky.addColorStop(1,z.skyC);
   ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
   ctx.save();ctx.translate(W/2-camX,H/2-camY);
-  // Ground
+  // Ground base — solid fill in the theme's ground color
   ctx.fillStyle=z.groundBase;ctx.fillRect(0,0,WORLD_W,WORLD_H);
-  // Tile texture
-  const gs=68,sl=camX-W/2,sr=camX+W/2,st=camY-H/2,sb=camY+H/2;
-  for(let gx=Math.floor(sl/gs)*gs;gx<sr+gs;gx+=gs){
-    for(let gy=Math.floor(st/gs)*gs;gy<sb+gs;gy+=gs){
-      ctx.fillStyle=(Math.floor(gx/gs)+Math.floor(gy/gs))%2?z.tileA:z.tileB;ctx.fillRect(gx,gy,gs,gs);
+
+  // Visible culling bounds — only draw what's near the camera for performance
+  const margin=400,vl=camX-W/2-margin,vr=camX+W/2+margin,vt=camY-H/2-margin,vb=camY+H/2+margin;
+
+  // ─── Layer 1: LARGE soft patches (the "this area is dirt, that area is stone" feel) ───
+  terrainFeatures.patches.forEach(p=>{
+    if(p.layer!=='large')return;
+    if(p.x<vl||p.x>vr||p.y<vt||p.y>vb)return;
+    ctx.save();
+    ctx.translate(p.x,p.y);
+    ctx.rotate(p.rotate);
+    // Soft radial gradient for a natural-looking blob
+    const grad=ctx.createRadialGradient(0,0,0,0,0,Math.max(p.rx,p.ry));
+    grad.addColorStop(0,p.color);
+    grad.addColorStop(1,p.color.replace(/[\d.]+\)$/,'0)'));
+    ctx.fillStyle=grad;
+    ctx.beginPath();ctx.ellipse(0,0,p.rx,p.ry,0,0,Math.PI*2);ctx.fill();
+    ctx.restore();
+  });
+
+  // ─── Paths ───
+  terrainFeatures.paths.forEach(path=>{
+    // Draw as a single flowing stroke with variable width along the points
+    for(let i=0;i<path.points.length-1;i++){
+      const p1=path.points[i],p2=path.points[i+1];
+      // Cull offscreen path segments
+      const minX=Math.min(p1.x,p2.x),maxX=Math.max(p1.x,p2.x);
+      const minY=Math.min(p1.y,p2.y),maxY=Math.max(p1.y,p2.y);
+      if(maxX<vl||minX>vr||maxY<vt||minY>vb)continue;
+      ctx.strokeStyle=path.color;
+      ctx.lineWidth=(p1.width+p2.width)/2;
+      ctx.lineCap='round';
+      ctx.beginPath();ctx.moveTo(p1.x,p1.y);ctx.lineTo(p2.x,p2.y);ctx.stroke();
+      // Slightly brighter inner core
+      ctx.strokeStyle=path.color.replace(/[\d.]+\)$/,(m)=>((parseFloat(m)*1.8).toFixed(2)+')'));
+      ctx.lineWidth=((p1.width+p2.width)/2)*0.35;
+      ctx.beginPath();ctx.moveTo(p1.x,p1.y);ctx.lineTo(p2.x,p2.y);ctx.stroke();
     }
-  }
-  ctx.strokeStyle=z.gridC;ctx.lineWidth=.5;
-  for(let gx=Math.floor(sl/gs)*gs;gx<sr+gs;gx+=gs){ctx.beginPath();ctx.moveTo(gx,st);ctx.lineTo(gx,sb);ctx.stroke();}
-  for(let gy=Math.floor(st/gs)*gs;gy<sb+gs;gy+=gs){ctx.beginPath();ctx.moveTo(sl,gy);ctx.lineTo(sr,gy);ctx.stroke();}
-  // Light pillars
+  });
+
+  // ─── Layer 2: medium patches (smaller ground variance) ───
+  terrainFeatures.patches.forEach(p=>{
+    if(p.layer!=='medium')return;
+    if(p.x<vl||p.x>vr||p.y<vt||p.y>vb)return;
+    ctx.save();
+    ctx.translate(p.x,p.y);
+    ctx.rotate(p.rotate);
+    const grad=ctx.createRadialGradient(0,0,0,0,0,Math.max(p.rx,p.ry));
+    grad.addColorStop(0,p.color);
+    grad.addColorStop(1,p.color.replace(/[\d.]+\)$/,'0)'));
+    ctx.fillStyle=grad;
+    ctx.beginPath();ctx.ellipse(0,0,p.rx,p.ry,0,0,Math.PI*2);ctx.fill();
+    ctx.restore();
+  });
+
+  // ─── Layer 3: small detail patches (texture/grit) ───
+  terrainFeatures.patches.forEach(p=>{
+    if(p.layer!=='small')return;
+    if(p.x<vl||p.x>vr||p.y<vt||p.y>vb)return;
+    ctx.fillStyle=p.color;
+    ctx.beginPath();ctx.ellipse(p.x,p.y,p.rx,p.ry,p.rotate,0,Math.PI*2);ctx.fill();
+  });
+
+  // Light pillars (ambient light beams cast by unseen sources)
   if(z.hasPillars){
     for(let i=0;i<5;i++){
       const lx=((camX/WORLD_W+i*.18)*WORLD_W)%WORLD_W;const ly=((camY/WORLD_H+i*.25)*WORLD_H)%WORLD_H;
@@ -584,7 +717,7 @@ function drawWorld(now){
       ctx.fillStyle=lg;ctx.beginPath();ctx.arc(lx,ly,lr,0,Math.PI*2);ctx.fill();
     }
   }
-  // Animated fog
+  // Animated fog layers
   for(let i=0;i<6;i++){
     const fx=((now/5200+i*.19)*WORLD_W)%WORLD_W-WORLD_W*.12;
     const fy=camY-H*.22+Math.sin(now/6500+i*1.4)*H*.18;
@@ -597,12 +730,13 @@ function drawWorld(now){
   if(z.ashFx){for(let i=0;i<8;i++){ctx.globalAlpha=.14+Math.sin(now/1500+i)*.07;ctx.fillStyle='rgba(200,150,255,0.5)';ctx.beginPath();ctx.arc((camX+Math.sin(now/4000+i*1.7)*(W*.4)+WORLD_W)%WORLD_W,(camY-H*.3+Math.sin(now/3500+i)*(H*.4)+WORLD_H)%WORLD_H,1.2+Math.sin(now/800+i)*.5,0,Math.PI*2);ctx.fill();}ctx.globalAlpha=1;}
   if(z.lavaFx){for(let i=0;i<4;i++){ctx.globalAlpha=(.5+Math.sin(now/300+i)*.3)*.055;const hg=ctx.createRadialGradient((camX+(-2+i)*W*.28+WORLD_W)%WORLD_W,camY+H*.3,0,(camX+(-2+i)*W*.28+WORLD_W)%WORLD_W,camY+H*.3,150);hg.addColorStop(0,'rgba(255,80,0,0.5)');hg.addColorStop(1,'rgba(255,80,0,0)');ctx.fillStyle=hg;ctx.beginPath();ctx.arc((camX+(-2+i)*W*.28+WORLD_W)%WORLD_W,camY+H*.3,150,0,Math.PI*2);ctx.fill();}ctx.globalAlpha=1;}
   if(z.toxicFx){for(let i=0;i<6;i++){ctx.globalAlpha=.2+Math.sin(now/600+i)*.1;ctx.fillStyle='rgba(52,211,153,0.5)';ctx.beginPath();ctx.arc((camX+(i-.5)*W*.3+WORLD_W)%WORLD_W,((camY+H*.3-((now/2000+i)%1)*H*.8)+WORLD_H)%WORLD_H,2+Math.sin(now/400+i),0,Math.PI*2);ctx.fill();}ctx.globalAlpha=1;}
-  // Edge vignette
+  // Edge vignette — darkens the world edges for depth
   const ev=ctx.createRadialGradient(WORLD_W/2,WORLD_H/2,WORLD_W*.32,WORLD_W/2,WORLD_H/2,WORLD_W*.76);ev.addColorStop(0,'rgba(0,0,0,0)');ev.addColorStop(1,z.edgeC);ctx.fillStyle=ev;ctx.fillRect(0,0,WORLD_W,WORLD_H);
-  // Props
+  // Props (trees, rocks, pillars, etc) drawn last so they're on top of ground
   drawEnvironment(now);
   ctx.restore();
 }
+
 
 // ═══════ SPAWN SYSTEMS ══════════════════════════════════
 function spawnEnemy(typeOverride=null){
