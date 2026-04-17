@@ -264,32 +264,49 @@ canvas#c{display:block;position:fixed;top:0;left:0}
 .panel::-webkit-scrollbar{width:4px}.panel::-webkit-scrollbar-track{background:#050010}.panel::-webkit-scrollbar-thumb{background:#2d1060;border-radius:2px}
 
 /* ─── TALENT PANEL ─── */
+/* Uses clamp() to scale text/spacing: mobile stays compact, desktop gets breathing room.
+   Also caps panel width so content is readable on wide monitors instead of stretching edge to edge. */
 #talentPanel{position:fixed;inset:0;z-index:400;display:none;flex-direction:column;background:linear-gradient(160deg,#0a0018,#06001a);overflow-y:auto}
-.talent-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px 14px;border-bottom:1px solid rgba(192,132,252,0.12);margin-bottom:10px;position:sticky;top:48px;background:linear-gradient(160deg,#0a0018,#06001a);z-index:3}
-.talent-points-label{font-family:'Cinzel',serif;font-size:9px;color:#7a5a9a;letter-spacing:2px;text-transform:uppercase}
-.talent-points-num{color:#fbbf24;font-size:16px;margin-left:6px;font-weight:700;text-shadow:0 0 10px #fbbf2466}
-.talent-reset-btn{font-family:'Cinzel',serif;font-size:7.5px;color:#6b4d8a;background:transparent;border:1px solid #6b4d8a40;padding:5px 14px;cursor:pointer;border-radius:4px;letter-spacing:2px;transition:all 0.2s}
-.talent-reset-btn:hover{color:#ef4444;border-color:#ef444466}
-.talent-branch{margin:0 12px 14px;border:1px solid rgba(255,255,255,0.05);border-radius:10px;overflow:hidden;background:rgba(255,255,255,0.015)}
-.talent-branch-hdr{display:flex;align-items:center;gap:10px;padding:10px 14px;font-family:'Cinzel',serif;font-size:11px;letter-spacing:3px;text-transform:uppercase;background:rgba(0,0,0,0.25);border-bottom:1px solid rgba(255,255,255,0.04)}
-.talent-branch-icon{font-size:14px}
+#talentTree{max-width:1100px;width:100%;margin:0 auto}
+.talent-header{display:flex;align-items:center;justify-content:space-between;padding:clamp(10px,1.5vw,18px) clamp(14px,2vw,24px);border-bottom:1px solid rgba(192,132,252,0.12);margin-bottom:clamp(10px,1.5vw,16px);position:sticky;top:48px;background:linear-gradient(160deg,#0a0018,#06001a);z-index:3}
+.talent-points-label{font-family:'Cinzel',serif;font-size:clamp(10px,1.2vw,13px);color:#b8a8d0;letter-spacing:2px;text-transform:uppercase}
+.talent-points-num{color:#fbbf24;font-size:clamp(20px,2.2vw,26px);margin-left:10px;font-weight:700;text-shadow:0 0 12px #fbbf2488;vertical-align:middle}
+.talent-reset-btn{font-family:'Cinzel',serif;font-size:clamp(10px,1vw,12px);color:#9a7abe;background:transparent;border:1px solid #8a6ab0;padding:clamp(6px,0.8vw,10px) clamp(14px,1.4vw,20px);cursor:pointer;border-radius:4px;letter-spacing:2px;transition:all 0.2s}
+.talent-reset-btn:hover{color:#ef4444;border-color:#ef4444}
+
+.talent-branch{margin:0 clamp(12px,1.5vw,20px) clamp(14px,1.5vw,20px);border:1px solid rgba(255,255,255,0.07);border-radius:10px;overflow:hidden;background:rgba(255,255,255,0.02)}
+.talent-branch-hdr{display:flex;align-items:center;gap:12px;padding:clamp(10px,1.2vw,16px) clamp(14px,1.5vw,20px);font-family:'Cinzel',serif;font-size:clamp(13px,1.4vw,17px);letter-spacing:3px;text-transform:uppercase;background:rgba(0,0,0,0.35);border-bottom:1px solid rgba(255,255,255,0.06)}
+.talent-branch-icon{font-size:clamp(16px,1.6vw,20px)}
 .talent-branch-name{flex:1;font-weight:600}
-.talent-branch-spent{font-size:8px;color:#7a5a9a;letter-spacing:1.5px;background:rgba(0,0,0,0.4);padding:3px 8px;border-radius:4px;border:1px solid rgba(255,255,255,0.06)}
-.talent-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;padding:10px}
-.talent-node{background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:9px 7px;cursor:default;transition:all 0.2s;text-align:center;position:relative}
-.talent-node.available{cursor:pointer;border-color:rgba(192,132,252,0.25);box-shadow:0 0 10px rgba(192,132,252,0.08)}
-.talent-node.available:hover{border-color:rgba(192,132,252,0.6);background:rgba(192,132,252,0.05);transform:translateY(-1px)}
-.talent-node.learned{border-color:rgba(251,191,36,0.35);background:rgba(251,191,36,0.04)}
-.talent-node.maxed{border-color:rgba(251,191,36,0.7);background:rgba(251,191,36,0.08);box-shadow:0 0 12px rgba(251,191,36,0.15)}
-.talent-node.locked{opacity:0.4;cursor:not-allowed}
-.tn-icon{font-size:16px;display:block;margin-bottom:4px;line-height:1}
-.tn-name{font-family:'Cinzel',serif;font-size:8px;letter-spacing:1px;color:#b8a8d0;margin-bottom:4px;text-transform:uppercase;font-weight:600}
+.talent-branch-spent{font-size:clamp(11px,1.1vw,13px);color:#d4c4e8;letter-spacing:1.5px;background:rgba(0,0,0,0.5);padding:4px 10px;border-radius:4px;border:1px solid rgba(255,255,255,0.1);font-weight:600}
+
+.talent-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:clamp(6px,0.8vw,12px);padding:clamp(10px,1.2vw,16px)}
+.talent-node{background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:clamp(10px,1.1vw,16px) clamp(8px,1vw,14px);cursor:default;transition:all 0.2s;text-align:center;position:relative;display:flex;flex-direction:column;gap:clamp(5px,0.5vw,8px);min-height:clamp(135px,13vw,170px)}
+.talent-node.available{cursor:pointer;border-color:rgba(192,132,252,0.35);box-shadow:0 0 14px rgba(192,132,252,0.10)}
+.talent-node.available:hover{border-color:rgba(192,132,252,0.75);background:rgba(192,132,252,0.07);transform:translateY(-1px)}
+.talent-node.learned{border-color:rgba(251,191,36,0.45);background:rgba(251,191,36,0.05)}
+.talent-node.maxed{border-color:rgba(251,191,36,0.85);background:rgba(251,191,36,0.10);box-shadow:0 0 14px rgba(251,191,36,0.20)}
+.talent-node.locked{opacity:0.45;cursor:not-allowed}
+
+.tn-icon{font-size:clamp(22px,2vw,28px);display:block;line-height:1;margin-bottom:2px}
+/* Higher-contrast name text — was #b8a8d0, bumped to near-white for readability */
+.tn-name{font-family:'Cinzel',serif;font-size:clamp(11px,1.1vw,14px);letter-spacing:1.5px;color:#e0d4f0;text-transform:uppercase;font-weight:700;line-height:1.2}
 .talent-node.learned .tn-name{color:#fbbf24}
-.talent-node.maxed .tn-name{color:#fde68a}
-.tn-desc{font-size:8px;color:#6b5a8a;line-height:1.35;margin-bottom:5px;min-height:22px}
-.tn-effect{font-size:8.5px;color:#9DC4B0;letter-spacing:0.3px;font-weight:600;padding:2px 4px;background:rgba(157,196,176,0.06);border-radius:3px;margin-bottom:4px}
-.talent-node.learned .tn-effect{color:#fbbf24;background:rgba(251,191,36,0.08)}
-.tn-rank{font-family:'Cinzel',serif;font-size:8px;color:#4a3a5a;letter-spacing:1px}
-.talent-node.learned .tn-rank{color:#fbbf24aa}
+.talent-node.maxed .tn-name{color:#fde68a;text-shadow:0 0 8px rgba(253,230,138,0.4)}
+/* Description — significantly brighter for readability */
+.tn-desc{font-size:clamp(10px,1vw,12px);color:#a899c5;line-height:1.4;flex:1}
+/* Effect text — the "what this does" line, made readable and prominent */
+.tn-effect{font-size:clamp(11px,1.1vw,14px);color:#9DC4B0;letter-spacing:0.3px;font-weight:700;padding:clamp(4px,0.5vw,7px) clamp(6px,0.7vw,10px);background:rgba(157,196,176,0.10);border-radius:4px;border:1px solid rgba(157,196,176,0.15)}
+.talent-node.learned .tn-effect{color:#fde68a;background:rgba(251,191,36,0.12);border-color:rgba(251,191,36,0.25)}
+.talent-node.maxed .tn-effect{color:#fff8dc;background:rgba(251,191,36,0.18);border-color:rgba(251,191,36,0.4)}
+.tn-rank{font-family:'Cinzel',serif;font-size:clamp(11px,1vw,13px);color:#9a7abe;letter-spacing:2px;font-weight:600}
+.talent-node.learned .tn-rank{color:#fbbf24}
 .talent-node.maxed .tn-rank{color:#fde68a}
-.tn-gate{font-size:7.5px;color:#ef4444;margin-top:4px;letter-spacing:0.5px}
+/* Gate message — brighter red so it's noticeable when scanning */
+.tn-gate{font-size:clamp(10px,1vw,12px);color:#ef4444;letter-spacing:0.5px;font-weight:600;background:rgba(239,68,68,0.08);padding:3px 6px;border-radius:3px;border:1px solid rgba(239,68,68,0.2)}
+
+/* Desktop: on wider screens, give talent nodes more internal space */
+@media (min-width:900px){
+  .talent-grid{gap:14px;padding:16px 20px}
+  .talent-node{padding:18px 14px;gap:8px}
+}
