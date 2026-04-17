@@ -1282,7 +1282,54 @@ const shopState = {
   lastRefresh: 0,           // timestamp of last refresh
   buyback: null,            // last discarded rare+ item, available to buy back
   buybackPrice: 0,
+  materials: [],            // array of {material, qty, price} for this rotation
 };
+
+// Base gold price per unit for each material. Multiplied by player level for scaling.
+const MATERIAL_PRICES = {
+  scrap:      8,    // common salvage output — cheap
+  etherDust:  22,   // rare+ salvage — moderate
+  runecore:   60,   // epic+ salvage — expensive
+  soulbond:   180,  // legendary+ salvage only — rare luxury
+};
+
+// Max stack size per listing, per material tier. Higher tiers sell fewer.
+const MATERIAL_STACK_SIZES = {
+  scrap:      [2, 5],   // 2-5 per listing
+  etherDust:  [1, 3],
+  runecore:   [1, 2],
+  soulbond:   [1, 1],   // always exactly 1 — rare
+};
+
+// Probability each material appears in a given rotation slot.
+// Weights determine relative frequency — scrap common, soulbond rare.
+const MATERIAL_ROLL_WEIGHTS = {
+  scrap:     50,
+  etherDust: 30,
+  runecore:  15,
+  soulbond:  5,
+};
+
+// How many material listings per shop rotation (random within range).
+const SHOP_MATERIALS_COUNT = [1, 3];
+
+// Picks a random material key weighted by MATERIAL_ROLL_WEIGHTS.
+function rollShopMaterial(){
+  const entries = Object.entries(MATERIAL_ROLL_WEIGHTS);
+  const total = entries.reduce((s,[,w])=>s+w, 0);
+  let roll = Math.random() * total;
+  for (const [mat, w] of entries){
+    if ((roll -= w) < 0) return mat;
+  }
+  return entries[0][0];
+}
+
+// Compute a material listing's price: base * quantity * level multiplier.
+function priceForMaterial(material, qty){
+  const base = MATERIAL_PRICES[material] || 10;
+  const levelMult = 1 + Math.max(1, player.level) * 0.08;
+  return Math.ceil(base * qty * levelMult);
+}
 
 // Compute a gear item's shop price from its rarity + level
 function priceForItem(item){
@@ -1291,7 +1338,7 @@ function priceForItem(item){
   return Math.ceil(45 * rarityMult * levelMult);
 }
 
-// Generate a fresh shop rotation of gear
+// Generate a fresh shop rotation of gear + materials
 function refreshShop(silent = false){
   shopState.gear = [];
   // Bias the rotation toward items near player level + their rarities
@@ -1299,6 +1346,24 @@ function refreshShop(silent = false){
     const item = rollLoot(player.level);
     item.shopPrice = priceForItem(item);
     shopState.gear.push(item);
+  }
+  // Roll materials — random count within SHOP_MATERIALS_COUNT, weighted by tier
+  shopState.materials = [];
+  const matCount = SHOP_MATERIALS_COUNT[0] + Math.floor(Math.random() * (SHOP_MATERIALS_COUNT[1] - SHOP_MATERIALS_COUNT[0] + 1));
+  const usedMaterials = new Set(); // avoid duplicate material types in same rotation
+  let attempts = 0;
+  while (shopState.materials.length < matCount && attempts < 20){
+    attempts++;
+    const mat = rollShopMaterial();
+    if (usedMaterials.has(mat)) continue;
+    usedMaterials.add(mat);
+    const [minQ, maxQ] = MATERIAL_STACK_SIZES[mat] || [1, 1];
+    const qty = minQ + Math.floor(Math.random() * (maxQ - minQ + 1));
+    shopState.materials.push({
+      material: mat,
+      qty,
+      price: priceForMaterial(mat, qty),
+    });
   }
   shopState.lastRefresh = Date.now();
   shopMysteryBoxUses = 0;
@@ -1415,6 +1480,26 @@ function buyBuyback(){
   acquireLoot({...shopState.buyback});
   shopState.buyback = null;
   shopState.buybackPrice = 0;
+  if (typeof writeSave === 'function') writeSave();
+  if (typeof renderShop === 'function') renderShop();
+  return true;
+}
+
+// Purchase a stack of materials. Uses creditMaterial (same path as salvage)
+// so materials flow to all 3 professions exactly as they do from salvage.
+function buyMaterial(index){
+  const listing = shopState.materials[index];
+  if (!listing) return false;
+  if (player.gold < listing.price){
+    addFeed('⚠ Not enough gold','#ef4444');
+    return false;
+  }
+  player.gold -= listing.price;
+  creditMaterial(listing.material, listing.qty);
+  const label = MATERIAL_LABELS[listing.material] || listing.material;
+  addFeed(`⚒ Purchased ${listing.qty} ${label} (-${listing.price}G)`,MATERIAL_COLORS[listing.material] || '#fff');
+  // Remove from shop rotation so it can't be bought twice
+  shopState.materials.splice(index, 1);
   if (typeof writeSave === 'function') writeSave();
   if (typeof renderShop === 'function') renderShop();
   return true;
@@ -1556,6 +1641,35 @@ function renderShop(){
     const mbBtn = mb.querySelector('.shop-buy-btn');
     if (mbAfford) mbBtn.addEventListener('click', () => buyMysteryBox());
     consumablesEl.appendChild(mb);
+  }
+
+  // Materials section — crafting ingredients this rotation
+  const materialsEl = document.getElementById('shopMaterials');
+  if (materialsEl){
+    materialsEl.innerHTML = '';
+    if (!shopState.materials || !shopState.materials.length){
+      materialsEl.innerHTML = '<div class="shop-empty">No materials this rotation — check back later</div>';
+    } else {
+      shopState.materials.forEach((listing, idx) => {
+        const col = MATERIAL_COLORS[listing.material] || '#fff';
+        const label = MATERIAL_LABELS[listing.material] || listing.material;
+        const canAfford = player.gold >= listing.price;
+        const row = document.createElement('div');
+        row.className = 'shop-consumable shop-material-row' + (canAfford ? '' : ' disabled');
+        row.style.borderColor = col + '44';
+        row.innerHTML = `
+          <div class="shop-consumable-icon" style="color:${col};background:${col}15;text-shadow:0 0 10px ${col}66">⚒</div>
+          <div class="shop-consumable-info">
+            <div class="shop-consumable-name" style="color:${col}">${listing.qty}× ${label}</div>
+            <div class="shop-consumable-desc">Crafting material — split between all professions on purchase.</div>
+          </div>
+          <button class="shop-buy-btn" ${canAfford?'':'disabled'}>${listing.price} G</button>
+        `;
+        const btn = row.querySelector('.shop-buy-btn');
+        if (canAfford) btn.addEventListener('click', () => buyMaterial(idx));
+        materialsEl.appendChild(row);
+      });
+    }
   }
 
   // Buyback slot
