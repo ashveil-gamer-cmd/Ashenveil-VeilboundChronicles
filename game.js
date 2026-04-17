@@ -629,6 +629,246 @@ function spawnCluster(){
   for(let i=0;i<cl.count;i++)setTimeout(()=>spawnEnemy(cl.type),i*220);
   addFeed(`☠ ${cl.type.toUpperCase()} HORDE!`,'#ef4444');
 }
+
+// ═══════ DUNGEON SYSTEM ═══════════════════════════════════
+// Sealed arena runs with escalating waves and a named boss.
+// While in a dungeon, regular spawn is disabled and zone progression is paused.
+// On boss death OR player death, auto-return to where they came from.
+let dungeonState={
+  active:false,
+  def:null,           // the DUNGEON object from data.js
+  waveIdx:0,          // 0..waves.length-1, then boss
+  phase:'idle',       // 'wave' | 'bossIntro' | 'boss' | 'complete'
+  phaseTimer:0,       // ms into current phase
+  returnX:0,returnY:0,// position to teleport back to after run
+  bossEntity:null,    // reference to boss for tracking
+};
+
+function enterDungeon(dungeonId){
+  const def=DUNGEONS.find(d=>d.id===dungeonId);
+  if(!def){addFeed('Dungeon not found','#ef4444');return;}
+  if(player.level<def.minLevel){
+    addFeed(`Requires level ${def.minLevel}`,'#ef4444');
+    return;
+  }
+  if(dungeonState.active)return;
+  // Save entry point so we can return here
+  dungeonState.returnX=player.x;
+  dungeonState.returnY=player.y;
+  // Teleport to a clean center arena position
+  player.x=WORLD_W/2;player.y=WORLD_H/2;
+  camX=player.x;camY=player.y;
+  // Clear existing enemies — dungeon is fresh
+  enemies=[];
+  // Begin run
+  dungeonState.active=true;
+  dungeonState.def=def;
+  dungeonState.waveIdx=0;
+  dungeonState.phase='wave';
+  dungeonState.phaseTimer=0;
+  dungeonState.bossEntity=null;
+  // Spawn first wave immediately
+  spawnDungeonWave(0);
+  // UI feedback — show dungeon HUD, hide zone label (dungeon HUD replaces it)
+  const overlay=document.getElementById('dungeonStatus');
+  if(overlay){overlay.style.display='flex';updateDungeonHUD();}
+  const zoneLbl=document.getElementById('zoneLabel');
+  if(zoneLbl)zoneLbl.style.display='none';
+  const panel=document.getElementById('dungeonPanel');
+  if(panel)panel.style.display='none';
+  addFeed(`⚑ ENTERED: ${def.name.toUpperCase()}`,def.color);
+  SFX.zoneChange&&SFX.zoneChange();
+  // Dramatic screen flash
+  pushGroundFX({type:'bloom',x:player.x,y:player.y,r:400,maxR:400,color:def.color,life:0.8,maxLife:0.8});
+}
+
+function spawnDungeonWave(waveIndex){
+  const wave=dungeonState.def.waves[waveIndex];
+  if(!wave)return;
+  // Spawn enemies in a ring around the player, staggered
+  for(let i=0;i<wave.count;i++){
+    setTimeout(()=>{
+      if(!dungeonState.active)return; // guard: dungeon may have ended
+      const type=wave.types[Math.floor(Math.random()*wave.types.length)];
+      const typeData=ENEMY_TYPES.find(t=>t.type===type)||ENEMY_TYPES[0];
+      const isElite=i<wave.elites;
+      const angle=Math.random()*Math.PI*2;
+      const dist=340+Math.random()*80;
+      const x=Math.max(60,Math.min(WORLD_W-60,player.x+Math.cos(angle)*dist));
+      const y=Math.max(60,Math.min(WORLD_H-60,player.y+Math.sin(angle)*dist));
+      const hs=enemyHpScale(player.level),ds=enemyDmgScale(player.level);
+      const base=player.level<=5?150:player.level<=10?175:200;
+      enemies.push({
+        id:enemyId++,x,y,vx:0,vy:0,
+        hp:base*hs*typeData.hp*(isElite?2.4:1),
+        maxHp:base*hs*typeData.hp*(isElite?2.4:1),
+        attack:(player.level<=5?22:player.level<=10?26:30)*ds*typeData.dmg*(isElite?1.6:1),
+        speed:typeData.spd*(isElite?1.12:1),
+        dead:false,isElite,typeData,
+        lastAttack:0,hitFlash:0,
+        veilmarkStacks:0,veilmarkExpiry:0,
+        size:typeData.r*(isElite?1.35:1),
+      });
+    },i*200);
+  }
+}
+
+function spawnDungeonBoss(){
+  const bd=dungeonState.def.boss;
+  const typeData=ENEMY_TYPES.find(t=>t.type===bd.baseType)||ENEMY_TYPES[0];
+  const hs=enemyHpScale(player.level),ds=enemyDmgScale(player.level);
+  const base=player.level<=5?150:player.level<=10?175:200;
+  // Spawn boss directly in front of player for a heroic entrance
+  const angle=player.facing||0;
+  const x=player.x+Math.cos(angle)*280;
+  const y=player.y+Math.sin(angle)*280;
+  const boss={
+    id:enemyId++,x,y,vx:0,vy:0,
+    hp:base*hs*typeData.hp*bd.hpMult,
+    maxHp:base*hs*typeData.hp*bd.hpMult,
+    attack:(player.level<=5?22:player.level<=10?26:30)*ds*typeData.dmg*bd.atkMult,
+    speed:typeData.spd*0.85, // bosses a bit slower but hit like a truck
+    dead:false,isElite:true,typeData,
+    lastAttack:0,hitFlash:0,
+    veilmarkStacks:0,veilmarkExpiry:0,
+    size:typeData.r*bd.sizeMult,
+    isBoss:true,bossName:bd.name,
+  };
+  enemies.push(boss);
+  dungeonState.bossEntity=boss;
+  bossTarget=boss;
+  // Big dramatic entrance effect
+  pushGroundFX({type:'ring',x:boss.x,y:boss.y,maxR:260,r:30,color:dungeonState.def.color,life:0.8,maxLife:0.8,expand:true});
+  pushGroundFX({type:'bloom',x:boss.x,y:boss.y,r:240,maxR:240,color:dungeonState.def.color,life:0.5,maxLife:0.5});
+  screenShake(18,600);
+  addFeed(`☠ ${bd.name.toUpperCase()} AWAKENS`,'#ef4444');
+}
+
+function updateDungeon(now){
+  if(!dungeonState.active)return;
+  // If player died inside a dungeon, abort the run when they hit the death screen
+  if(player.isDead){exitDungeon(false);return;}
+
+  const livingEnemies=enemies.filter(e=>!e.dead).length;
+
+  if(dungeonState.phase==='wave'){
+    // Wait until enemies are cleared, then advance
+    if(livingEnemies===0){
+      // Brief pause before next wave for readability
+      dungeonState.phaseTimer+=16; // assume ~16ms/frame; coarse is fine
+      if(dungeonState.phaseTimer>1200){
+        dungeonState.phaseTimer=0;
+        dungeonState.waveIdx++;
+        if(dungeonState.waveIdx>=dungeonState.def.waves.length){
+          dungeonState.phase='bossIntro';
+          addFeed('━━ BOSS INCOMING ━━','#ef4444');
+        } else {
+          spawnDungeonWave(dungeonState.waveIdx);
+          addFeed(`WAVE ${dungeonState.waveIdx+1}/${dungeonState.def.waves.length}`,'#c084fc');
+        }
+      }
+    } else {
+      dungeonState.phaseTimer=0;
+    }
+  } else if(dungeonState.phase==='bossIntro'){
+    // 1.5s dramatic pause then spawn boss
+    dungeonState.phaseTimer+=16;
+    if(dungeonState.phaseTimer>1500){
+      dungeonState.phaseTimer=0;
+      dungeonState.phase='boss';
+      spawnDungeonBoss();
+    }
+  } else if(dungeonState.phase==='boss'){
+    if(dungeonState.bossEntity&&dungeonState.bossEntity.dead){
+      // Victory! Pay out rewards then exit
+      completeDungeon();
+    }
+  }
+  updateDungeonHUD();
+}
+
+function completeDungeon(){
+  const def=dungeonState.def;
+  const reward=def.reward;
+  // Bonus rewards
+  player.gold+=reward.bonusGold;
+  addXP(reward.bonusXP);
+  // Guaranteed loot at minimum rarity
+  const allRarities=['common','uncommon','rare','epic','legendary','mythic'];
+  const minIdx=allRarities.indexOf(reward.minRarity);
+  // Pick a random rarity at or above min
+  const maxIdx=Math.min(minIdx+2,allRarities.length-1);
+  const chosenIdx=minIdx+Math.floor(Math.random()*(maxIdx-minIdx+1));
+  const targetRarity=allRarities[chosenIdx];
+  // Filter item pool for that rarity, fall back if empty
+  const pool=ITEM_POOL.filter(i=>i.rarity===targetRarity);
+  const item=pool.length
+    ? {...pool[Math.floor(Math.random()*pool.length)]}
+    : rollLoot(player.level);
+  tryEquip(item);
+  // Beam FX + dramatic exit
+  const rarityColors={common:'#9ca3af',uncommon:'#22c55e',rare:'#60a5fa',epic:'#c084fc',legendary:'#f59e0b',mythic:'#ff6b6b'};
+  const col=rarityColors[item.rarity]||'#fff';
+  pushGroundFX({type:'beam',x:player.x,y:player.y,r:60,maxR:60,color:col,life:2.5,maxLife:2.5});
+  pushGroundFX({type:'bloom',x:player.x,y:player.y,r:300,maxR:300,color:col,life:0.8,maxLife:0.8});
+  screenShake(14,400);
+  addFeed(`✦ ${def.name.toUpperCase()} CLEARED!`,def.color);
+  addFeed(`+${reward.bonusGold} gold · +${reward.bonusXP} XP`,'#f59e0b');
+  // Save immediately — never lose a dungeon clear
+  if(typeof writeSave==='function')writeSave();
+  // Exit after a brief celebration pause
+  setTimeout(()=>exitDungeon(true),2400);
+}
+
+function exitDungeon(success){
+  if(!dungeonState.active)return;
+  dungeonState.active=false;
+  dungeonState.phase='idle';
+  dungeonState.bossEntity=null;
+  bossTarget=null;
+  // Clear enemies (they don't belong in the normal zone)
+  enemies=[];
+  // Teleport back to entry position
+  player.x=dungeonState.returnX;
+  player.y=dungeonState.returnY;
+  camX=player.x;camY=player.y;
+  // Clear velocity + reset AFK waypoint so player doesn't immediately drift away
+  player.vx=0;player.vy=0;
+  player.lastInput=performance.now(); // prevents AFK pathing for a few seconds
+  if(typeof setAfkWaypoint==='function')setAfkWaypoint();
+  // Hide dungeon HUD, restore normal zone label
+  const overlay=document.getElementById('dungeonStatus');
+  if(overlay)overlay.style.display='none';
+  const zoneLbl=document.getElementById('zoneLabel');
+  if(zoneLbl)zoneLbl.style.display='block';
+  if(!success)addFeed('Dungeon failed','#6b4d8a');
+}
+
+function updateDungeonHUD(){
+  if(!dungeonState.active)return;
+  const overlay=document.getElementById('dungeonStatus');
+  if(!overlay)return;
+  const def=dungeonState.def;
+  let title,sub;
+  if(dungeonState.phase==='wave'){
+    const total=def.waves.length;
+    const cur=dungeonState.waveIdx+1;
+    const remaining=enemies.filter(e=>!e.dead).length;
+    title=`${def.name}`;
+    sub=`Wave ${cur}/${total} · ${remaining} enemies`;
+  } else if(dungeonState.phase==='bossIntro'){
+    title=def.name;
+    sub='BOSS INCOMING...';
+  } else if(dungeonState.phase==='boss'){
+    title=def.boss.name.toUpperCase();
+    sub='FINAL BATTLE';
+  }
+  const titleEl=overlay.querySelector('.dungeon-status-title');
+  const subEl=overlay.querySelector('.dungeon-status-sub');
+  if(titleEl)titleEl.textContent=title;
+  if(subEl)subEl.textContent=sub;
+  if(titleEl)titleEl.style.color=def.color;
+}
 function spawnSpirit(isTemp=false){
   const perms=spirits.filter(s=>!s.isTemp&&!s.dead);
   if(!isTemp&&perms.length>=(player.maxBonds||MAX_SPIRITS))return false;
@@ -1127,6 +1367,8 @@ function update(dt,now){
             document.getElementById('deathStats').textContent=`${kills} slain · Level ${player.level}`;
             document.getElementById('deathScreen').style.display='flex';
             if(typeof writeSave==='function')writeSave();
+            // If inside a dungeon, fail the run
+            if(dungeonState.active)exitDungeon(false);
           }
         }
       }
@@ -1150,12 +1392,16 @@ function update(dt,now){
   });
   enemies=enemies.filter(e=>!e.dead);
 
-  // Spawn
-  spawnTimer+=dt*1000;
-  const si=Math.max(1400,3000-player.level*42);
-  if(spawnTimer>si){spawnTimer=0;spawnEnemy();}
-  clusterTimer+=dt*1000;
-  if(clusterTimer>clusterInterval){clusterTimer=0;clusterInterval=12000+Math.random()*9000;spawnCluster();}
+  // Spawn — regular enemies only outside dungeons
+  if(!dungeonState.active){
+    spawnTimer+=dt*1000;
+    const si=Math.max(1400,3000-player.level*42);
+    if(spawnTimer>si){spawnTimer=0;spawnEnemy();}
+    clusterTimer+=dt*1000;
+    if(clusterTimer>clusterInterval){clusterTimer=0;clusterInterval=12000+Math.random()*9000;spawnCluster();}
+  } else {
+    updateDungeon(now);
+  }
 
   // Particles
   particles=particles.filter(p=>{p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;if(p.soul)p.vy-=dt*38;p.vx*=0.92;p.vy*=0.92;return p.life>0;});
