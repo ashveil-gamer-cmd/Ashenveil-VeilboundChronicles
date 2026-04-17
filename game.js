@@ -869,6 +869,206 @@ function updateDungeonHUD(){
   if(subEl)subEl.textContent=sub;
   if(titleEl)titleEl.style.color=def.color;
 }
+
+// ═══════ PORTAL SYSTEM ═══════════════════════════════════
+// Portals spawn naturally in the world as the player plays.
+// Stepping on one channels for 0.8s then enters the dungeon. Walking away cancels.
+// Only ONE portal exists at a time. Lifespan is 90s — last 15s visually dim + warn.
+
+const PORTAL_LIFESPAN=90000;       // total ms before expire
+const PORTAL_WARN_MS=15000;         // last N ms play warning dim/pulse
+const PORTAL_ENTRY_RADIUS=62;       // px within which channeling starts
+const PORTAL_CHANNEL_MS=800;        // ms to channel before being pulled in
+const PORTAL_SPAWN_MIN_MS=90000;    // minimum wait before first portal (90s)
+const PORTAL_SPAWN_COOLDOWN_MIN=120000; // after portal resolves, min wait (2m)
+const PORTAL_SPAWN_COOLDOWN_MAX=240000; // ...up to 4m
+
+let portalState={
+  active:null,       // the live portal {x,y,def,spawnAt,expiresAt,channelStart}
+  nextSpawnAt:performance.now()+PORTAL_SPAWN_MIN_MS, // when next portal can spawn
+  totalSpawned:0,    // stats / save
+};
+
+// Pick which tier of dungeon to spawn a portal to, based on player level + chance.
+function rollPortalDungeon(){
+  const lv=player.level;
+  // Only dungeons the player meets the level req for
+  const eligible=DUNGEONS.filter(d=>lv>=d.minLevel);
+  if(!eligible.length)return null;
+  // Weight higher tiers less so they're rarer
+  // tier 1: weight 60, tier 2: weight 30, tier 3: weight 10
+  const weights={1:60,2:30,3:10};
+  let totalW=0;
+  eligible.forEach(d=>totalW+=weights[d.tier]||10);
+  let roll=Math.random()*totalW;
+  for(const d of eligible){
+    roll-=weights[d.tier]||10;
+    if(roll<=0)return d;
+  }
+  return eligible[0];
+}
+
+function spawnPortal(){
+  if(portalState.active)return;           // already one out
+  if(dungeonState.active)return;          // don't spawn mid-dungeon
+  const def=rollPortalDungeon();
+  if(!def)return;
+  // Spawn 400-700px from player in a random direction that stays in-bounds
+  let x,y,tries=0;
+  do{
+    const angle=Math.random()*Math.PI*2;
+    const dist=400+Math.random()*300;
+    x=player.x+Math.cos(angle)*dist;
+    y=player.y+Math.sin(angle)*dist;
+    tries++;
+  } while((x<200||x>WORLD_W-200||y<200||y>WORLD_H-200)&&tries<10);
+  x=Math.max(200,Math.min(WORLD_W-200,x));
+  y=Math.max(200,Math.min(WORLD_H-200,y));
+  const now=performance.now();
+  portalState.active={
+    x,y,def,
+    spawnAt:now,
+    expiresAt:now+PORTAL_LIFESPAN,
+    channelStart:0,  // set when player is inside entry radius, reset when they leave
+    phase:'idle',    // 'idle' | 'channeling' | 'entering'
+  };
+  portalState.totalSpawned++;
+  // Spawn FX: dramatic pop-in
+  pushGroundFX({type:'ring',x,y,maxR:220,r:40,color:def.color,life:1.0,maxLife:1.0,expand:true});
+  pushGroundFX({type:'bloom',x,y,r:200,maxR:200,color:def.color,life:0.6,maxLife:0.6});
+  pushGroundFX({type:'scorch',x,y,r:100,maxR:100,color:def.color,life:2.0,maxLife:2.0});
+  SFX.zoneChange&&SFX.zoneChange();
+  addFeed(`⚑ A rift to ${def.name} opens nearby...`,def.color);
+}
+
+// Called every frame from update()
+function updatePortal(dt,now){
+  // If no portal, try to spawn one
+  if(!portalState.active){
+    if(!dungeonState.active && now>=portalState.nextSpawnAt){
+      spawnPortal();
+    }
+    return;
+  }
+  const p=portalState.active;
+  // Expiry
+  if(now>=p.expiresAt){
+    pushGroundFX({type:'ring',x:p.x,y:p.y,maxR:140,r:20,color:'#6b4d8a',life:0.6,maxLife:0.6,expand:true});
+    addFeed('⚑ Portal collapsed.','#6b4d8a');
+    portalState.active=null;
+    portalState.nextSpawnAt=now+PORTAL_SPAWN_COOLDOWN_MIN+Math.random()*(PORTAL_SPAWN_COOLDOWN_MAX-PORTAL_SPAWN_COOLDOWN_MIN);
+    return;
+  }
+  // Dim-warn threshold
+  const remaining=p.expiresAt-now;
+  if(remaining<=PORTAL_WARN_MS&&!p.warned){
+    p.warned=true;
+    addFeed('⚑ Portal fading — go now!','#f59e0b');
+  }
+  // Check player proximity for channel
+  const dx=player.x-p.x, dy=player.y-p.y, d=Math.sqrt(dx*dx+dy*dy);
+  if(d<PORTAL_ENTRY_RADIUS){
+    if(p.phase==='idle'){
+      p.phase='channeling';
+      p.channelStart=now;
+      addFeed(`Channeling ${p.def.name}...`,p.def.color);
+    }
+  } else {
+    if(p.phase==='channeling'){
+      // Left range — cancel channel
+      p.phase='idle';
+      p.channelStart=0;
+    }
+  }
+  // Complete channel → enter dungeon
+  if(p.phase==='channeling'&&now-p.channelStart>=PORTAL_CHANNEL_MS){
+    p.phase='entering';
+    const def=p.def;
+    // Consume the portal first (enterDungeon clears enemies, etc.)
+    portalState.active=null;
+    portalState.nextSpawnAt=now+PORTAL_SPAWN_COOLDOWN_MIN+Math.random()*(PORTAL_SPAWN_COOLDOWN_MAX-PORTAL_SPAWN_COOLDOWN_MIN);
+    // Use the existing enterDungeon function with the dungeon ID
+    enterDungeon(def.id);
+  }
+}
+
+// Called from render() AFTER the canvas has been translated into world space.
+// Draws the portal at p.x, p.y in world coordinates.
+function drawPortal(now){
+  if(!portalState.active)return;
+  const p=portalState.active;
+  // Cull offscreen in world space
+  if(p.x<camX-W/2-300||p.x>camX+W/2+300||p.y<camY-H/2-300||p.y>camY+H/2+300)return;
+  const remaining=p.expiresAt-now;
+  const dimming=remaining<PORTAL_WARN_MS;
+  const age=now-p.spawnAt;
+  const pulse=0.7+0.3*Math.sin(age*0.005);
+  const channelProgress=p.phase==='channeling'?(now-p.channelStart)/PORTAL_CHANNEL_MS:0;
+  const baseColor=dimming?'#6b4d8a':p.def.color;
+  ctx.save();
+  // Outer glow bloom
+  const bloomR=70*pulse*(1+channelProgress*0.5);
+  const grad=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,bloomR);
+  grad.addColorStop(0,baseColor+'cc');
+  grad.addColorStop(0.5,baseColor+'55');
+  grad.addColorStop(1,baseColor+'00');
+  ctx.fillStyle=grad;
+  ctx.beginPath();ctx.arc(p.x,p.y,bloomR,0,Math.PI*2);ctx.fill();
+  // Spinning ring (outer, slow)
+  ctx.strokeStyle=baseColor;
+  ctx.lineWidth=3;
+  ctx.globalAlpha=dimming?0.5+0.5*Math.sin(age*0.01):0.9;
+  const ringR=38+2*Math.sin(age*0.004);
+  ctx.beginPath();
+  ctx.arc(p.x,p.y,ringR,age*0.002,age*0.002+Math.PI*1.5);
+  ctx.stroke();
+  // Inner ring counter-rotating
+  ctx.beginPath();
+  ctx.arc(p.x,p.y,ringR*0.65,-age*0.003,-age*0.003+Math.PI*1.2);
+  ctx.stroke();
+  // Vertical column of light
+  const colH=70*pulse;
+  const colGrad=ctx.createLinearGradient(p.x,p.y-colH,p.x,p.y);
+  colGrad.addColorStop(0,baseColor+'00');
+  colGrad.addColorStop(0.7,baseColor+'88');
+  colGrad.addColorStop(1,baseColor+'dd');
+  ctx.globalAlpha=0.8;
+  ctx.fillStyle=colGrad;
+  ctx.fillRect(p.x-4,p.y-colH,8,colH);
+  // Center white-hot dot
+  ctx.globalAlpha=1;
+  ctx.fillStyle='#fff';
+  ctx.shadowColor=baseColor;ctx.shadowBlur=12;
+  ctx.beginPath();ctx.arc(p.x,p.y,3+2*pulse,0,Math.PI*2);ctx.fill();
+  ctx.shadowBlur=0;
+  // Channel progress ring (while player is standing on portal)
+  if(channelProgress>0){
+    ctx.strokeStyle='#fff';
+    ctx.lineWidth=4;
+    ctx.globalAlpha=1;
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,50,-Math.PI/2,-Math.PI/2+channelProgress*Math.PI*2);
+    ctx.stroke();
+  }
+  // Floating dungeon name above
+  ctx.globalAlpha=dimming?0.5:1;
+  ctx.textAlign='center';
+  ctx.font='700 12px Cinzel, serif';
+  ctx.fillStyle='#000';
+  ctx.fillText(p.def.name.toUpperCase(),p.x+1,p.y-colH-9);
+  ctx.fillStyle=baseColor;
+  ctx.fillText(p.def.name.toUpperCase(),p.x,p.y-colH-10);
+  ctx.restore();
+  // Emit embers occasionally into the particle system
+  if(Math.random()<0.3){
+    particles.push({
+      x:p.x+(Math.random()-0.5)*20,y:p.y+(Math.random()-0.5)*20,
+      vx:(Math.random()-0.5)*20,vy:-30-Math.random()*30,
+      life:1.2,maxLife:1.2,
+      color:baseColor,size:1.5+Math.random()*1.5,soul:true
+    });
+  }
+}
 function spawnSpirit(isTemp=false){
   const perms=spirits.filter(s=>!s.isTemp&&!s.dead);
   if(!isTemp&&perms.length>=(player.maxBonds||MAX_SPIRITS))return false;
@@ -1399,6 +1599,8 @@ function update(dt,now){
     if(spawnTimer>si){spawnTimer=0;spawnEnemy();}
     clusterTimer+=dt*1000;
     if(clusterTimer>clusterInterval){clusterTimer=0;clusterInterval=12000+Math.random()*9000;spawnCluster();}
+    // Portals spawn during normal play only (never during a dungeon run)
+    updatePortal(dt,now);
   } else {
     updateDungeon(now);
   }
@@ -1429,6 +1631,9 @@ function render(now){
 
   // Ground FX — render on the floor BEFORE entities so characters stand on top
   drawGroundFX(now);
+
+  // Portal visual — render above ground FX but below entities
+  drawPortal(now);
 
   // Veilmark rings on enemies (behind them)
   enemies.forEach(e=>{
@@ -1809,6 +2014,14 @@ function updateMinimapZ(){
   mx.clearRect(0,0,mw,mw);mx.fillStyle='rgba(5,0,15,0.9)';mx.fillRect(0,0,mw,mw);
   enemies.forEach(e=>{if(e.dead)return;mx.fillStyle=e.isElite?'#fbbf24':'#ef4444';mx.beginPath();mx.arc(e.x*sc,e.y*sc,1.5,0,Math.PI*2);mx.fill();});
   spirits.forEach(s=>{if(s.dead)return;mx.fillStyle='#9DC4B0';mx.beginPath();mx.arc(s.x*sc,s.y*sc,1.2,0,Math.PI*2);mx.fill();});
+  // Portal marker — pulsing tier-color dot so player can spot it from afar
+  if(portalState.active){
+    const p=portalState.active;
+    const pulse=0.6+0.4*Math.sin(performance.now()*0.005);
+    mx.fillStyle=p.def.color;mx.shadowColor=p.def.color;mx.shadowBlur=6;
+    mx.beginPath();mx.arc(p.x*sc,p.y*sc,3*pulse+1.5,0,Math.PI*2);mx.fill();
+    mx.shadowBlur=0;
+  }
   mx.fillStyle='#c084fc';mx.shadowColor='#c084fc';mx.shadowBlur=4;
   mx.beginPath();mx.arc(player.x*sc,player.y*sc,2.8,0,Math.PI*2);mx.fill();mx.shadowBlur=0;
 }
