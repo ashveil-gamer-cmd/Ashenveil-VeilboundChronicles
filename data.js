@@ -272,3 +272,117 @@ ENEMY_TYPES[3].draw=drawGolem;
 ENEMY_TYPES[4].draw=drawShade;
 ENEMY_TYPES[5].draw=drawAbomination;
 ENEMY_TYPES[6].draw=drawSpecter;
+
+
+// ═══════ TALENT TREE DATA ════════════════════════════════
+// Three branches, six talents each. Talents have 1-3 ranks.
+// "gate" is the minimum number of points that must be spent in this branch before unlocking.
+// "effect" describes what each rank does in plain language for the tooltip.
+// "apply(rank)" returns a partial bonus object the engine reads via getTalentBonus().
+//
+// Supported bonus keys (engine reads these in game.js):
+//   hpPct         — % increase to max HP
+//   dmgPct        — % increase to all ability damage
+//   cdrPct        — % cooldown reduction across all abilities
+//   critPct       — % added crit chance
+//   moveSpdPct    — % added movement speed
+//   spiritCap     — flat increase to spirit bond cap
+//   spiritDmgPct  — % increase to spirit auto-attack damage
+//   lifeOnHit     — flat HP gained per enemy killed
+//   detoRadius    — flat pixels added to Detonate radius
+//   detoDmgPct    — % increase to Detonate damage specifically
+//   veilmarkMax   — flat increase to max Veilmark stacks
+//   wrathRadius   — flat pixels added to Wrath Tide radius
+
+const TALENT_TREE={
+  Binding:{
+    color:'#9DC4B0',
+    icon:'✦',
+    talents:[
+      {id:'b1',name:'Greater Bond',icon:'◉',maxRank:3,gate:0,
+       desc:'Increase spirit bond cap.',
+       effect:r=>`+${r} spirit cap`,
+       apply:r=>({spiritCap:r})},
+      {id:'b2',name:'Vicious Spirits',icon:'▲',maxRank:3,gate:0,
+       desc:'Your spirits hit harder.',
+       effect:r=>`+${r*10}% spirit damage`,
+       apply:r=>({spiritDmgPct:r*10})},
+      {id:'b3',name:'Swift Summoning',icon:'↯',maxRank:2,gate:2,
+       desc:'Raise cooldown reduced.',
+       effect:r=>`-${r*15}% Raise cooldown`,
+       apply:r=>({raiseCdrPct:r*15})},
+      {id:'b4',name:'Echoing Call',icon:'◈',maxRank:1,gate:3,
+       desc:'Raise now summons two spirits at once.',
+       effect:_=>'Raise summons 2 spirits',
+       apply:_=>({raiseDoubles:1})},
+      {id:'b5',name:'Spirit Pact',icon:'✪',maxRank:3,gate:4,
+       desc:'Each living spirit increases your damage.',
+       effect:r=>`+${r*3}% damage per spirit`,
+       apply:r=>({perSpiritDmgPct:r*3})},
+      {id:'b6',name:'Soul Eruption',icon:'✺',maxRank:1,gate:6,
+       desc:'Spirits explode on death, damaging nearby enemies.',
+       effect:_=>'Spirits detonate on death',
+       apply:_=>({spiritExplode:1})},
+    ],
+  },
+  Veilcraft:{
+    color:'#f43f5e',
+    icon:'✖',
+    talents:[
+      {id:'v1',name:'Searing Mark',icon:'◎',maxRank:3,gate:0,
+       desc:'Detonate hits harder.',
+       effect:r=>`+${r*12}% Detonate damage`,
+       apply:r=>({detoDmgPct:r*12})},
+      {id:'v2',name:'Widening Veil',icon:'○',maxRank:3,gate:0,
+       desc:'Detonate affects a larger area.',
+       effect:r=>`+${r*25} Detonate radius`,
+       apply:r=>({detoRadius:r*25})},
+      {id:'v3',name:'Deep Mark',icon:'◆',maxRank:2,gate:2,
+       desc:'Veilmark stacks cap higher.',
+       effect:r=>`+${r*2} max Veilmark stacks`,
+       apply:r=>({veilmarkMax:r*2})},
+      {id:'v4',name:'Unbound Wrath',icon:'⟐',maxRank:3,gate:3,
+       desc:'Wrath Tide strikes a wider area.',
+       effect:r=>`+${r*30} Wrath Tide radius`,
+       apply:r=>({wrathRadius:r*30})},
+      {id:'v5',name:'Relentless Veil',icon:'⚡',maxRank:3,gate:4,
+       desc:'All ability cooldowns reduced.',
+       effect:r=>`-${r*6}% all cooldowns`,
+       apply:r=>({cdrPct:r*6})},
+      {id:'v6',name:'Cataclysm',icon:'✹',maxRank:1,gate:6,
+       desc:'Detonate has a 30% chance to trigger a second time.',
+       effect:_=>'Detonate echoes 30% of the time',
+       apply:_=>({detoEcho:1})},
+    ],
+  },
+  Hollow:{
+    color:'#c084fc',
+    icon:'♰',
+    talents:[
+      {id:'h1',name:'Veiled Flesh',icon:'♡',maxRank:3,gate:0,
+       desc:'Increase your max health.',
+       effect:r=>`+${r*8}% max HP`,
+       apply:r=>({hpPct:r*8})},
+      {id:'h2',name:'Hollow Step',icon:'↦',maxRank:3,gate:0,
+       desc:'Move faster.',
+       effect:r=>`+${r*4}% movement speed`,
+       apply:r=>({moveSpdPct:r*4})},
+      {id:'h3',name:'Pale Vitality',icon:'❂',maxRank:3,gate:2,
+       desc:'Heal HP every time an enemy dies.',
+       effect:r=>`Heal ${r*8} HP per kill`,
+       apply:r=>({lifeOnHit:r*8})},
+      {id:'h4',name:'Deft Casting',icon:'◇',maxRank:3,gate:3,
+       desc:'Increased critical strike chance.',
+       effect:r=>`+${r*3}% crit chance`,
+       apply:r=>({critPct:r*3})},
+      {id:'h5',name:'Hollow Resilience',icon:'⊠',maxRank:3,gate:4,
+       desc:'Reduces damage taken.',
+       effect:r=>`-${r*5}% damage taken`,
+       apply:r=>({dmgReducePct:r*5})},
+      {id:'h6',name:'Everlasting',icon:'✦',maxRank:1,gate:6,
+       desc:'Once per life, fatal damage is reduced to 1 HP instead.',
+       effect:_=>'Cheat death once per life',
+       apply:_=>({cheatDeath:1})},
+    ],
+  },
+};
