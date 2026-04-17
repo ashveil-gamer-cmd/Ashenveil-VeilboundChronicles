@@ -835,3 +835,178 @@ canvas#c{display:block;position:fixed;top:0;left:0}
   opacity:0.4;cursor:not-allowed;color:#4a5a50;border-color:rgba(74,90,80,0.4);
   background:transparent;
 }
+
+/* ─── GEAR PANEL DEPTH ─── */
+.gear-summary{
+  margin-bottom:clamp(12px,1.5vw,18px);
+  padding:clamp(10px,1.2vw,15px) clamp(12px,1.5vw,18px);
+  background:rgba(245,158,11,0.04);
+  border:1px solid rgba(245,158,11,0.2);
+  border-radius:6px;
+}
+.gear-summary-label{
+  font-family:'Cinzel',serif;font-size:clamp(9px,0.9vw,11px);
+  letter-spacing:3px;color:#f59e0b;text-transform:uppercase;
+  margin-bottom:8px;font-weight:600;
+}
+.gear-summary-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));
+  gap:6px 16px;
+}
+.gear-summary-stat{
+  display:flex;align-items:baseline;gap:8px;
+  font-size:clamp(10px,1vw,12px);
+}
+.gear-summary-val{
+  font-family:'Cinzel',serif;font-weight:700;
+  font-size:clamp(12px,1.1vw,14px);
+  letter-spacing:0.5px;
+}
+.gear-summary-key{color:#8a7aa8;letter-spacing:0.5px}
+
+.gear-sets-card{
+  margin-bottom:clamp(12px,1.5vw,18px);
+  padding:clamp(10px,1.2vw,15px) clamp(12px,1.5vw,18px);
+  background:rgba(192,132,252,0.05);
+  border:1px solid rgba(192,132,252,0.25);
+  border-radius:6px;
+}
+.gear-set-row{margin-top:6px}
+.gear-set-header{
+  display:flex;justify-content:space-between;align-items:baseline;
+}
+.gear-set-name{
+  font-family:'Cinzel',serif;font-size:clamp(11px,1.1vw,13px);
+  color:#c084fc;letter-spacing:1.5px;font-weight:600;
+}
+.gear-set-count{
+  font-family:'Cinzel',serif;font-size:clamp(9px,0.9vw,11px);
+  color:#d4c896;letter-spacing:1px;
+}
+.gear-set-active{
+  font-size:clamp(10px,1vw,12px);color:#22c55e;
+  margin-top:3px;padding-left:4px;
+}
+.gear-set-next{
+  font-size:clamp(10px,1vw,12px);color:#8a7aa8;
+  margin-top:2px;padding-left:4px;font-style:italic;
+}
+
+.gear-slot-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+  gap:clamp(8px,1vw,12px);
+}
+.gear-slot{
+  padding:clamp(10px,1.2vw,14px);
+  background:rgba(255,255,255,0.03);
+  border:1px solid rgba(255,255,255,0.08);
+  border-radius:6px;
+  transition:all 0.15s;
+  cursor:pointer;
+}
+.gear-slot.has-item:hover{background:rgba(255,255,255,0.05);transform:translateY(-1px)}
+.gear-slot.selected{
+  background:rgba(255,255,255,0.06);
+  box-shadow:0 0 0 1px rgba(255,255,255,0.18),0 6px 18px rgba(0,0,0,0.5);
+}
+.gear-slot-header{
+  display:flex;align-items:center;gap:8px;margin-bottom:6px;
+}
+.gear-slot-icon{font-size:clamp(16px,1.6vw,20px);line-height:1;font-weight:700}
+.gear-slot-icon-empty{color:#4a3d5f;opacity:0.6}
+.gear-slot-name{
+  font-family:'Cinzel',serif;font-size:clamp(9px,0.95vw,11px);
+  letter-spacing:2px;color:#8a7aa8;flex:1;text-transform:uppercase;
+}
+.gear-rarity-tag{
+  font-family:'Cinzel',serif;font-size:clamp(8px,0.8vw,10px);
+  padding:2px 7px;border:1px solid;border-radius:3px;
+  letter-spacing:1.5px;font-weight:600;
+}
+.gear-item-name{
+  font-family:'Cinzel',serif;font-size:clamp(12px,1.2vw,14px);
+  letter-spacing:1px;font-weight:700;
+  margin-bottom:6px;
+}
+.gear-crafted-badge{
+  font-size:clamp(8px,0.8vw,10px);
+  color:#9DC4B0;letter-spacing:1.5px;
+  padding:1px 6px;border-radius:2px;
+  background:rgba(157,196,176,0.15);
+  vertical-align:middle;margin-left:6px;font-weight:600;
+}
+.gear-stats-block{
+  display:flex;flex-direction:column;gap:2px;
+  margin-bottom:4px;
+}
+.gear-stat-row{
+  font-size:clamp(10px,1vw,12px);
+  letter-spacing:0.3px;
+}
+.gear-set-line{
+  font-size:clamp(9px,0.9vw,11px);
+  color:#c084fc;font-style:italic;letter-spacing:0.5px;margin-top:4px;
+}
+.gear-empty{
+  font-size:clamp(10px,1vw,12px);
+  color:#4a3d5f;font-style:italic;
+  text-align:center;padding:clamp(14px,1.8vw,20px);
+}
+.gear-actions{
+  display:flex;gap:8px;margin-top:10px;
+  padding-top:10px;border-top:1px solid rgba(255,255,255,0.08);
+}
+.gear-action-btn{
+  flex:1;
+  font-family:'Cinzel',serif;font-size:clamp(9px,0.9vw,11px);
+  letter-spacing:1.5px;font-weight:700;
+  padding:clamp(6px,0.8vw,9px);
+  border-radius:4px;cursor:pointer;
+  transition:all 0.15s;
+}
+.gear-action-move{
+  color:#60a5fa;background:transparent;
+  border:1px solid rgba(96,165,250,0.45);
+}
+.gear-action-move:hover{
+  background:rgba(96,165,250,0.15);border-color:#60a5fa;
+  box-shadow:0 0 10px rgba(96,165,250,0.3);
+}
+.gear-action-salvage{
+  color:#a78bfa;background:transparent;
+  border:1px solid rgba(167,139,250,0.45);
+}
+.gear-action-salvage:hover{
+  background:rgba(167,139,250,0.15);border-color:#a78bfa;
+  box-shadow:0 0 10px rgba(167,139,250,0.3);
+}
+
+/* ─── REFORGE BUTTONS ─── */
+/* Gear panel reforge button */
+.gear-action-reforge{
+  color:#c084fc;background:transparent;
+  border:1px solid rgba(192,132,252,0.45);
+}
+.gear-action-reforge:hover:not([disabled]){
+  background:rgba(192,132,252,0.15);border-color:#c084fc;
+  box-shadow:0 0 10px rgba(192,132,252,0.3);
+}
+.gear-action-reforge[disabled]{
+  opacity:0.35;cursor:not-allowed;
+  color:#4a3d5f;border-color:rgba(74,61,95,0.4);
+}
+/* Bag tooltip reforge button */
+.bag-btn-reforge{
+  color:#c084fc;background:transparent;
+  border:1px solid rgba(192,132,252,0.45);
+}
+.bag-btn-reforge:hover:not([disabled]){
+  background:rgba(192,132,252,0.15);border-color:#c084fc;
+  box-shadow:0 0 14px rgba(192,132,252,0.3);
+}
+.bag-btn-reforge[disabled]{
+  opacity:0.35;cursor:not-allowed;
+  color:#4a3d5f;border-color:rgba(74,61,95,0.4);
+}
