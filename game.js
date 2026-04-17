@@ -1454,4 +1454,3 @@ function updateMinimapZ(){
   mx.fillStyle='#c084fc';mx.shadowColor='#c084fc';mx.shadowBlur=4;
   mx.beginPath();mx.arc(player.x*sc,player.y*sc,2.8,0,Math.PI*2);mx.fill();mx.shadowBlur=0;
 }
-
