@@ -3568,6 +3568,61 @@ window.addEventListener('pagehide',emergencySave);
 window.addEventListener('blur',emergencySave);
 // Start flow: if starting a new game (no continue), show class-select first.
 // Continue-from-save goes straight into the game with the saved class.
+// ─── VOLUME CONTROL HANDLERS ───────────────────────────────
+// Global functions called by inline onclick handlers in index.html.
+// masterVolume and setMasterVolume are defined in audio.js.
+let _preMuteVolume = 0.6;
+function toggleVolumePanel(){
+  const panel = document.getElementById('volumePanel');
+  if(!panel) return;
+  panel.style.display = (panel.style.display === 'none') ? 'flex' : 'none';
+  // Sync slider to current value when opening
+  if(panel.style.display === 'flex'){
+    const slider = document.getElementById('volumeSlider');
+    if(slider) slider.value = Math.round(getMasterVolume() * 100);
+    const val = document.getElementById('volumeValue');
+    if(val) val.textContent = Math.round(getMasterVolume() * 100) + '%';
+  }
+}
+function handleVolumeChange(v){
+  const num = parseFloat(v);
+  setMasterVolume(num / 100);
+  const val = document.getElementById('volumeValue');
+  if(val) val.textContent = Math.round(num) + '%';
+  // Update button icon based on level
+  const btn = document.getElementById('volumeBtn');
+  if(btn){
+    btn.textContent = num <= 0 ? '🔇' : (num < 33 ? '🔈' : (num < 66 ? '🔉' : '🔊'));
+  }
+  const muteBtn = document.querySelector('.vol-mute-btn');
+  if(muteBtn) muteBtn.classList.toggle('muted', num <= 0);
+}
+function handleMuteToggle(){
+  const cur = getMasterVolume();
+  if(cur > 0){
+    _preMuteVolume = cur;
+    setMasterVolume(0);
+    handleVolumeChange(0);
+    const slider = document.getElementById('volumeSlider');
+    if(slider) slider.value = 0;
+  } else {
+    const restore = _preMuteVolume > 0 ? _preMuteVolume : 0.6;
+    setMasterVolume(restore);
+    handleVolumeChange(restore * 100);
+    const slider = document.getElementById('volumeSlider');
+    if(slider) slider.value = restore * 100;
+  }
+}
+// Initialize slider with saved volume on load
+(function initVolumeUI(){
+  const slider = document.getElementById('volumeSlider');
+  if(slider){
+    const v = Math.round((typeof getMasterVolume === 'function' ? getMasterVolume() : 0.6) * 100);
+    slider.value = v;
+    handleVolumeChange(v);
+  }
+})();
+
 document.getElementById('startBtn').addEventListener('click',()=>openClassSelect());
 // New continue/newgame buttons — only present if HTML has been updated
 const _continueBtn=document.getElementById('continueBtn');
