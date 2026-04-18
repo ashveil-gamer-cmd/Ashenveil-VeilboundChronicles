@@ -27,12 +27,50 @@ const SET_BONUSES={
   }
 };
 function getSetPieceCount(sn){return Object.values(equipped).filter(i=>i&&i.setName===sn).length;}
+// Rarity-based stat multiplier. Applied at roll time so gear upgrades feel
+// transformative — a legendary piece is genuinely ~2x stronger than a common
+// one, not +15%. This makes gear the primary damage/survival lever in the
+// idle progression model (level gives passive speed; gear gives power).
+const RARITY_STAT_MULT={
+  common:    1.0,
+  uncommon:  1.35,
+  rare:      1.75,
+  epic:      2.3,
+  legendary: 3.0,
+  mythic:    4.0,
+};
+
+// Scale an item's stats by a multiplier, rounding to sensible integers.
+// Returns a new stats object; doesn't mutate the input.
+function scaleItemStats(stats, mult){
+  const out = {};
+  for(const [key, val] of Object.entries(stats || {})){
+    if(typeof val !== 'number'){ out[key] = val; continue; }
+    // Small percent-like stats (crit, cdr, res) scale less aggressively so
+    // they stay in a believable range. Big stats (hp, atk, sm) scale full.
+    const smallStat = ['crit','cdr','res','moveSpdPct','critDmgPct'].includes(key);
+    const scaled = smallStat ? val * (1 + (mult - 1) * 0.5) : val * mult;
+    out[key] = Math.max(1, Math.round(scaled));
+  }
+  return out;
+}
+
 function rollLoot(level){
   const tierIdx=Math.min(Math.floor(level/20),4);
   const rarities=['common','uncommon','rare','epic','legendary'];
   const rarity=rarities[Math.min(tierIdx+Math.floor(Math.random()*2),4)];
   const filtered=ITEM_POOL.filter(i=>i.rarity===rarity||Math.random()<0.12);
-  return {...(filtered.length?filtered[Math.floor(Math.random()*filtered.length)]:ITEM_POOL[Math.floor(Math.random()*ITEM_POOL.length)])};
+  const base = filtered.length?filtered[Math.floor(Math.random()*filtered.length)]:ITEM_POOL[Math.floor(Math.random()*ITEM_POOL.length)];
+  // Build the rolled item — start from the template, apply rarity-based stat
+  // scaling and a small level-based scaling bonus so higher-level drops are
+  // meaningfully stronger.
+  const levelBonus = 1 + Math.max(0, level - 1) * 0.03; // +3% per level past 1
+  const rarityMult = (RARITY_STAT_MULT[base.rarity] || 1.0);
+  const totalMult = rarityMult * levelBonus;
+  return {
+    ...base,
+    stats: scaleItemStats(base.stats, totalMult),
+  };
 }
 // Rarity color palette — single source of truth used by all gear UI
 const RARITY_COLORS={common:'#9ca3af',uncommon:'#22c55e',rare:'#60a5fa',epic:'#c084fc',legendary:'#f59e0b',mythic:'#ff6b6b'};
