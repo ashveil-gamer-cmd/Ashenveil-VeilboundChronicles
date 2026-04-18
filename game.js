@@ -2381,7 +2381,7 @@ function spawnEnemy(typeOverride=null){
   const hs=enemyHpScale(player.level),ds=enemyDmgScale(player.level);
   // Base HP doubled from previous values so fights take 3-5s with basic attacks
   // instead of dying in one hit. Pairs with slower XP curve for satisfying combat.
-  const base = 510 + player.level * 10;
+  const base = 340 + player.level * 6;
   const baseAtk = 22 + player.level * 0.8;
   enemies.push({
     id:enemyId++,x,y,vx:0,vy:0,
@@ -2481,7 +2481,7 @@ function spawnDungeonWave(waveIndex){
       const clear=findClearPosition(x,y,22);
       x=clear.x;y=clear.y;
       const hs=enemyHpScale(player.level),ds=enemyDmgScale(player.level);
-      const base = 510 + player.level * 10;
+      const base = 340 + player.level * 6;
       const baseAtk = 22 + player.level * 0.8;
       enemies.push({
         id:enemyId++,x,y,vx:0,vy:0,
@@ -2502,7 +2502,7 @@ function spawnDungeonBoss(){
   const bd=dungeonState.def.boss;
   const typeData=ENEMY_TYPES.find(t=>t.type===bd.baseType)||ENEMY_TYPES[0];
   const hs=enemyHpScale(player.level),ds=enemyDmgScale(player.level);
-  const base = 510 + player.level * 10;
+  const base = 340 + player.level * 6;
   const baseAtk = 22 + player.level * 0.8;
   // Spawn boss directly in front of player for a heroic entrance
   const angle=player.facing||0;
@@ -2614,7 +2614,7 @@ function resolveBossAbility(boss){
     // Summon skeleton thralls at the boss's position
     const typeData=ENEMY_TYPES.find(t=>t.type==='skeleton')||ENEMY_TYPES[0];
     const hs=enemyHpScale(player.level),ds=enemyDmgScale(player.level);
-    const base = 510 + player.level * 10;
+    const base = 340 + player.level * 6;
     const baseAtk = 22 + player.level * 0.8;
     for(let i=0;i<(ab.count||2);i++){
       const a=(i/ab.count)*Math.PI*2;
