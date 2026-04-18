@@ -2462,13 +2462,19 @@ function spawnDungeonWave(waveIndex){
       // Nudge away from collidable props
       const clear=findClearPosition(x,y,22);
       x=clear.x;y=clear.y;
-      const hs=enemyHpScale(player.level),ds=enemyDmgScale(player.level);
-      const base=player.level<=5?150:player.level<=10?175:200;
+      // Dungeon enemies scale to the dungeon's minLevel + a small spread
+      // for variety. This is slightly above the zone the dungeon sits in.
+      const dMin = (dungeonState.def?.minLevel || 1);
+      const enemyLv = Math.max(1, dMin + Math.floor(Math.random() * 4));
+      const hs=enemyHpScale(enemyLv),ds=enemyDmgScale(enemyLv);
+      const base=enemyLv<=5?150:enemyLv<=10?175:enemyLv<=20?220:enemyLv<=35?280:360;
+      const baseAtk=enemyLv<=5?22:enemyLv<=10?26:enemyLv<=20?32:enemyLv<=35?40:52;
       enemies.push({
         id:enemyId++,x,y,vx:0,vy:0,
+        level: enemyLv,
         hp:base*hs*typeData.hp*(isElite?2.4:1),
         maxHp:base*hs*typeData.hp*(isElite?2.4:1),
-        attack:(player.level<=5?22:player.level<=10?26:30)*ds*typeData.dmg*(isElite?1.6:1),
+        attack:baseAtk*ds*typeData.dmg*(isElite?1.6:1),
         speed:typeData.spd*(isElite?1.12:1),
         dead:false,isElite,typeData,
         lastAttack:0,hitFlash:0,
@@ -2482,8 +2488,12 @@ function spawnDungeonWave(waveIndex){
 function spawnDungeonBoss(){
   const bd=dungeonState.def.boss;
   const typeData=ENEMY_TYPES.find(t=>t.type===bd.baseType)||ENEMY_TYPES[0];
-  const hs=enemyHpScale(player.level),ds=enemyDmgScale(player.level);
-  const base=player.level<=5?150:player.level<=10?175:200;
+  // Boss level is the dungeon's minLevel + 2 — it's the hardest encounter
+  // of the dungeon, and should feel like the culmination of the run.
+  const bossLv = Math.max(1, (dungeonState.def?.minLevel || 1) + 2);
+  const hs=enemyHpScale(bossLv),ds=enemyDmgScale(bossLv);
+  const base=bossLv<=5?150:bossLv<=10?175:bossLv<=20?220:bossLv<=35?280:360;
+  const baseAtk=bossLv<=5?22:bossLv<=10?26:bossLv<=20?32:bossLv<=35?40:52;
   // Spawn boss directly in front of player for a heroic entrance
   const angle=player.facing||0;
   let x=player.x+Math.cos(angle)*280;
@@ -2493,9 +2503,10 @@ function spawnDungeonBoss(){
   x=clear.x;y=clear.y;
   const boss={
     id:enemyId++,x,y,vx:0,vy:0,
+    level: bossLv,
     hp:base*hs*typeData.hp*bd.hpMult,
     maxHp:base*hs*typeData.hp*bd.hpMult,
-    attack:(player.level<=5?22:player.level<=10?26:30)*ds*typeData.dmg*bd.atkMult,
+    attack:baseAtk*ds*typeData.dmg*bd.atkMult,
     speed:typeData.spd*0.85, // bosses a bit slower but hit like a truck
     dead:false,isElite:true,typeData,
     lastAttack:0,hitFlash:0,
@@ -2593,8 +2604,11 @@ function resolveBossAbility(boss){
   if(ab.type==='summonThralls'){
     // Summon skeleton thralls at the boss's position
     const typeData=ENEMY_TYPES.find(t=>t.type==='skeleton')||ENEMY_TYPES[0];
-    const hs=enemyHpScale(player.level),ds=enemyDmgScale(player.level);
-    const base=player.level<=5?150:player.level<=10?175:200;
+    // Thralls inherit the boss's level (minus 1 — weaker minions)
+    const thrallLv = Math.max(1, (boss.level || player.level) - 1);
+    const hs=enemyHpScale(thrallLv),ds=enemyDmgScale(thrallLv);
+    const base=thrallLv<=5?150:thrallLv<=10?175:thrallLv<=20?220:thrallLv<=35?280:360;
+    const baseAtk=thrallLv<=5?22:thrallLv<=10?26:thrallLv<=20?32:thrallLv<=35?40:52;
     for(let i=0;i<(ab.count||2);i++){
       const a=(i/ab.count)*Math.PI*2;
       const tx=boss.x+Math.cos(a)*boss.size*1.2;
@@ -2602,9 +2616,10 @@ function resolveBossAbility(boss){
       const clear=findClearPosition(tx,ty,22);
       enemies.push({
         id:enemyId++,x:clear.x,y:clear.y,vx:0,vy:0,
+        level: thrallLv,
         hp:base*hs*typeData.hp*0.6, // thralls are weaker than normal skeletons
         maxHp:base*hs*typeData.hp*0.6,
-        attack:(player.level<=5?22:player.level<=10?26:30)*ds*typeData.dmg*0.8,
+        attack:baseAtk*ds*typeData.dmg*0.8,
         speed:typeData.spd*1.1, // but a bit faster
         dead:false,isElite:false,typeData,
         lastAttack:0,hitFlash:0,
