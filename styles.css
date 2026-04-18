@@ -1255,31 +1255,34 @@ canvas#c{display:block;position:fixed;top:0;left:0}
 }
 .char-card-class{
   font-family:'Cinzel',serif;
-  font-size:clamp(9px,1vw,11px);
+  font-size:clamp(10px,1.1vw,12px);
   letter-spacing:2.5px;text-transform:uppercase;
+  font-weight:700;
+  opacity:1;
 }
 .char-card-stats{
   display:grid;grid-template-columns:repeat(3,1fr);gap:6px;
   width:100%;
-  margin-top:6px;padding:8px 6px;
-  background:rgba(0,0,0,0.3);border-radius:5px;
-  border:1px solid rgba(255,255,255,0.05);
+  margin-top:6px;padding:10px 6px;
+  background:rgba(0,0,0,0.4);border-radius:5px;
+  border:1px solid rgba(255,255,255,0.08);
 }
 .char-stat{
-  display:flex;flex-direction:column;align-items:center;gap:2px;
+  display:flex;flex-direction:column;align-items:center;gap:3px;
   font-size:clamp(9px,1vw,11px);
 }
 .char-stat-label{
-  font-family:'Cinzel',serif;color:#8a7aa8;letter-spacing:1.5px;font-size:clamp(7px,0.8vw,9px);
+  font-family:'Cinzel',serif;color:#b8a8d0;letter-spacing:1.5px;font-size:clamp(8px,0.85vw,10px);font-weight:600;
 }
 .char-stat-val{
-  font-family:'Cinzel',serif;color:#e8dfc8;font-weight:700;
-  font-size:clamp(11px,1.2vw,14px);
+  font-family:'Cinzel',serif;color:#f0e6d2;font-weight:700;
+  font-size:clamp(12px,1.3vw,15px);
 }
 .char-card-lastplayed{
-  font-family:'Cinzel',serif;font-size:clamp(8px,0.9vw,10px);
-  letter-spacing:1.5px;color:#6b4d8a;font-style:italic;
-  margin-top:2px;
+  font-family:'Cinzel',serif;font-size:clamp(9px,0.95vw,11px);
+  letter-spacing:1.8px;color:#b8a8d0;font-style:italic;
+  margin-top:4px;
+  opacity:0.85;
 }
 .char-card-actions{
   display:flex;gap:6px;width:100%;margin-top:8px;
@@ -1312,12 +1315,45 @@ canvas#c{display:block;position:fixed;top:0;left:0}
   box-shadow:0 0 14px rgba(192,132,252,0.3);
 }
 .char-card-empty{
-  border-color:rgba(192,132,252,0.3);
+  border-color:rgba(192,132,252,0.4);
   border-style:dashed;
-  opacity:0.85;
+  opacity:1;
 }
-.char-card-empty:hover{opacity:1}
+.char-card-empty:hover{
+  border-color:rgba(192,132,252,0.7);
+  box-shadow:0 8px 28px rgba(0,0,0,0.55), 0 0 20px rgba(192,132,252,0.2);
+}
+.char-card-empty .char-card-class{
+  color:#b8a8d0;
+  opacity:0.9;
+  font-size:clamp(9px,1vw,11px);
+  letter-spacing:2px;
+}
 .char-card-plus{
   color:#c084fc;font-size:clamp(42px,5.5vw,60px);
   text-shadow:0 0 14px rgba(192,132,252,0.5);
+}
+/* Back-to-title button */
+#charSelectCancelBtn, #classSelectCancelBtn{
+  font-family:'Cinzel',serif;
+  font-size:clamp(10px,1.1vw,12px);
+  padding:10px 24px;letter-spacing:2.5px;
+  color:#b8a8d0;background:rgba(0,0,0,0.4);
+  border:1px solid rgba(192,132,252,0.35);
+  border-radius:4px;cursor:pointer;
+  margin-top:10px;
+}
+#charSelectCancelBtn:hover, #classSelectCancelBtn:hover{
+  color:#e8dfc8;border-color:rgba(192,132,252,0.7);
+  background:rgba(192,132,252,0.1);
+}
+/* Exit button in menu bar — red-tinted to signal "leave game" */
+.menu-btn-exit{
+  color:#f59e0b !important;
+  border-color:rgba(245,158,11,0.35) !important;
+}
+.menu-btn-exit:hover{
+  color:#fbbf24 !important;
+  background:rgba(245,158,11,0.12) !important;
+  border-color:rgba(245,158,11,0.6) !important;
 }
