@@ -1652,6 +1652,8 @@ function drawWorld(now){
 
 // ═══════ SPAWN SYSTEMS ══════════════════════════════════
 function spawnEnemy(typeOverride=null){
+  // No combat spawns in camp zones — The Procession is a safe hub
+  if(curZone?.isCamp) return;
   const living=enemies.filter(e=>!e.dead).length;
   if(living>=MAX_ENEMIES)return;
   const angle=Math.random()*Math.PI*2;
@@ -2951,9 +2953,13 @@ function update(dt,now){
   if(keys['ArrowRight']||keys['d']||keys['D'])ix=1;
   if(keys['ArrowUp']||keys['w']||keys['W'])iy=-1;
   if(keys['ArrowDown']||keys['s']||keys['S'])iy=1;
-  if(keys['q']||keys['Q'])playerCast(0);
-  if(keys['e']||keys['E'])playerCast(2);
-  if(keys['r']||keys['R'])playerCast(3);
+  // In camp, E interacts with NPCs; in combat, E fires ability 2.
+  // Q/R are ability-only (no NPC-safe bindings needed).
+  if(!curZone?.isCamp){
+    if(keys['q']||keys['Q'])playerCast(0);
+    if(keys['e']||keys['E'])playerCast(2);
+    if(keys['r']||keys['R'])playerCast(3);
+  }
   if(touchJoy.active){ix=touchJoy.dx;iy=touchJoy.dy;}
   if(ix!==0||iy!==0)player.lastInput=now;
   const isAfk=now-player.lastInput>AFK_IDLE;
@@ -3205,6 +3211,11 @@ function render(now){
   // Spirits
   spirits.forEach(s=>drawSpirit(s,now));
 
+  // Camp NPCs — only rendered when in the procession zone
+  if(curZone?.isCamp && typeof drawCampNPCs === 'function'){
+    drawCampNPCs(now);
+  }
+
   // Enemies
   enemies.forEach(e=>{
     if(e.dead)return;
@@ -3285,6 +3296,11 @@ function updateHUD(now){
   document.getElementById('levelBadge').textContent=`LV ${player.level}`;
   document.getElementById('hpNum').textContent=`${Math.ceil(player.hp)}`;
   document.getElementById('goldLabel').textContent=`💰 ${player.gold} G`;
+  // Zone label (top-right) — always reflects current zone, including camp
+  const zn = document.getElementById('zoneName');
+  const zt = document.getElementById('zoneTier');
+  if(zn && curZone) zn.textContent = curZone.name;
+  if(zt && curZone) zt.textContent = curZone.tier;
   // Spirit pips — only shown for Hollowcaller
   const sp=document.getElementById('spiritPanel');
   if(sp){
@@ -3548,9 +3564,16 @@ function applySave(data){
   player.maxBonds=data.player?.maxBonds??MAX_SPIRITS;
   // Kills
   kills=data.stats?.kills??0;
-  // Zone
+  // Zone — handle camp specially since it lives outside the ZONES array
   const zoneId=data.zoneId??1;
-  curZone=ZONES.find(z=>z.id===zoneId)||ZONES[0];
+  if(zoneId === 'procession' || zoneId === CAMP_ZONE.id){
+    curZone = CAMP_ZONE;
+    // Place player at camp spawn point so they're next to NPCs on reload
+    player.x = WORLD_W/2 + CAMP_SPAWN_POINT.x;
+    player.y = WORLD_H/2 + CAMP_SPAWN_POINT.y;
+  } else {
+    curZone = ZONES.find(z=>z.id===zoneId) || ZONES[0];
+  }
   // Equipped gear
   if(data.equipped){
     Object.keys(equipped).forEach(slot=>{
@@ -3751,6 +3774,11 @@ function startGame(continueFromSave=false){
     if(typeof recalcStats==='function')recalcStats();
     else{player.maxHp=computeMaxHp(1);player.attack=computeAttack(1);player.maxBonds=MAX_SPIRITS;}
     player.hp=player.maxHp;
+    // New characters begin in The Procession camp — a safe place to meet the NPCs
+    // before venturing out. They can use Marken the Pathfinder to travel to zones.
+    curZone = CAMP_ZONE;
+    player.x = WORLD_W/2 + CAMP_SPAWN_POINT.x;
+    player.y = WORLD_H/2 + CAMP_SPAWN_POINT.y;
   }
   setAfkWaypoint();
   generateEnvironment();
@@ -3764,14 +3792,17 @@ function startGame(continueFromSave=false){
   }
   drawAbilityIcons();
   startMusic();
-  for(let i=0;i<8;i++)trackTimeout(()=>spawnEnemy(),i*400);
+  // Don't spawn combat enemies in camp — it's a safe zone
+  if(!curZone?.isCamp){
+    for(let i=0;i<8;i++)trackTimeout(()=>spawnEnemy(),i*400);
+  }
   running=true;lastTime=performance.now();
   requestAnimationFrame(loop);
   if(continueFromSave){
     addFeed(`✦ WELCOME BACK · LV ${player.level}`,'#c084fc');
   } else {
-    addFeed('THE VEIL CALLS YOU','#c084fc');
-    addFeed('WASD/Arrow keys · Q W E R abilities','#3d2555');
+    addFeed('✦ YOU ARRIVE AT THE PROCESSION','#d4a555');
+    addFeed('Walk to an NPC and press E','#c4b8dd');
     // New characters — write their initial save immediately so they persist
     if(typeof writeSave==='function') writeSave();
   }
@@ -3791,7 +3822,23 @@ function newGameConfirm(){
 }
 
 // ═══════ INPUT ═══════════════════════════════════════════
-document.addEventListener('keydown',e=>{keys[e.key]=true;player.lastInput=performance.now();});
+document.addEventListener('keydown',e=>{
+  const wasPressed = keys[e.key];
+  keys[e.key]=true;
+  player.lastInput=performance.now();
+  // In camp, E interacts with the nearest NPC — once per press (edge-triggered).
+  // Only fires on the initial keydown, not on held repeats.
+  if(!wasPressed && (e.key === 'e' || e.key === 'E') && curZone?.isCamp){
+    // Don't fire if a panel is already open — prevents double-dip
+    const anyPanelOpen = ['gearPanel','inventoryPanel','shopPanel','talentPanel','profPanel','zoneTravelOverlay'].some(id => {
+      const el = document.getElementById(id);
+      return el && el.style.display !== 'none' && el.style.display !== '';
+    });
+    if(!anyPanelOpen && typeof handleCampInteraction === 'function'){
+      handleCampInteraction();
+    }
+  }
+});
 document.addEventListener('keyup',e=>{keys[e.key]=false;});
 
 // ─── EMERGENCY SAVE TRIGGERS ───
@@ -4114,19 +4161,366 @@ canvas.addEventListener('touchmove',e=>{
 canvas.addEventListener('touchend',e=>{for(let i=0;i<e.changedTouches.length;i++)if(e.changedTouches[i].identifier===joyId){touchJoy.active=false;touchJoy.dx=0;touchJoy.dy=0;joyId=null;}});
 
 // ════════ ZONE TRANSITIONS ════════════════════════════════════════════
-function checkZone(){
-  const nz=ZONES.filter(z=>player.level>=z.minLv).pop();
-  if(nz&&nz.id!==curZone.id){
-    if(zoneTransiting)return;zoneTransiting=true;curZone=nz;
-    SFX.zoneChange();
-    // Switch ambient music to the new zone's sonic profile
-    if(typeof switchAmbientZone==='function')switchAmbientZone(nz.id);
-    showZTrans(nz.name,nz.tier,nz.ambColor);
-    generateEnvironment();enemies=[];
-    for(let i=0;i<8;i++)setTimeout(()=>spawnEnemy(),i*350);
-    addFeed('★ ZONE: '+nz.name,'#e8b84b');
-    setTimeout(()=>zoneTransiting=false,2600);
+// ═══════ THE PROCESSION — CAMP RENDERING & INTERACTION ════════════
+// The camp's world-anchored positions are relative to world center. We
+// convert them to absolute world coords on access so rendering and collision
+// use the same coordinate space as everything else in the game.
+
+// Get absolute world coords for a camp element (NPC or campfire).
+function campWorldPos(entry){
+  return { x: WORLD_W/2 + (entry.x||0), y: WORLD_H/2 + (entry.y||0) };
+}
+
+// Returns the NPC the player is currently within interaction range of,
+// or null if none. Used by render to highlight, and by E key to trigger.
+const CAMP_INTERACT_RADIUS = 80;
+function getNearbyCampNpc(){
+  if(!curZone?.isCamp) return null;
+  let closest = null, closestDist = CAMP_INTERACT_RADIUS;
+  CAMP_NPCS.forEach(npc => {
+    const pos = campWorldPos(npc);
+    const dx = player.x - pos.x, dy = player.y - pos.y;
+    const d = Math.sqrt(dx*dx + dy*dy);
+    if(d < closestDist){ closest = npc; closestDist = d; }
+  });
+  return closest;
+}
+
+// Draw an NPC figure — simple stylized humanoid silhouette that's
+// distinct enough to recognize from across the camp.
+function drawCampNpcFigure(npc, pos, now){
+  const bob = Math.sin(now*0.001 + (npc.x+npc.y)*0.01) * 1.4;
+  const y = pos.y + bob;
+  const x = pos.x;
+  // Shadow at feet
+  ctx.fillStyle='rgba(0,0,0,0.38)';
+  ctx.beginPath();ctx.ellipse(x,y+22,18,5,0,0,Math.PI*2);ctx.fill();
+  // Body
+  ctx.fillStyle=npc.color;
+  ctx.shadowColor=npc.accent; ctx.shadowBlur=14;
+  // Robed silhouette — tapered trapezoid
+  ctx.beginPath();
+  ctx.moveTo(x-14, y+20);
+  ctx.lineTo(x-10, y-12);
+  ctx.lineTo(x+10, y-12);
+  ctx.lineTo(x+14, y+20);
+  ctx.closePath();
+  ctx.fill();
+  ctx.shadowBlur=0;
+  // Head
+  ctx.fillStyle=npc.accent;
+  ctx.beginPath();ctx.arc(x, y-18, 7, 0, Math.PI*2);ctx.fill();
+  // Inner hood shadow (gives face depth)
+  ctx.fillStyle='rgba(0,0,0,0.35)';
+  ctx.beginPath();ctx.arc(x, y-17, 4.5, 0, Math.PI*2);ctx.fill();
+  // Role-specific accent — a small detail per NPC
+  ctx.save();
+  ctx.translate(x, y);
+  if(npc.role === 'pathfinder'){
+    // Walking stick
+    ctx.strokeStyle=npc.accent;
+    ctx.lineWidth=1.6;
+    ctx.beginPath();ctx.moveTo(12, -20); ctx.lineTo(18, 22); ctx.stroke();
+    // Lantern
+    ctx.fillStyle='#fbbf24';
+    ctx.shadowColor='#fbbf24'; ctx.shadowBlur=12;
+    ctx.beginPath();ctx.arc(17, -8, 3, 0, Math.PI*2);ctx.fill();
+    ctx.shadowBlur=0;
+  } else if(npc.role === 'weaponsmith'){
+    // Anvil at feet
+    ctx.fillStyle='#2a1f10';
+    ctx.fillRect(-16, 18, 32, 4);
+    ctx.fillRect(-12, 22, 24, 3);
+    // Ember glow
+    ctx.fillStyle='#ff6b2c';
+    ctx.shadowColor='#ff6b2c'; ctx.shadowBlur=10;
+    ctx.beginPath();ctx.arc(-2, 19, 2, 0, Math.PI*2);ctx.fill();
+    ctx.shadowBlur=0;
+  } else if(npc.role === 'armorer'){
+    // Loom frame
+    ctx.strokeStyle='#6a4a28';
+    ctx.lineWidth=1.4;
+    ctx.strokeRect(-16, -6, 10, 22);
+    // Thread lines
+    ctx.strokeStyle=npc.accent;
+    ctx.lineWidth=0.6;
+    for(let i=0;i<3;i++){
+      ctx.beginPath();ctx.moveTo(-16, -4+i*7); ctx.lineTo(-6, -4+i*7); ctx.stroke();
+    }
+  } else if(npc.role === 'merchant'){
+    // Cart body
+    ctx.fillStyle='#3a2818';
+    ctx.fillRect(8, -2, 22, 18);
+    // Wheel
+    ctx.strokeStyle='#2a1810';
+    ctx.lineWidth=1.4;
+    ctx.beginPath();ctx.arc(14, 18, 5, 0, Math.PI*2);ctx.stroke();
+    ctx.beginPath();ctx.arc(26, 18, 5, 0, Math.PI*2);ctx.stroke();
+    // Goods hint (dots)
+    ctx.fillStyle='#a89dc4';
+    ctx.beginPath();ctx.arc(16, 3, 1.5, 0, Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.arc(22, 5, 1.5, 0, Math.PI*2);ctx.fill();
+  } else if(npc.role === 'ritualist'){
+    // Mirrored mask glint
+    ctx.fillStyle='#f0f4ec';
+    ctx.shadowColor='#9DC4B0'; ctx.shadowBlur=14;
+    ctx.beginPath();ctx.arc(0, -17, 4, 0, Math.PI*2);ctx.fill();
+    ctx.shadowBlur=0;
+    // Floating rune circle at feet
+    const runeAngle = now*0.0008;
+    ctx.strokeStyle='#9DC4B0';
+    ctx.lineWidth=0.8;
+    ctx.globalAlpha=0.45;
+    ctx.beginPath();ctx.arc(0, 20, 18, 0, Math.PI*2);ctx.stroke();
+    ctx.globalAlpha=1;
+    for(let i=0;i<3;i++){
+      const a = runeAngle + i*(Math.PI*2/3);
+      ctx.fillStyle='#9DC4B0';
+      ctx.beginPath();ctx.arc(Math.cos(a)*18, 20+Math.sin(a)*3, 1.4, 0, Math.PI*2);ctx.fill();
+    }
   }
+  ctx.restore();
+}
+
+// Draw the central campfire with warm flicker
+function drawCampfire(now){
+  const pos = campWorldPos(CAMP_CAMPFIRE);
+  const x = pos.x, y = pos.y;
+  // Glow pool on ground
+  const g = ctx.createRadialGradient(x, y, 0, x, y, 220);
+  g.addColorStop(0, 'rgba(255,180,80,0.35)');
+  g.addColorStop(0.5, 'rgba(255,140,60,0.15)');
+  g.addColorStop(1, 'rgba(255,140,60,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();ctx.arc(x, y, 220, 0, Math.PI*2);ctx.fill();
+  // Logs
+  ctx.fillStyle='#2a1810';
+  ctx.fillRect(x-20, y, 40, 6);
+  ctx.fillRect(x-14, y-4, 28, 5);
+  // Fire — flickering triangle stack
+  const flickerA = 12 + Math.sin(now*0.015)*3;
+  const flickerB = 18 + Math.sin(now*0.011+1.2)*4;
+  // Outer flame (orange)
+  ctx.fillStyle='#ff7f2a';
+  ctx.shadowColor='#ff7f2a'; ctx.shadowBlur=22;
+  ctx.beginPath();
+  ctx.moveTo(x, y-flickerB);
+  ctx.lineTo(x-10, y);
+  ctx.lineTo(x+10, y);
+  ctx.closePath();
+  ctx.fill();
+  // Inner flame (yellow)
+  ctx.fillStyle='#ffcc44';
+  ctx.shadowColor='#ffcc44'; ctx.shadowBlur=14;
+  ctx.beginPath();
+  ctx.moveTo(x, y-flickerA);
+  ctx.lineTo(x-5, y-2);
+  ctx.lineTo(x+5, y-2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.shadowBlur=0;
+  // Sparks rising
+  for(let i=0;i<3;i++){
+    const sparkT = (now*0.001 + i*0.3) % 1;
+    const sx = x + Math.sin(now*0.004 + i)*8;
+    const sy = y - sparkT*50;
+    ctx.globalAlpha = 1 - sparkT;
+    ctx.fillStyle='#ffd060';
+    ctx.beginPath();ctx.arc(sx, sy, 1.4, 0, Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+}
+
+// Main NPC draw call. Called from render() when in camp zone.
+function drawCampNPCs(now){
+  // Campfire first (behind NPCs in z-order but anchored at y=40)
+  drawCampfire(now);
+  // Draw each NPC
+  const nearby = getNearbyCampNpc();
+  CAMP_NPCS.forEach(npc => {
+    const pos = campWorldPos(npc);
+    drawCampNpcFigure(npc, pos, now);
+    // Label above NPC — always shown in camp so player knows who's who
+    const labelY = pos.y - 46;
+    ctx.font = 'bold 12px Cinzel, serif';
+    ctx.textAlign = 'center';
+    // Backdrop for readability
+    const textW = ctx.measureText(npc.name).width;
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.fillRect(pos.x - textW/2 - 8, labelY - 14, textW + 16, 18);
+    // Name text — brighter when player is nearby
+    if(nearby === npc){
+      ctx.fillStyle = npc.accent;
+      ctx.shadowColor = npc.accent; ctx.shadowBlur = 10;
+    } else {
+      ctx.fillStyle = npc.color;
+    }
+    ctx.fillText(npc.name, pos.x, labelY);
+    ctx.shadowBlur = 0;
+    // Interaction hint when nearby — "Press E"
+    if(nearby === npc){
+      ctx.font = 'bold 11px Cinzel, serif';
+      ctx.fillStyle = '#f2e9d2';
+      const hint = '[ E ] Interact';
+      const hintW = ctx.measureText(hint).width;
+      ctx.fillStyle = 'rgba(0,0,0,0.75)';
+      ctx.fillRect(pos.x - hintW/2 - 10, pos.y + 32, hintW + 20, 18);
+      ctx.fillStyle = '#f2e9d2';
+      ctx.fillText(hint, pos.x, pos.y + 45);
+    }
+  });
+  ctx.textAlign = 'start';
+}
+
+// Handle E keypress for NPC interaction. Called from key handler.
+function handleCampInteraction(){
+  if(!curZone?.isCamp) return false;
+  const npc = getNearbyCampNpc();
+  if(!npc) return false;
+  // Route to the appropriate handler
+  const handlers = {
+    openZoneTravel: ()=>openZoneTravelScreen(),
+    openMerchant:   ()=>{ if(typeof openShop==='function') openShop(); },
+    openWeaponsmith:()=>{ if(typeof openProf==='function') openProf(); },
+    openArmorer:    ()=>{ if(typeof openProf==='function') openProf(); },
+    openRitualist:  ()=>{ if(typeof openProf==='function') openProf(); },
+  };
+  const fn = handlers[npc.onInteract];
+  if(fn){ fn(); return true; }
+  return false;
+}
+
+// Zone travel overlay — shown when player interacts with Marken.
+// A modal listing each zone with its level requirement and a teleport button.
+function openZoneTravelScreen(){
+  let overlay = document.getElementById('zoneTravelOverlay');
+  if(!overlay){
+    overlay = document.createElement('div');
+    overlay.id = 'zoneTravelOverlay';
+    overlay.className = 'panel';
+    overlay.style.cssText = 'display:flex;flex-direction:column;z-index:450;';
+    document.body.appendChild(overlay);
+  }
+  const zonesHtml = ZONES.map(z => {
+    const locked = player.level < (z.minLv||0);
+    const cls = locked ? 'zt-card zt-locked' : 'zt-card';
+    const btnCls = locked ? 'zt-btn zt-btn-locked' : 'zt-btn';
+    const btnText = locked ? `Requires LV ${z.minLv}` : '► Travel';
+    return `
+      <div class="${cls}" style="border-color:${z.ambColor}55">
+        <div class="zt-tier" style="color:${z.ambColor}">${z.tier}</div>
+        <div class="zt-name">${z.name}</div>
+        <div class="zt-minlv">Minimum level ${z.minLv || 1}</div>
+        <button class="${btnCls}" data-zone="${z.id}" ${locked?'disabled':''}
+                style="${!locked?`color:${z.ambColor};border-color:${z.ambColor}88;`:''}">
+          ${btnText}
+        </button>
+      </div>`;
+  }).join('');
+  overlay.innerHTML = `
+    <div class="panel-header">
+      <h2 style="color:#d4a555">✦ PATHFINDER</h2>
+      <button class="panel-close" onclick="document.getElementById('zoneTravelOverlay').style.display='none'">← BACK</button>
+    </div>
+    <div style="padding:20px;max-width:900px;width:100%;margin:0 auto">
+      <div class="zt-preface">Marken traces a finger across his compass:</div>
+      <div class="zt-flavor">"Where do you need to be?"</div>
+      <div class="zt-grid">${zonesHtml}</div>
+    </div>
+  `;
+  overlay.style.display = 'flex';
+  // Wire up travel buttons
+  overlay.querySelectorAll('.zt-btn:not(.zt-btn-locked)').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const zoneId = btn.getAttribute('data-zone');
+      overlay.style.display = 'none';
+      travelToZone(zoneId);
+    });
+  });
+}
+
+// Auto-zone-transition on level up. With the new camp model, the player
+// chooses their zone explicitly via Marken the Pathfinder, so this function
+// only has work to do when called from a non-camp zone (e.g. after a level-up
+// in the Ashen Wastes, we don't force-move them to Bone Crypts). In practice
+// this is now a near no-op — kept for compat with existing call sites.
+function checkZone(){
+  // Never auto-transition out of camp — player explicitly travels via Marken
+  if(curZone?.isCamp) return;
+  // Respect player's current zone choice. Only auto-upgrade if they're in
+  // a zone whose min-level they've far exceeded AND they've never visited a higher one.
+  // For session 1, no auto-transition at all — let the player return to camp
+  // and pick their next zone deliberately.
+}
+
+// Menu button wrapper — called by the CAMP button in the HUD.
+// No confirm if already in camp (just flash a hint).
+function returnToCamp(){
+  if(curZone?.isCamp){
+    addFeed('You are already at the Procession', '#c4b8dd');
+    return;
+  }
+  travelToCamp();
+}
+
+// Travel from camp to a named zone. Called by Marken's interaction.
+// Sets curZone to the target, regenerates environment, spawns enemies.
+function travelToZone(zoneId){
+  const target = ZONES.find(z => z.id === zoneId);
+  if(!target){ addFeed('Unknown destination','#ef4444'); return; }
+  // Confirm player meets minimum level
+  if(player.level < (target.minLv||0)){
+    addFeed(`Too weak. Need LV ${target.minLv}`, '#ef4444');
+    return;
+  }
+  curZone = target;
+  zoneTransiting = true;
+  SFX.zoneChange();
+  if(typeof switchAmbientZone==='function') switchAmbientZone(target.id);
+  showZTrans(target.name, target.tier, target.ambColor);
+  // Clear world state — no camp-fire lingering into combat zone
+  enemies = [];
+  particles.length = 0;
+  groundFX.length = 0;
+  if(typeof portals !== 'undefined') portals.length = 0;
+  generateEnvironment();
+  // Place player at world center for a clean start in the new zone
+  player.x = WORLD_W/2;
+  player.y = WORLD_H/2;
+  camX = player.x; camY = player.y;
+  const clear = findClearPosition(player.x, player.y, 24);
+  player.x = clear.x; player.y = clear.y;
+  setAfkWaypoint();
+  // Stagger initial spawns
+  for(let i=0;i<8;i++) trackTimeout(()=>spawnEnemy(), i*350);
+  addFeed('★ ZONE: ' + target.name, '#e8b84b');
+  if(typeof writeSave==='function') writeSave();
+  setTimeout(()=>zoneTransiting=false, 2600);
+}
+
+// Travel back to The Procession camp from any zone
+function travelToCamp(){
+  curZone = CAMP_ZONE;
+  zoneTransiting = true;
+  SFX.zoneChange();
+  if(typeof switchAmbientZone==='function') switchAmbientZone('procession');
+  showZTrans(CAMP_ZONE.name, CAMP_ZONE.tier, CAMP_ZONE.ambColor);
+  // Clear world state
+  enemies = [];
+  particles.length = 0;
+  groundFX.length = 0;
+  if(typeof portals !== 'undefined') portals.length = 0;
+  if(typeof bossTarget !== 'undefined') bossTarget = null;
+  if(typeof dungeonState !== 'undefined' && dungeonState) dungeonState.active = false;
+  generateEnvironment();
+  // Place player at the camp's spawn point (south of campfire)
+  player.x = WORLD_W/2 + CAMP_SPAWN_POINT.x;
+  player.y = WORLD_H/2 + CAMP_SPAWN_POINT.y;
+  camX = player.x; camY = player.y;
+  setAfkWaypoint();
+  addFeed('★ ' + CAMP_ZONE.name, CAMP_ZONE.ambColor);
+  if(typeof writeSave==='function') writeSave();
+  setTimeout(()=>zoneTransiting=false, 2600);
 }
 function showZTrans(name,sub,color){
   const zt=document.getElementById('zoneTransition');
