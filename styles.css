@@ -1483,3 +1483,223 @@ canvas#c{display:block;position:fixed;top:0;left:0}
   height:clamp(38px, 4.5vw, 48px);
   filter:drop-shadow(0 1px 3px rgba(0,0,0,0.6));
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   RESPONSIVE LAYOUT — Phone Portrait & Phone Landscape
+   ═══════════════════════════════════════════════════════════════
+   The game now supports three shapes:
+     - Desktop/tablet (>900px wide)       — default layout (above)
+     - Phone landscape (<900w, <500h)     — compact spacing
+     - Phone portrait (<500w, taller)     — fullscreen world + pull-out menu
+
+   Uses body classes set by JS (see updateOrientationNotice in game.js):
+     .phone, .phone-landscape, .phone-portrait, .portrait
+
+   Always-hide the legacy rotate notice so it can never appear again.
+═══════════════════════════════════════════════════════════════ */
+#rotateNotice{display:none !important}
+
+/* ─── PHONE LANDSCAPE — tight but keeps existing layout ─── */
+@media (max-height: 500px) and (orientation: landscape){
+  #hud{padding:6px 10px;max-width:240px}
+  #hud .hud-portrait{width:36px;height:36px;margin-right:7px;font-size:1.1rem}
+  #hud .hud-name{font-size:11px}
+  #hud .hud-bar-row{margin-bottom:2px}
+  #hud .hud-bar-bg{height:5px;max-width:100px}
+  #hud .hud-gold{font-size:10px;padding-top:2px}
+  /* Zone label sits to the LEFT of the ☰ toggle button */
+  #zoneLabel{top:8px;right:60px}
+  #zoneLabel .zone-name{font-size:10px}
+  #zoneLabel .kill-counter{font-size:10px}
+  #spiritPanel{top:74px;left:10px}
+  #setProgress{top:82px}
+  #abilityBar{padding:6px 8px 10px;gap:5px}
+  .ab{width:48px;height:48px;border-radius:9px}
+  .ab-hotkey{font-size:8px;top:2px;left:3px}
+  .ab-name{font-size:7px;bottom:2px}
+  .ab-cd{font-size:13px}
+  /* Use the same ☰ toggle pattern as portrait — screen is too short for
+     a 7-button vertical stack */
+  #menuToggleBtn{
+    display:flex;
+    position:fixed;top:8px;right:8px;
+    width:40px;height:40px;
+    background:linear-gradient(135deg,rgba(10,20,18,0.95),rgba(5,10,8,0.95));
+    border:1px solid rgba(157,196,176,0.4);border-radius:8px;
+    align-items:center;justify-content:center;
+    cursor:pointer;pointer-events:all;z-index:101;
+    font-family:'Cinzel',serif;font-size:18px;color:#9DC4B0;
+    box-shadow:0 2px 8px rgba(0,0,0,0.7);
+  }
+  #menuBar{
+    top:54px;right:8px;bottom:auto;
+    flex-direction:column;gap:4px;
+    background:rgba(10,0,25,0.92);
+    border:1px solid rgba(192,132,252,0.25);border-radius:8px;
+    padding:8px;
+    box-shadow:0 4px 16px rgba(0,0,0,0.8);
+    display:none !important;
+    max-height:calc(100vh - 80px);overflow-y:auto;
+    z-index:100;
+  }
+  body.menu-open #menuBar{display:flex !important}
+  .menu-btn{padding:6px 12px;font-size:10px;min-width:80px;text-align:left}
+  #feedLog{bottom:70px;left:10px;max-width:calc(50vw - 80px)}
+  .feed{font-size:9px}
+  #musicLabel{bottom:66px;right:56px;font-size:8px}
+}
+
+/* ─── PHONE PORTRAIT — fullscreen world, collapsible menu ─── */
+@media (max-width: 500px) and (orientation: portrait){
+  /* Compact HUD — top bar with just essentials. Leaves room for menu toggle at right. */
+  #hud{
+    padding:6px 10px;max-width:calc(100vw - 70px);
+    left:0;
+    border-bottom-right-radius:8px;
+    background:linear-gradient(180deg,rgba(10,0,25,0.95),rgba(5,0,15,0.75) 80%,transparent);
+  }
+  #hud .hud-portrait{width:34px;height:34px;margin-right:8px;font-size:1rem}
+  #hud .hud-name{font-size:11px;letter-spacing:1.5px}
+  #hud .hud-bar-row{margin-bottom:2px}
+  #hud .hud-bar-lbl{width:14px;font-size:8px}
+  #hud .hud-bar-bg{height:5px;max-width:none}
+  #hud .hud-gold{font-size:10px;padding-top:2px}
+
+  /* Zone label — compact, top-right; positioned left of menu button */
+  #zoneLabel{top:8px;right:62px}
+  #zoneLabel .zone-name{font-size:9px;letter-spacing:2px}
+  #zoneLabel .kill-counter{font-size:9px;margin-top:2px}
+
+  /* Spirit pips — below HUD */
+  #spiritPanel{top:92px;left:12px}
+  .spip{width:8px;height:8px}
+
+  /* Set progress — compact top-center */
+  #setProgress{top:98px}
+  .set-badge{font-size:7px;padding:2px 8px}
+
+  /* Ability bar — unchanged position, slightly tighter */
+  #abilityBar{padding:6px 6px 12px;gap:5px}
+  .ab{width:52px;height:52px;border-radius:10px}
+  .ab-hotkey{display:none} /* no keyboard on phone, free the visual space */
+  .ab-name{font-size:8px;bottom:3px;letter-spacing:0.3px}
+  .ab-cd{font-size:14px}
+
+  /* ─── PULL-OUT MENU BUTTON ─── */
+  /* Single toggle button replaces the vertical menu stack.
+     Tapping it expands an overlay grid of all menu buttons.
+     When expanded, the grid covers a small portion of the screen,
+     taps outside close it. */
+  #menuBar{
+    bottom:auto;top:58px;right:8px;
+    flex-direction:column;gap:4px;
+    background:rgba(10,0,25,0.92);
+    border:1px solid rgba(192,132,252,0.25);border-radius:8px;
+    padding:8px;
+    box-shadow:0 4px 16px rgba(0,0,0,0.8);
+    /* Default: collapsed — hide all children */
+    display:none !important; /* overridden by .menu-open */
+    max-height:60vh;overflow-y:auto;
+    z-index:100;
+  }
+  body.menu-open #menuBar{display:flex !important}
+  /* Menu toggle button — always visible */
+  #menuToggleBtn{
+    position:fixed;top:10px;right:10px;
+    display:flex;align-items:center;justify-content:center;
+    width:44px;height:44px;
+    background:linear-gradient(135deg,rgba(10,20,18,0.95),rgba(5,10,8,0.95));
+    border:1px solid rgba(157,196,176,0.4);border-radius:8px;
+    cursor:pointer;pointer-events:all;z-index:101;
+    font-family:'Cinzel',serif;font-size:20px;color:#9DC4B0;
+    box-shadow:0 2px 8px rgba(0,0,0,0.7);
+  }
+  #menuToggleBtn:active{transform:scale(0.95)}
+  .menu-btn{padding:10px 14px;font-size:12px;min-width:120px;text-align:left}
+
+  /* Feed log — left column, doesn't overlap menu button */
+  #feedLog{
+    bottom:90px;left:8px;max-width:calc(100vw - 64px);
+    max-height:140px;
+  }
+  .feed{font-size:9px;letter-spacing:1px}
+
+  /* Music label — small, above ability bar */
+  #musicLabel{bottom:74px;right:10px;font-size:7px;max-width:120px}
+
+  /* ─── FULL-SCREEN PANELS ─── */
+  /* All modals take full screen with larger touch targets */
+  #inventoryPanel, #gearPanel, #shopPanel, #talentPanel, #profPanel,
+  #zoneTravelOverlay, #characterSelectScreen, #classSelectScreen{
+    padding:0;
+  }
+  .panel-header{
+    padding:clamp(10px,2vw,14px);
+    position:sticky;top:0;z-index:10;
+    background:inherit;
+  }
+  .panel-header h2{font-size:16px;letter-spacing:2px}
+  .panel-close{
+    padding:10px 14px;font-size:12px;
+    min-width:64px;min-height:44px;
+  }
+
+  /* Bag grid — 4 columns instead of 6 */
+  #bagGrid{
+    grid-template-columns:repeat(4,1fr);
+    gap:6px;padding:10px;
+  }
+  .bag-slot{min-height:70px}
+  .bag-slot-icon-canvas{width:40px;height:40px}
+
+  /* Gear panel — single column on portrait */
+  .gear-grid{
+    grid-template-columns:1fr !important;
+    padding:10px !important;
+    gap:10px !important;
+    max-width:none !important;
+  }
+  .gear-slot{padding:10px}
+
+  /* Shop — single column of gear items */
+  #shopGearGrid{grid-template-columns:1fr !important;gap:10px;padding:10px}
+
+  /* Talent tree — stays readable but compact */
+  .talent-grid{grid-template-columns:repeat(2,1fr) !important;gap:6px}
+  .talent-node{padding:8px;min-height:110px}
+
+  /* Character select — single column */
+  #characterSelectGrid{grid-template-columns:1fr !important;padding:12px !important;gap:12px !important}
+
+  /* Class select — single column */
+  #classSelectGrid{grid-template-columns:1fr !important;padding:12px !important;gap:12px !important}
+
+  /* Title screen — smaller main title */
+  .title-main{font-size:3rem;letter-spacing:0.1em}
+  .title-sub{font-size:0.7rem;letter-spacing:0.3em}
+  .title-lore{font-size:0.75rem;max-width:90vw}
+
+  /* Panel scrollbars — wider for finger use */
+  .panel::-webkit-scrollbar{width:8px}
+}
+
+/* ─── HIDE MENU TOGGLE ON DESKTOP ─── */
+/* Only shown on phone (portrait or short-landscape) */
+#menuToggleBtn{display:none}
+@media (max-width: 500px) and (orientation: portrait){
+  #menuToggleBtn{display:flex}
+}
+@media (max-height: 500px) and (orientation: landscape){
+  #menuToggleBtn{display:flex}
+}
+
+/* ─── LARGER TOUCH TARGETS FOR MOBILE ─── */
+@media (pointer: coarse){
+  .menu-btn{min-height:40px}
+  .panel-close{min-width:60px;min-height:40px}
+  .shop-buy-btn, .bag-btn, .talent-reset-btn, .gear-action-btn,
+  .craft-btn, .char-action-play, .char-action-delete, #startBtn,
+  #newGameBtn, #continueBtn{
+    min-height:40px;
+  }
+}
