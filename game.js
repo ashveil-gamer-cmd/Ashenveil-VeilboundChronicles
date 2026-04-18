@@ -1254,7 +1254,7 @@ let player={
   furyChargeUntil:0,       // Ironwake: Fury channel window
   // Base player fields
   x:WORLD_W/2,y:WORLD_H/2,hp:1000,maxHp:1000,attack:15,
-  level:1,xp:0,xpToNext:165,gold:0,
+  level:1,xp:0,xpToNext:60,gold:0,
   vx:0,vy:0,facing:0,
   lastAttack:0,lastInput:0,
   isDead:false,iframes:0,
@@ -2353,14 +2353,23 @@ function spawnEnemy(typeOverride=null){
     if(Math.random()<0.55&&bias.length){const t=bias[Math.floor(Math.random()*bias.length)];typeData=ENEMY_TYPES.find(e=>e.type===t);}
     if(!typeData){const pool=ENEMY_TYPES.filter(t=>!t.elite||(player.level>=8&&Math.random()<0.12));typeData=pool[Math.floor(Math.random()*pool.length)];}
   }
-  const isElite=player.level>=5&&Math.random()<0.08;
-  const hs=enemyHpScale(player.level),ds=enemyDmgScale(player.level);
-  const base=player.level<=5?150:player.level<=10?175:200;
+  // Roll enemy level from zone's enemy level band (classic WoW — zones are
+  // level-gated). Each enemy gets its own level; not all enemies in a zone
+  // are at the same level, giving fights some variety.
+  const enemyLv = rollEnemyLevel(curZone);
+  const isElite=enemyLv>=5&&Math.random()<0.08;
+  // Stat scaling now uses the enemy's own level, not the player's.
+  // This is the key difference: outleveling a zone means enemies are
+  // genuinely weaker; underleveling means they're genuinely stronger.
+  const hs=enemyHpScale(enemyLv),ds=enemyDmgScale(enemyLv);
+  const base=enemyLv<=5?150:enemyLv<=10?175:enemyLv<=20?220:enemyLv<=35?280:360;
+  const baseAtk=enemyLv<=5?22:enemyLv<=10?26:enemyLv<=20?32:enemyLv<=35?40:52;
   enemies.push({
     id:enemyId++,x,y,vx:0,vy:0,
+    level: enemyLv,
     hp:base*hs*typeData.hp*(isElite?2.4:1),
     maxHp:base*hs*typeData.hp*(isElite?2.4:1),
-    attack:(player.level<=5?22:player.level<=10?26:30)*ds*typeData.dmg*(isElite?1.6:1),
+    attack:baseAtk*ds*typeData.dmg*(isElite?1.6:1),
     speed:typeData.spd*(isElite?1.12:1),
     dead:false,isElite,typeData,
     lastAttack:0,hitFlash:0,
@@ -3328,7 +3337,13 @@ function hitEnemy(e,dmg,isCrit=false,fromX,fromY){
   }
   const critChance=0.12+_tb('critPct')/100;
   const critRoll=Math.random()<critChance;
-  const finalDmg=critRoll?dmg*2.2:dmg;
+  // Apply level-gap multiplier. Enemy level defaults to player level if
+  // missing (for bosses or legacy enemies without a level set).
+  const eLv = (typeof e.level === 'number') ? e.level : player.level;
+  const gapMult = (typeof playerVsEnemyDmgMult === 'function')
+    ? playerVsEnemyDmgMult(player.level, eLv)
+    : 1.0;
+  const finalDmg = (critRoll ? dmg*2.2 : dmg) * gapMult;
   e.hp-=finalDmg;e.hitFlash=0.18;
   spawnDmgText(e.x,e.y-e.size,Math.round(finalDmg),critRoll?'#fde68a':'#fff',critRoll);
   // Directional impact sparks (if we know where the hit came from, sparks fly away from source)
@@ -3348,7 +3363,17 @@ function hitEnemy(e,dmg,isCrit=false,fromX,fromY){
 function killEnemy(e){
   e.dead=true;kills++;
   document.getElementById('killCount').textContent=`☠ ${kills}`;
-  const xpG=e.isElite?60:14,goldG=e.isElite?30:6;
+  // XP and gold rewards — tuned for classic-WoW-style slow progression.
+  // Level gap modifies reward: grey mobs (far below) give almost nothing,
+  // orange mobs (above you) give bonus XP, same-level gives full.
+  const baseXp = e.isElite ? 120 : 30;
+  const baseGold = e.isElite ? 50 : 10;
+  const eLv = (typeof e.level === 'number') ? e.level : player.level;
+  const xpMult = (typeof xpRewardMult === 'function')
+    ? xpRewardMult(player.level, eLv)
+    : 1.0;
+  const xpG = Math.max(1, Math.round(baseXp * xpMult));
+  const goldG = Math.max(1, Math.round(baseGold * xpMult));
   addXP(xpG);player.gold+=goldG;
   SFX[e.isElite?'eliteDeath':'enemyDeath']();
   spawnDmgText(e.x,e.y-40,`+${xpG}XP`,'#8b5cf6',false);
@@ -3763,9 +3788,15 @@ function update(dt,now){
       // Recompute distance now — player may have dodged out of range
       const ndx=player.x-e.x,ndy=player.y-e.y,nd=Math.sqrt(ndx*ndx+ndy*ndy)||1;
       if(nd<=e.attackRange&&player.iframes<=0){
+        // Apply level-gap multiplier — higher-level enemies hit harder,
+        // lower-level barely scratch you
+        const eLv = (typeof e.level === 'number') ? e.level : player.level;
+        const gapMult = (typeof enemyVsPlayerDmgMult === 'function')
+          ? enemyVsPlayerDmgMult(eLv, player.level)
+          : 1.0;
         // Apply damage reduction talent
         const dmgReducePct=_tb('dmgReducePct');
-        let incomingDmg=e.attack*(1-Math.min(dmgReducePct,80)/100);
+        let incomingDmg=e.attack * gapMult * (1-Math.min(dmgReducePct,80)/100);
         // Ironwake Bulwark — 70% damage reduction during active window
         if(player.classId==='ironwake' && player.bulwarkUntil && now < player.bulwarkUntil){
           incomingDmg *= 0.3;
@@ -3913,11 +3944,27 @@ function render(now){
     if(e.isElite){
       ctx.strokeStyle='#fbbf24';ctx.lineWidth=1.5;
       ctx.beginPath();ctx.roundRect(e.x-bw/2,e.y-e.size-16,bw,6,2);ctx.stroke();
-      // Elite crown
-      ctx.fillStyle='#fbbf24';ctx.shadowColor='#fbbf24';ctx.shadowBlur=6;
-      ctx.font='10px serif';ctx.textAlign='center';ctx.fillText('👑',e.x,e.y-e.size-20);
-      ctx.shadowBlur=0;
     }
+    // Level label above HP bar, color-coded by difficulty relative to player
+    // (matches WoW's grey/green/white/yellow/orange/red system).
+    if(typeof e.level === 'number'){
+      const dColor = (typeof enemyDifficultyColor === 'function')
+        ? enemyDifficultyColor(player.level, e.level)
+        : '#ffffff';
+      const labelY = e.y - e.size - 22;
+      const labelText = e.isElite ? `★ Lv ${e.level}` : `Lv ${e.level}`;
+      ctx.font = 'bold 10px Cinzel, serif';
+      ctx.textAlign = 'center';
+      // Backdrop for readability against the world
+      const textW = ctx.measureText(labelText).width;
+      ctx.fillStyle = 'rgba(0,0,0,0.65)';
+      ctx.fillRect(e.x - textW/2 - 4, labelY - 8, textW + 8, 12);
+      ctx.fillStyle = dColor;
+      ctx.shadowColor = dColor; ctx.shadowBlur = 4;
+      ctx.fillText(labelText, e.x, labelY);
+      ctx.shadowBlur = 0;
+    }
+    ctx.textAlign = 'start';
   });
 
   // Player
@@ -4238,7 +4285,17 @@ function applySave(data){
   // Player — use `?? default` so missing fields fall back safely
   player.level=data.player?.level??1;
   player.xp=data.player?.xp??0;
-  player.xpToNext=data.player?.xpToNext??xpForLevel(player.level);
+  // Always recompute xpToNext from the current formula — if we changed the
+  // XP curve, existing characters should see the new curve on their next
+  // level-up (not the old value persisted in their save).
+  player.xpToNext=xpForLevel(player.level);
+  // If saved xp somehow exceeds the new requirement, trigger an immediate
+  // level-up cascade on next addXP call by just clamping xp at xpToNext-1.
+  // This prevents weird states where a loaded character has more XP than
+  // needed for their current level.
+  if(player.xp >= player.xpToNext){
+    player.xp = Math.max(0, player.xpToNext - 1);
+  }
   player.maxHp=data.player?.maxHp??computeMaxHp(player.level);
   player.hp=Math.min(data.player?.hp??player.maxHp,player.maxHp);
   player.gold=data.player?.gold??0;
@@ -4485,7 +4542,8 @@ function startGame(continueFromSave=false){
     addFeed(`✦ WELCOME BACK · LV ${player.level}`,'#c084fc');
   } else {
     addFeed('✦ YOU ARRIVE AT THE PROCESSION','#d4a555');
-    addFeed('Walk to an NPC and press E','#c4b8dd');
+    const _isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    addFeed(_isTouch ? 'Walk to an NPC and tap them' : 'Walk to an NPC and press E','#c4b8dd');
     // New characters — write their initial save immediately so they persist
     if(typeof writeSave==='function') writeSave();
   }
@@ -4597,30 +4655,44 @@ function handleMuteToggle(){
   }
 })();
 
+// ─── MOBILE MENU TOGGLE ────────────────────────────────────────────
+// Phone portrait hides the menu bar by default. The ☰ toggle button shows/
+// hides it. Also auto-closes when the player opens any panel so it never
+// stays stuck behind a modal.
+function toggleMobileMenu(){
+  document.body.classList.toggle('menu-open');
+}
+function closeMobileMenu(){
+  document.body.classList.remove('menu-open');
+}
+// Close the mobile menu whenever the player taps a menu button (since it
+// will immediately open a panel). The timeout lets the click register first.
+document.addEventListener('click', e => {
+  if(e.target && e.target.classList && e.target.classList.contains('menu-btn')){
+    setTimeout(closeMobileMenu, 50);
+  }
+});
+
 // ─── ORIENTATION WATCHER ─────────────────────────────────────────
-// Shows "rotate your device" notice when on a narrow screen in portrait mode.
-// Uses window.innerWidth + innerHeight (not CSS media queries) because mobile
-// browsers sometimes cache media query results and don't re-fire until reload.
-// Runs on: load, resize, orientationchange. Responsive on all devices.
+// Previously gated the game to landscape only. Now the game works in all
+// orientations and viewport sizes — CSS media queries handle the layout
+// adaptation. This function stays as a no-op for compat with old save paths.
 function updateOrientationNotice(){
+  // Force-hide the rotate notice if it exists from a previous session or
+  // cached HTML — we no longer require a specific orientation.
   const notice = document.getElementById('rotateNotice');
-  if(!notice) return;
+  if(notice) notice.classList.remove('active');
+  // Apply orientation-specific body class so CSS can adapt
   const w = window.innerWidth;
   const h = window.innerHeight;
-  // Consider it "phone portrait" if: width under 900px AND portrait orientation
-  const isPortraitPhone = w < 900 && h > w;
-  if(isPortraitPhone){
-    notice.classList.add('active');
-  } else {
-    notice.classList.remove('active');
-  }
+  document.body.classList.toggle('portrait', h > w);
+  document.body.classList.toggle('phone', Math.min(w, h) < 500);
+  document.body.classList.toggle('phone-portrait', h > w && w < 500);
+  document.body.classList.toggle('phone-landscape', w > h && h < 500);
 }
-// Run once on load, then on any size/orientation change
 updateOrientationNotice();
 window.addEventListener('resize', updateOrientationNotice);
 window.addEventListener('orientationchange', ()=>{
-  // Some mobile browsers need a small delay after orientationchange for the
-  // innerWidth/innerHeight values to update
   setTimeout(updateOrientationNotice, 120);
 });
 
@@ -4829,19 +4901,160 @@ function newGameConfirmCheck(){
 // Paint correct buttons on page load
 refreshTitleButtons();
 
-canvas.addEventListener('touchstart',e=>{
-  e.preventDefault();
-  const t=e.changedTouches[0];
-  if(t.clientX<W/2){joyId=t.identifier;touchJoy.startX=t.clientX;touchJoy.startY=t.clientY;touchJoy.active=true;touchJoy.dx=0;touchJoy.dy=0;}
-},{passive:false});
-canvas.addEventListener('touchmove',e=>{
-  e.preventDefault();
-  for(let i=0;i<e.changedTouches.length;i++){
-    const t=e.changedTouches[i];
-    if(t.identifier===joyId){const dx=t.clientX-touchJoy.startX,dy=t.clientY-touchJoy.startY,m=Math.sqrt(dx*dx+dy*dy)||1;touchJoy.dx=dx/Math.max(m,50);touchJoy.dy=dy/Math.max(m,50);player.lastInput=performance.now();}
+// ═══════ TAP-TO-INTERACT ═══════════════════════════════════════════
+// Mobile-friendly interaction: tap an NPC directly (or near them) to trigger
+// their interaction. Works alongside the touch joystick — a brief tap that
+// doesn't drag is treated as an interaction attempt, not movement.
+// On desktop this also handles mouse clicks in the game world.
+//
+// How it distinguishes tap from joystick:
+//  - Records touch start position + time
+//  - On touch end, if the finger moved less than TAP_MAX_DRIFT and was held
+//    less than TAP_MAX_HOLD_MS, it's a tap
+//  - Tap world coords are checked against all camp NPCs; nearest within
+//    TAP_INTERACT_RADIUS triggers that NPC's interaction
+const TAP_MAX_DRIFT = 18;      // px — finger movement above this = drag, not tap
+const TAP_MAX_HOLD_MS = 350;   // ms — hold time above this = drag, not tap
+const TAP_INTERACT_RADIUS = 80; // world-units radius around tap point to find NPC
+let _tapTracker = { active:false, sx:0, sy:0, startTime:0 };
+
+// Convert a screen position (client coords) to world coords using current camera
+function screenToWorld(sx, sy){
+  return {
+    x: camX + (sx - W/2),
+    y: camY + (sy - H/2),
+  };
+}
+
+// Find nearest camp NPC within interact range of a given world coord.
+// Returns the NPC object or null.
+function getNpcAtWorld(wx, wy, radius = TAP_INTERACT_RADIUS){
+  if(!curZone?.isCamp || typeof CAMP_NPCS === 'undefined') return null;
+  let closest = null, closestDist = radius;
+  CAMP_NPCS.forEach(npc => {
+    const pos = campWorldPos(npc);
+    const dx = wx - pos.x, dy = wy - pos.y;
+    const d = Math.sqrt(dx*dx + dy*dy);
+    if(d < closestDist){ closest = npc; closestDist = d; }
+  });
+  return closest;
+}
+
+// Execute NPC interaction — centralized so touch and keyboard both call it
+function executeNpcInteraction(npc){
+  if(!npc) return false;
+  const handlers = {
+    openZoneTravel: ()=>{ if(typeof openZoneTravelScreen === 'function') openZoneTravelScreen(); },
+    openMerchant:   ()=>{ if(typeof openShop === 'function') openShop(); },
+    openWeaponsmith:()=>{ if(typeof openProf === 'function') openProf(); },
+    openArmorer:    ()=>{ if(typeof openProf === 'function') openProf(); },
+    openRitualist:  ()=>{ if(typeof openProf === 'function') openProf(); },
+  };
+  const fn = handlers[npc.onInteract];
+  if(fn){ fn(); return true; }
+  return false;
+}
+
+// Handle a tap at a given screen position. Returns true if an interaction fired.
+function handleTapAt(screenX, screenY){
+  // Only in camp zone
+  if(!curZone?.isCamp) return false;
+  // Don't interact if any modal/panel is already open — tapping through them
+  // would be confusing
+  const openPanel = ['gearPanel','inventoryPanel','shopPanel','talentPanel','profPanel','zoneTravelOverlay'].find(id => {
+    const el = document.getElementById(id);
+    return el && getComputedStyle(el).display !== 'none' && el.style.display !== '';
+  });
+  if(openPanel) return false;
+  // Convert screen to world, find NPC, execute
+  const wp = screenToWorld(screenX, screenY);
+  const npc = getNpcAtWorld(wp.x, wp.y);
+  if(npc){
+    executeNpcInteraction(npc);
+    return true;
   }
-},{passive:false});
-canvas.addEventListener('touchend',e=>{for(let i=0;i<e.changedTouches.length;i++)if(e.changedTouches[i].identifier===joyId){touchJoy.active=false;touchJoy.dx=0;touchJoy.dy=0;joyId=null;}});
+  return false;
+}
+
+// Desktop mouse click — triggers tap-to-interact anywhere in the game world
+canvas.addEventListener('click', e => {
+  // Only fires for mouse clicks; touches on mobile dispatch click too but
+  // our touchend handler gets there first with preventDefault. This is a
+  // belt-and-suspenders approach for desktop mouse.
+  if(e.isTrusted === false) return;
+  handleTapAt(e.clientX, e.clientY);
+});
+
+// ═══════ TOUCH HANDLERS ═══════════════════════════════════════════
+// Left-half touch = virtual joystick for movement (original behavior).
+// Right-half touch = handled as potential tap; if the finger doesn't drag,
+// it fires a tap-to-interact at the tap location.
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  for(let i=0; i<e.changedTouches.length; i++){
+    const t = e.changedTouches[i];
+    if(t.clientX < W/2 && !touchJoy.active){
+      // Left side — joystick for movement
+      joyId = t.identifier;
+      touchJoy.startX = t.clientX;
+      touchJoy.startY = t.clientY;
+      touchJoy.active = true;
+      touchJoy.dx = 0;
+      touchJoy.dy = 0;
+    } else {
+      // Right side OR left side while joystick active — candidate tap
+      _tapTracker = {
+        active: true,
+        id: t.identifier,
+        sx: t.clientX,
+        sy: t.clientY,
+        startTime: performance.now(),
+      };
+    }
+  }
+}, {passive:false});
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  for(let i=0; i<e.changedTouches.length; i++){
+    const t = e.changedTouches[i];
+    if(t.identifier === joyId){
+      const dx = t.clientX - touchJoy.startX;
+      const dy = t.clientY - touchJoy.startY;
+      const m = Math.sqrt(dx*dx + dy*dy) || 1;
+      touchJoy.dx = dx / Math.max(m, 50);
+      touchJoy.dy = dy / Math.max(m, 50);
+      player.lastInput = performance.now();
+    }
+    if(_tapTracker.active && t.identifier === _tapTracker.id){
+      // Check if finger drifted too far — if so, invalidate the tap
+      const dx = t.clientX - _tapTracker.sx;
+      const dy = t.clientY - _tapTracker.sy;
+      if(Math.sqrt(dx*dx + dy*dy) > TAP_MAX_DRIFT){
+        _tapTracker.active = false;
+      }
+    }
+  }
+}, {passive:false});
+canvas.addEventListener('touchend', e => {
+  for(let i=0; i<e.changedTouches.length; i++){
+    const t = e.changedTouches[i];
+    if(t.identifier === joyId){
+      touchJoy.active = false;
+      touchJoy.dx = 0;
+      touchJoy.dy = 0;
+      joyId = null;
+    }
+    if(_tapTracker.active && t.identifier === _tapTracker.id){
+      // Was this a valid brief tap? If so, attempt NPC interaction.
+      const elapsed = performance.now() - _tapTracker.startTime;
+      if(elapsed < TAP_MAX_HOLD_MS){
+        handleTapAt(t.clientX, t.clientY);
+      }
+      _tapTracker.active = false;
+    }
+  }
+});
+
 
 // ════════ ZONE TRANSITIONS ════════════════════════════════════════════
 // ═══════ THE PROCESSION — CAMP RENDERING & INTERACTION ════════════
@@ -5044,7 +5257,8 @@ function drawCampNPCs(now){
     if(nearby === npc){
       ctx.font = 'bold 11px Cinzel, serif';
       ctx.fillStyle = '#f2e9d2';
-      const hint = '[ E ] Interact';
+      const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+      const hint = isTouch ? '[ TAP ] Interact' : '[ E ] Interact';
       const hintW = ctx.measureText(hint).width;
       ctx.fillStyle = 'rgba(0,0,0,0.75)';
       ctx.fillRect(pos.x - hintW/2 - 10, pos.y + 32, hintW + 20, 18);
