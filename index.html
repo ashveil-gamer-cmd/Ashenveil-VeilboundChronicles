@@ -242,49 +242,6 @@
 <div id="tooltip"></div>
 
 
-<!-- TALENT PANEL -->
-<div class="panel" id="talentPanel">
-  <div class="panel-hdr" style="border-bottom:1px solid rgba(232,184,75,0.15)">
-    <h2 style="color:#e8b84b;font-family:Cinzel,serif;font-size:1.05rem;letter-spacing:4px;flex:1">✦ TALENTS</h2>
-    <span id="talentPointsLabel" style="font-family:Cinzel,serif;font-size:9px;color:#e8b84b;background:rgba(232,184,75,0.08);border:1px solid rgba(232,184,75,0.2);border-radius:4px;padding:3px 10px;margin-right:8px">0 Points</span>
-    <button onclick="closePanel('talentPanel')" style="font-family:Cinzel,serif;font-size:7.5px;color:#6b4d8a;background:transparent;border:1px solid #6b4d8a40;padding:6px 16px;cursor:pointer;border-radius:4px;letter-spacing:2px">← BACK</button>
-  </div>
-  <div id="talentTree" style="padding:12px"></div>
-</div>
-
-<!-- DUNGEON PANEL -->
-<div class="panel" id="dungeonPanel">
-  <div class="panel-hdr" style="border-bottom:1px solid rgba(239,68,68,0.15)">
-    <h2 style="color:#ef4444;font-family:Cinzel,serif;font-size:1.05rem;letter-spacing:4px;flex:1">⚑ DUNGEONS</h2>
-    <button onclick="closePanel('dungeonPanel')" style="font-family:Cinzel,serif;font-size:7.5px;color:#6b4d8a;background:transparent;border:1px solid #6b4d8a40;padding:6px 16px;cursor:pointer;border-radius:4px;letter-spacing:2px">← BACK</button>
-  </div>
-  <div id="dungeonList" style="padding:12px;display:flex;flex-direction:column;gap:8px"></div>
-</div>
-
-<!-- SHOP PANEL -->
-<div class="panel" id="shopPanel">
-  <div class="panel-hdr" style="border-bottom:1px solid rgba(232,184,75,0.15)">
-    <h2 style="color:#e8b84b;font-family:Cinzel,serif;font-size:1.05rem;letter-spacing:4px;flex:1">🏪 HOLLOWSHOP</h2>
-    <span id="shopGoldLabel" style="font-family:Cinzel,serif;font-size:9px;color:#e8b84b;margin-right:8px">0 G</span>
-    <button onclick="closePanel('shopPanel')" style="font-family:Cinzel,serif;font-size:7.5px;color:#6b4d8a;background:transparent;border:1px solid #6b4d8a40;padding:6px 16px;cursor:pointer;border-radius:4px;letter-spacing:2px">← BACK</button>
-  </div>
-  <div style="display:flex;gap:6px;padding:10px 14px 0;border-bottom:1px solid rgba(192,132,252,0.1)">
-    <div class="shop-tab active" onclick="switchShopTab('items',this)">Items</div>
-    <div class="shop-tab" onclick="switchShopTab('enchant',this)">Enchant</div>
-    <div class="shop-tab" onclick="switchShopTab('consumables',this)">Potions</div>
-  </div>
-  <div id="shopGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px"></div>
-</div>
-
-<!-- STATS PANEL -->
-<div class="panel" id="statsPanel">
-  <div class="panel-hdr" style="border-bottom:1px solid rgba(157,196,176,0.12)">
-    <h2 style="color:#9DC4B0;font-family:Cinzel,serif;font-size:1.05rem;letter-spacing:4px;flex:1">📊 CHARACTER</h2>
-    <button onclick="closePanel('statsPanel')" style="font-family:Cinzel,serif;font-size:7.5px;color:#6b4d8a;background:transparent;border:1px solid #6b4d8a40;padding:6px 16px;cursor:pointer;border-radius:4px;letter-spacing:2px">← BACK</button>
-  </div>
-  <div id="statGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:12px"></div>
-</div>
-
 <!-- LEVEL UP BANNER -->
 <div id="lvlBanner" style="position:fixed;top:38%;left:50%;transform:translate(-50%,-50%);z-index:250;display:none;flex-direction:column;align-items:center;gap:6px;pointer-events:none">
   <h3 id="lvlTxt" style="font-family:Cinzel,serif;font-size:clamp(2rem,7vw,3.2rem);font-weight:900;background:linear-gradient(170deg,#fff,#c4b5fd,#9DC4B0);-webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:0.4em;animation:lvlPop 2.8s forwards">LEVEL UP</h3>
@@ -311,4 +268,4 @@
 <script src="systems.js"></script>
 <script src="game.js"></script>
 </body>
-</html></html>
+</html>
