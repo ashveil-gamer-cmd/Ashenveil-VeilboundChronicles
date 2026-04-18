@@ -520,6 +520,674 @@ function drawAbilityIcons(){
 }
 
 
+// ═══════════════════════════════════════════════════════════════════════
+// GEAR ICON SYSTEM — Hand-crafted Canvas2D icons for each equipment slot.
+// ═══════════════════════════════════════════════════════════════════════
+// Each gear slot gets its own detailed icon, designed in the same visual
+// language as the ability icons: layered background vignette, colored inner
+// glow, thin outer frame ring, then custom shapes representing the item.
+//
+// Rarity is expressed through the frame/glow color and intensity, plus
+// subtle overlays at higher rarities (legendary gets gem accents, mythic
+// gets animated embers).
+//
+// Usage:
+//   const canvas = document.createElement('canvas');
+//   canvas.width = 52; canvas.height = 52;
+//   drawGearIcon(canvas, 'Weapon', 'epic');
+//
+// Icons are drawn once at request time (not per frame) — the calling code
+// should cache the canvas in the DOM after drawing.
+
+// Rarity → { color, bgInner, bgOuter, glowIntensity, overlay } mapping.
+// Frame color matches the rarity palette used everywhere else in the game.
+const GEAR_RARITY_STYLE = {
+  common:    { color:'#b8b8c8', bgInner:'#1a1a26', bgOuter:'#05050d', glow:0.35, hasGem:false, hasEmber:false },
+  uncommon:  { color:'#3dd574', bgInner:'#0d1f14', bgOuter:'#030a06', glow:0.55, hasGem:false, hasEmber:false },
+  rare:      { color:'#60a5fa', bgInner:'#0e1428', bgOuter:'#03050d', glow:0.70, hasGem:false, hasEmber:false },
+  epic:      { color:'#c084fc', bgInner:'#1a0d2e', bgOuter:'#05020d', glow:0.85, hasGem:true,  hasEmber:false },
+  legendary: { color:'#fbbf24', bgInner:'#2a1a05', bgOuter:'#0a0603', glow:1.00, hasGem:true,  hasEmber:false },
+  mythic:    { color:'#ff6b6b', bgInner:'#2a0a0a', bgOuter:'#0a0303', glow:1.20, hasGem:true,  hasEmber:true  },
+};
+
+// Slot → draw function. Each takes (ctx, size, rarityColor). The rarity
+// color is pre-applied to the background/glow by the caller; the slot
+// function only draws the object itself.
+const GEAR_ICON_DRAWERS = {
+
+  // ═══ WEAPON — An upright longsword, diagonal-tipped for readability. ═══
+  // Straight orientation reads more clearly at 44px than a diagonal curve.
+  // Centered blade with prominent crossguard and pommel for iconic silhouette.
+  Weapon: (x, S, rc) => {
+    const CX=S/2, CY=S/2;
+    // Blade shadow
+    x.fillStyle = 'rgba(0,0,0,0.5)';
+    x.beginPath();
+    x.moveTo(CX-2.5, CY-16);
+    x.lineTo(CX-3, CY+6);
+    x.lineTo(CX+3, CY+6);
+    x.lineTo(CX+2.5, CY-16);
+    x.lineTo(CX, CY-20);
+    x.closePath();
+    x.fill();
+    // Blade — bright metallic gradient (top is bright, tapering to darker)
+    const bladeGrad = x.createLinearGradient(CX-3, 0, CX+3, 0);
+    bladeGrad.addColorStop(0, '#6a6a7a');
+    bladeGrad.addColorStop(0.4, '#d8d8e0');
+    bladeGrad.addColorStop(0.55, '#ffffff');
+    bladeGrad.addColorStop(0.7, '#d8d8e0');
+    bladeGrad.addColorStop(1, '#6a6a7a');
+    x.fillStyle = bladeGrad;
+    x.shadowColor = '#ffffff'; x.shadowBlur = 5;
+    x.beginPath();
+    x.moveTo(CX-2.5, CY-16);
+    x.lineTo(CX-3, CY+6);
+    x.lineTo(CX+3, CY+6);
+    x.lineTo(CX+2.5, CY-16);
+    x.lineTo(CX, CY-20);  // pointed tip
+    x.closePath();
+    x.fill();
+    x.shadowBlur = 0;
+    // Blade fuller (the groove down the center) — subtle dark line
+    x.strokeStyle = 'rgba(40,40,60,0.4)';
+    x.lineWidth = 0.8;
+    x.beginPath();
+    x.moveTo(CX, CY-18);
+    x.lineTo(CX, CY+4);
+    x.stroke();
+    // Blade tip highlight
+    x.strokeStyle = 'rgba(255,255,255,0.7)';
+    x.lineWidth = 0.6;
+    x.beginPath();
+    x.moveTo(CX-1, CY-16);
+    x.lineTo(CX-0.5, CY-19);
+    x.stroke();
+    // Crossguard — wide horizontal bar with rarity-tinted endcaps
+    x.fillStyle = '#2a1a08';
+    x.fillRect(CX-12, CY+6, 24, 4);
+    // Crossguard flare at ends (rarity-colored)
+    x.fillStyle = rc;
+    x.shadowColor = rc; x.shadowBlur = 6;
+    x.fillRect(CX-13, CY+6, 2, 4);
+    x.fillRect(CX+11, CY+6, 2, 4);
+    x.shadowBlur = 0;
+    // Crossguard top highlight
+    x.strokeStyle = 'rgba(212, 180, 140, 0.5)';
+    x.lineWidth = 0.6;
+    x.beginPath();
+    x.moveTo(CX-11, CY+6.5);
+    x.lineTo(CX+11, CY+6.5);
+    x.stroke();
+    // Grip — wrapped handle below crossguard
+    x.fillStyle = '#3a2410';
+    x.fillRect(CX-2, CY+10, 4, 6);
+    // Grip wrap stripes
+    x.strokeStyle = '#1a0c04';
+    x.lineWidth = 0.6;
+    for(let i=0; i<3; i++){
+      x.beginPath();
+      x.moveTo(CX-2, CY+11 + i*2);
+      x.lineTo(CX+2, CY+12 + i*2);
+      x.stroke();
+    }
+    // Pommel — round jewel at bottom
+    x.fillStyle = rc;
+    x.shadowColor = rc; x.shadowBlur = 8;
+    x.beginPath(); x.arc(CX, CY+18, 3, 0, Math.PI*2); x.fill();
+    x.shadowBlur = 0;
+    // Pommel highlight
+    x.fillStyle = '#ffffff';
+    x.beginPath(); x.arc(CX-1, CY+17, 1, 0, Math.PI*2); x.fill();
+  },
+
+  // ═══ HELMET — Hooded silhouette suggesting the Veil-touched. ═══
+  // A pointed hood with shadowed interior rather than a generic metal helm —
+  // fits the occult theme. Could evolve into crown/helm variants later.
+  Helmet: (x, S, rc) => {
+    const CX=S/2, CY=S/2;
+    // Hood outer silhouette — tall pointed shape
+    x.fillStyle = '#1a1220';
+    x.shadowColor = rc; x.shadowBlur = 10;
+    x.beginPath();
+    x.moveTo(CX, CY-18);              // peak of hood
+    x.quadraticCurveTo(CX+14, CY-10, CX+16, CY+4);  // right outer
+    x.quadraticCurveTo(CX+14, CY+12, CX+12, CY+14); // right drape
+    x.lineTo(CX-12, CY+14);                          // bottom
+    x.quadraticCurveTo(CX-14, CY+12, CX-16, CY+4);  // left drape
+    x.quadraticCurveTo(CX-14, CY-10, CX, CY-18);    // left to peak
+    x.closePath();
+    x.fill();
+    x.shadowBlur = 0;
+    // Hood rim — rarity-colored trim
+    x.strokeStyle = rc;
+    x.lineWidth = 1.4;
+    x.shadowColor = rc; x.shadowBlur = 6;
+    x.beginPath();
+    x.moveTo(CX, CY-18);
+    x.quadraticCurveTo(CX+14, CY-10, CX+16, CY+4);
+    x.moveTo(CX, CY-18);
+    x.quadraticCurveTo(CX-14, CY-10, CX-16, CY+4);
+    x.stroke();
+    x.shadowBlur = 0;
+    // Inner darkness — hood interior shadow
+    x.fillStyle = 'rgba(0,0,0,0.85)';
+    x.beginPath();
+    x.moveTo(CX, CY-10);
+    x.quadraticCurveTo(CX+9, CY-4, CX+10, CY+6);
+    x.lineTo(CX-10, CY+6);
+    x.quadraticCurveTo(CX-9, CY-4, CX, CY-10);
+    x.closePath();
+    x.fill();
+    // Glowing eyes inside — two pinpricks
+    x.fillStyle = rc;
+    x.shadowColor = rc; x.shadowBlur = 4;
+    x.beginPath(); x.arc(CX-3, CY-1, 1.2, 0, Math.PI*2); x.fill();
+    x.beginPath(); x.arc(CX+3, CY-1, 1.2, 0, Math.PI*2); x.fill();
+    // Bright inner dot for life
+    x.shadowBlur = 0;
+    x.fillStyle = '#ffffff';
+    x.beginPath(); x.arc(CX-3, CY-1.2, 0.4, 0, Math.PI*2); x.fill();
+    x.beginPath(); x.arc(CX+3, CY-1.2, 0.4, 0, Math.PI*2); x.fill();
+    // Top peak jewel — small gem at the hood's point
+    x.fillStyle = rc;
+    x.shadowColor = rc; x.shadowBlur = 5;
+    x.beginPath(); x.arc(CX, CY-16.5, 1.4, 0, Math.PI*2); x.fill();
+  },
+
+  // ═══ CHEST — Layered armor plates with rune-etched breastplate. ═══
+  Chest: (x, S, rc) => {
+    const CX=S/2, CY=S/2;
+    // Shoulder pauldrons — curved shapes on either side
+    x.fillStyle = '#3a3040';
+    x.shadowColor = rc; x.shadowBlur = 6;
+    // Left pauldron
+    x.beginPath();
+    x.moveTo(CX-16, CY-10);
+    x.quadraticCurveTo(CX-20, CY-6, CX-18, CY);
+    x.quadraticCurveTo(CX-14, CY-2, CX-10, CY-8);
+    x.closePath();
+    x.fill();
+    // Right pauldron
+    x.beginPath();
+    x.moveTo(CX+16, CY-10);
+    x.quadraticCurveTo(CX+20, CY-6, CX+18, CY);
+    x.quadraticCurveTo(CX+14, CY-2, CX+10, CY-8);
+    x.closePath();
+    x.fill();
+    // Breastplate main body — trapezoidal shape with metallic gradient
+    const plateGrad = x.createLinearGradient(0, CY-12, 0, CY+16);
+    plateGrad.addColorStop(0, '#5a5060');
+    plateGrad.addColorStop(0.4, '#7a708a');
+    plateGrad.addColorStop(0.7, '#4a4058');
+    plateGrad.addColorStop(1, '#2a2030');
+    x.fillStyle = plateGrad;
+    x.shadowBlur = 0;
+    x.beginPath();
+    x.moveTo(CX-12, CY-10);
+    x.lineTo(CX+12, CY-10);
+    x.quadraticCurveTo(CX+14, CY, CX+10, CY+16);
+    x.lineTo(CX-10, CY+16);
+    x.quadraticCurveTo(CX-14, CY, CX-12, CY-10);
+    x.closePath();
+    x.fill();
+    // Plate edge highlight
+    x.strokeStyle = 'rgba(255,255,255,0.3)';
+    x.lineWidth = 0.8;
+    x.beginPath();
+    x.moveTo(CX-11, CY-9);
+    x.lineTo(CX+11, CY-9);
+    x.stroke();
+    // Central rune channel — vertical groove down the middle
+    x.fillStyle = 'rgba(0,0,0,0.4)';
+    x.fillRect(CX-1.5, CY-8, 3, 20);
+    // Rune glow — three small circles down the channel
+    x.fillStyle = rc;
+    x.shadowColor = rc; x.shadowBlur = 5;
+    x.beginPath(); x.arc(CX, CY-4, 1.3, 0, Math.PI*2); x.fill();
+    x.beginPath(); x.arc(CX, CY+2, 1.3, 0, Math.PI*2); x.fill();
+    x.beginPath(); x.arc(CX, CY+8, 1.3, 0, Math.PI*2); x.fill();
+    // Rivets along the edges
+    x.shadowBlur = 0;
+    x.fillStyle = '#1a1018';
+    [[CX-10, CY-6], [CX+10, CY-6], [CX-9, CY+4], [CX+9, CY+4], [CX-8, CY+12], [CX+8, CY+12]]
+      .forEach(([rx, ry]) => {
+        x.beginPath(); x.arc(rx, ry, 1, 0, Math.PI*2); x.fill();
+      });
+    // Neckline V-cut
+    x.fillStyle = 'rgba(0,0,0,0.5)';
+    x.beginPath();
+    x.moveTo(CX-4, CY-10);
+    x.lineTo(CX, CY-5);
+    x.lineTo(CX+4, CY-10);
+    x.closePath();
+    x.fill();
+  },
+
+  // ═══ GLOVES — A gauntlet catching light, fingers splayed. ═══
+  Gloves: (x, S, rc) => {
+    const CX=S/2, CY=S/2;
+    x.save();
+    x.translate(CX, CY);
+    x.rotate(-0.25); // slight diagonal so it doesn't read as a flat hand
+    // Forearm cuff / bracer
+    x.fillStyle = '#3a2820';
+    x.shadowColor = rc; x.shadowBlur = 6;
+    x.beginPath();
+    x.moveTo(-10, 8);
+    x.lineTo(8, 12);
+    x.lineTo(8, 16);
+    x.lineTo(-10, 12);
+    x.closePath();
+    x.fill();
+    // Bracer trim — rarity-colored band
+    x.fillStyle = rc;
+    x.fillRect(-10, 12, 18, 1.4);
+    x.shadowBlur = 0;
+    // Back of hand — main armor plate
+    const handGrad = x.createLinearGradient(-4, -12, 6, 8);
+    handGrad.addColorStop(0, '#5a4a3a');
+    handGrad.addColorStop(0.5, '#7a6a5a');
+    handGrad.addColorStop(1, '#3a2a1a');
+    x.fillStyle = handGrad;
+    x.beginPath();
+    x.moveTo(-8, 8);
+    x.quadraticCurveTo(-6, -4, 0, -8);
+    x.quadraticCurveTo(6, -4, 8, 8);
+    x.closePath();
+    x.fill();
+    // Fingers — four segmented plates rising from the hand
+    x.fillStyle = '#4a3a2a';
+    const fingerData = [[-6, -8, -5, -14], [-2, -10, -1, -16], [2, -10, 3, -16], [6, -8, 7, -14]];
+    fingerData.forEach(([fx1, fy1, fx2, fy2]) => {
+      x.beginPath();
+      x.moveTo(fx1, fy1);
+      x.lineTo(fx1+2, fy1);
+      x.lineTo(fx2+1, fy2);
+      x.lineTo(fx2-1, fy2);
+      x.closePath();
+      x.fill();
+    });
+    // Knuckle studs — small rivets on each finger
+    x.fillStyle = rc;
+    x.shadowColor = rc; x.shadowBlur = 4;
+    [[-5, -10], [-1, -12], [3, -12], [7, -10]].forEach(([rx, ry]) => {
+      x.beginPath(); x.arc(rx, ry, 1, 0, Math.PI*2); x.fill();
+    });
+    // Palm gem — centerpiece on back of hand
+    x.shadowBlur = 6;
+    x.fillStyle = rc;
+    x.beginPath(); x.arc(0, -1, 2, 0, Math.PI*2); x.fill();
+    x.fillStyle = '#ffffff';
+    x.shadowBlur = 0;
+    x.beginPath(); x.arc(-0.5, -1.5, 0.6, 0, Math.PI*2); x.fill();
+    x.restore();
+  },
+
+  // ═══ BOOTS — A greaved boot in side profile, sole visible. ═══
+  Boots: (x, S, rc) => {
+    const CX=S/2, CY=S/2;
+    // Boot shadow
+    x.fillStyle = 'rgba(0,0,0,0.5)';
+    x.beginPath();
+    x.ellipse(CX, CY+15, 14, 2, 0, 0, Math.PI*2);
+    x.fill();
+    // Boot body — L-shape in profile
+    const bootGrad = x.createLinearGradient(0, CY-12, 0, CY+14);
+    bootGrad.addColorStop(0, '#5a4030');
+    bootGrad.addColorStop(0.6, '#3a2418');
+    bootGrad.addColorStop(1, '#1a0f08');
+    x.fillStyle = bootGrad;
+    x.shadowColor = rc; x.shadowBlur = 6;
+    x.beginPath();
+    // Top of boot (shin opening)
+    x.moveTo(CX-7, CY-14);
+    x.lineTo(CX-3, CY-14);
+    // Down the back of calf
+    x.lineTo(CX-3, CY+8);
+    // Heel out
+    x.lineTo(CX-10, CY+8);
+    x.lineTo(CX-12, CY+12);
+    // Sole
+    x.lineTo(CX+10, CY+12);
+    // Toe
+    x.quadraticCurveTo(CX+14, CY+10, CX+10, CY+6);
+    // Front of boot up
+    x.lineTo(CX+4, CY+6);
+    // Ankle
+    x.quadraticCurveTo(CX+2, CY, CX+2, CY-14);
+    x.lineTo(CX-7, CY-14);
+    x.closePath();
+    x.fill();
+    x.shadowBlur = 0;
+    // Sole — darker band at bottom
+    x.fillStyle = '#0a0604';
+    x.fillRect(CX-12, CY+11, 24, 2);
+    // Cuff — rarity-tinted band at top of boot
+    x.fillStyle = rc;
+    x.shadowColor = rc; x.shadowBlur = 5;
+    x.fillRect(CX-7, CY-14, 9, 2);
+    x.shadowBlur = 0;
+    // Lace cross-detail on ankle
+    x.strokeStyle = 'rgba(212, 180, 140, 0.7)';
+    x.lineWidth = 0.7;
+    for(let i=0; i<3; i++){
+      x.beginPath();
+      x.moveTo(CX-2, CY-8+i*4);
+      x.lineTo(CX+2, CY-6+i*4);
+      x.stroke();
+      x.beginPath();
+      x.moveTo(CX-2, CY-6+i*4);
+      x.lineTo(CX+2, CY-8+i*4);
+      x.stroke();
+    }
+    // Buckle on side — small gem detail
+    x.fillStyle = rc;
+    x.shadowColor = rc; x.shadowBlur = 4;
+    x.beginPath(); x.arc(CX-4, CY+1, 1.5, 0, Math.PI*2); x.fill();
+    x.shadowBlur = 0;
+    x.fillStyle = '#ffffff';
+    x.beginPath(); x.arc(CX-4.4, CY+0.6, 0.5, 0, Math.PI*2); x.fill();
+  },
+
+  // ═══ BELT — A leather belt with central gemmed buckle. ═══
+  Belt: (x, S, rc) => {
+    const CX=S/2, CY=S/2;
+    // Belt main strap — horizontal band
+    const beltGrad = x.createLinearGradient(0, CY-6, 0, CY+6);
+    beltGrad.addColorStop(0, '#5a3818');
+    beltGrad.addColorStop(0.5, '#3a2410');
+    beltGrad.addColorStop(1, '#1a0e05');
+    x.fillStyle = beltGrad;
+    x.shadowColor = rc; x.shadowBlur = 6;
+    x.beginPath();
+    x.moveTo(CX-20, CY-5);
+    x.lineTo(CX+20, CY-5);
+    x.quadraticCurveTo(CX+21, CY, CX+20, CY+5);
+    x.lineTo(CX-20, CY+5);
+    x.quadraticCurveTo(CX-21, CY, CX-20, CY-5);
+    x.closePath();
+    x.fill();
+    x.shadowBlur = 0;
+    // Leather stitching along top/bottom edges
+    x.strokeStyle = '#2a1a0a';
+    x.lineWidth = 0.5;
+    for(let i=-18; i<=18; i+=4){
+      x.beginPath(); x.moveTo(CX+i, CY-4); x.lineTo(CX+i+1.5, CY-4); x.stroke();
+      x.beginPath(); x.moveTo(CX+i, CY+4); x.lineTo(CX+i+1.5, CY+4); x.stroke();
+    }
+    // Central metal buckle — ornate square frame
+    x.fillStyle = '#3a2a1a';
+    x.fillRect(CX-8, CY-8, 16, 16);
+    // Buckle inner darker recess
+    x.fillStyle = '#1a1008';
+    x.fillRect(CX-6, CY-6, 12, 12);
+    // Buckle frame — rarity-colored metal
+    x.strokeStyle = rc;
+    x.lineWidth = 2;
+    x.shadowColor = rc; x.shadowBlur = 6;
+    x.strokeRect(CX-8, CY-8, 16, 16);
+    // Central gem
+    x.shadowBlur = 10;
+    x.fillStyle = rc;
+    x.beginPath();
+    // Faceted diamond shape
+    x.moveTo(CX, CY-5);
+    x.lineTo(CX+5, CY);
+    x.lineTo(CX, CY+5);
+    x.lineTo(CX-5, CY);
+    x.closePath();
+    x.fill();
+    // Gem highlights — white facet reflections
+    x.shadowBlur = 0;
+    x.fillStyle = 'rgba(255,255,255,0.7)';
+    x.beginPath();
+    x.moveTo(CX-2, CY-2);
+    x.lineTo(CX+1, CY-3);
+    x.lineTo(CX, CY);
+    x.closePath();
+    x.fill();
+    // Small accent rivets on the strap ends
+    x.fillStyle = rc;
+    x.shadowColor = rc; x.shadowBlur = 3;
+    x.beginPath(); x.arc(CX-16, CY, 1.2, 0, Math.PI*2); x.fill();
+    x.beginPath(); x.arc(CX+16, CY, 1.2, 0, Math.PI*2); x.fill();
+  },
+
+  // ═══ RING — A single ornate ring with gem center, seen face-on. ═══
+  Ring: (x, S, rc) => {
+    const CX=S/2, CY=S/2;
+    // Ring outer shadow
+    x.fillStyle = 'rgba(0,0,0,0.4)';
+    x.beginPath(); x.arc(CX+1, CY+2, 14, 0, Math.PI*2); x.fill();
+    // Ring band — metal torus
+    const bandGrad = x.createRadialGradient(CX, CY, 10, CX, CY, 14);
+    bandGrad.addColorStop(0, '#5a4a3a');
+    bandGrad.addColorStop(0.5, '#8a7a5a');
+    bandGrad.addColorStop(0.8, '#d4b878');
+    bandGrad.addColorStop(1, '#5a4018');
+    x.strokeStyle = bandGrad;
+    x.lineWidth = 4;
+    x.shadowColor = rc; x.shadowBlur = 8;
+    x.beginPath();
+    x.arc(CX, CY, 12, 0, Math.PI*2);
+    x.stroke();
+    x.shadowBlur = 0;
+    // Inner edge highlight
+    x.strokeStyle = 'rgba(255,240,200,0.4)';
+    x.lineWidth = 1;
+    x.beginPath();
+    x.arc(CX, CY, 10, Math.PI*0.3, Math.PI*1.2);
+    x.stroke();
+    // Ornamental filigree — small decorative marks at cardinal points
+    x.fillStyle = '#3a2a1a';
+    [[CX-14, CY], [CX+14, CY], [CX, CY-14], [CX, CY+14]].forEach(([fx, fy]) => {
+      x.beginPath(); x.arc(fx, fy, 1.5, 0, Math.PI*2); x.fill();
+    });
+    // Setting (prongs) around the gem
+    x.strokeStyle = '#2a1a0a';
+    x.lineWidth = 1.2;
+    const prongs = [[-4, -4], [4, -4], [-4, 4], [4, 4]];
+    prongs.forEach(([px, py]) => {
+      x.beginPath();
+      x.moveTo(CX+px, CY+py);
+      x.lineTo(CX+px*0.5, CY+py*0.5);
+      x.stroke();
+    });
+    // Central gemstone — multi-facet radial
+    x.shadowColor = rc; x.shadowBlur = 12;
+    const gemGrad = x.createRadialGradient(CX-1, CY-1, 0, CX, CY, 6);
+    gemGrad.addColorStop(0, '#ffffff');
+    gemGrad.addColorStop(0.3, rc);
+    gemGrad.addColorStop(1, rc.replace('#','#') + '88');
+    x.fillStyle = rc;
+    // Diamond cut shape
+    x.beginPath();
+    x.moveTo(CX, CY-6);
+    x.lineTo(CX+5, CY-2);
+    x.lineTo(CX+4, CY+5);
+    x.lineTo(CX-4, CY+5);
+    x.lineTo(CX-5, CY-2);
+    x.closePath();
+    x.fill();
+    // Gem highlight — sparkle
+    x.shadowBlur = 0;
+    x.fillStyle = 'rgba(255,255,255,0.85)';
+    x.beginPath();
+    x.moveTo(CX-2, CY-3);
+    x.lineTo(CX, CY-4);
+    x.lineTo(CX+1, CY-1);
+    x.lineTo(CX-1, CY);
+    x.closePath();
+    x.fill();
+    // Additional tiny sparkle
+    x.fillStyle = '#ffffff';
+    x.beginPath(); x.arc(CX+2, CY+2, 0.5, 0, Math.PI*2); x.fill();
+  },
+
+  // ═══ AMULET — A pendant on a chain, gem centered. ═══
+  Amulet: (x, S, rc) => {
+    const CX=S/2, CY=S/2;
+    // Chain — arc of small links across the top
+    x.strokeStyle = '#7a6a4a';
+    x.lineWidth = 1.4;
+    x.beginPath();
+    x.arc(CX, CY+4, 16, Math.PI*1.1, Math.PI*1.9);
+    x.stroke();
+    // Individual chain links
+    x.fillStyle = '#8a7a5a';
+    for(let a=Math.PI*1.15; a<Math.PI*1.85; a+=Math.PI*0.08){
+      const lx = CX + Math.cos(a)*16;
+      const ly = CY+4 + Math.sin(a)*16;
+      x.beginPath(); x.arc(lx, ly, 1.2, 0, Math.PI*2); x.fill();
+    }
+    // Pendant housing — outer ornamental shape
+    x.fillStyle = '#3a2a1a';
+    x.shadowColor = rc; x.shadowBlur = 10;
+    x.beginPath();
+    // Teardrop / shield pendant shape
+    x.moveTo(CX, CY-9);
+    x.quadraticCurveTo(CX+10, CY-7, CX+9, CY+4);
+    x.quadraticCurveTo(CX+6, CY+14, CX, CY+16);
+    x.quadraticCurveTo(CX-6, CY+14, CX-9, CY+4);
+    x.quadraticCurveTo(CX-10, CY-7, CX, CY-9);
+    x.closePath();
+    x.fill();
+    x.shadowBlur = 0;
+    // Metal rim — rarity-tinted edge
+    x.strokeStyle = rc;
+    x.lineWidth = 1.6;
+    x.shadowColor = rc; x.shadowBlur = 6;
+    x.beginPath();
+    x.moveTo(CX, CY-9);
+    x.quadraticCurveTo(CX+10, CY-7, CX+9, CY+4);
+    x.quadraticCurveTo(CX+6, CY+14, CX, CY+16);
+    x.quadraticCurveTo(CX-6, CY+14, CX-9, CY+4);
+    x.quadraticCurveTo(CX-10, CY-7, CX, CY-9);
+    x.stroke();
+    x.shadowBlur = 0;
+    // Bail — the loop at top that holds the chain
+    x.fillStyle = '#8a7a5a';
+    x.beginPath();
+    x.ellipse(CX, CY-11, 2.5, 2, 0, 0, Math.PI*2);
+    x.fill();
+    x.strokeStyle = '#3a2a1a';
+    x.lineWidth = 0.8;
+    x.stroke();
+    // Central gem — large oval stone filling most of the pendant
+    const gemGrad = x.createRadialGradient(CX-1, CY+1, 0, CX, CY+3, 7);
+    gemGrad.addColorStop(0, '#ffffff');
+    gemGrad.addColorStop(0.3, rc);
+    gemGrad.addColorStop(1, rc);
+    x.fillStyle = gemGrad;
+    x.shadowColor = rc; x.shadowBlur = 10;
+    x.beginPath();
+    x.ellipse(CX, CY+3, 5.5, 7, 0, 0, Math.PI*2);
+    x.fill();
+    // Gem highlight — crescent sheen
+    x.shadowBlur = 0;
+    x.fillStyle = 'rgba(255,255,255,0.75)';
+    x.beginPath();
+    x.ellipse(CX-2, CY, 2, 3, -0.3, 0, Math.PI*2);
+    x.fill();
+    // Inner sparkle pinprick
+    x.fillStyle = '#ffffff';
+    x.beginPath(); x.arc(CX-1.5, CY-0.5, 0.6, 0, Math.PI*2); x.fill();
+    // Accent marks — small filigree on pendant sides
+    x.strokeStyle = rc;
+    x.lineWidth = 0.7;
+    x.beginPath(); x.moveTo(CX-7, CY-3); x.lineTo(CX-6, CY+1); x.stroke();
+    x.beginPath(); x.moveTo(CX+7, CY-3); x.lineTo(CX+6, CY+1); x.stroke();
+  },
+};
+
+// Shared background routine for gear icons — vignette + colored glow + frame.
+// Same visual language as iconBG used in drawAbilityIcons, matched to rarity.
+function gearIconBG(x, S, rarity){
+  const style = GEAR_RARITY_STYLE[rarity] || GEAR_RARITY_STYLE.common;
+  const CX=S/2, CY=S/2;
+  // Outer vignette background
+  const bg = x.createRadialGradient(CX, CY, S*0.2, CX, CY, S*0.55);
+  bg.addColorStop(0, style.bgInner);
+  bg.addColorStop(1, style.bgOuter);
+  x.fillStyle = bg;
+  x.fillRect(0, 0, S, S);
+  // Colored inner glow (scales with rarity)
+  const alphaHex = (v) => Math.round(v*255).toString(16).padStart(2,'0');
+  const glowInner = alphaHex(0.40 * style.glow);
+  const glowMid   = alphaHex(0.16 * style.glow);
+  const g = x.createRadialGradient(CX, CY, 0, CX, CY, S*0.5);
+  g.addColorStop(0, style.color + glowInner);
+  g.addColorStop(0.5, style.color + glowMid);
+  g.addColorStop(1, style.color + '00');
+  x.fillStyle = g;
+  x.beginPath(); x.arc(CX, CY, S*0.48, 0, Math.PI*2); x.fill();
+  // Outer frame ring — thicker/brighter for higher rarity
+  const frameAlpha = alphaHex(Math.min(1, 0.35 + style.glow*0.4));
+  x.strokeStyle = style.color + frameAlpha;
+  x.lineWidth = rarity === 'mythic' || rarity === 'legendary' ? 1.6 : 1;
+  x.beginPath(); x.arc(CX, CY, S*0.47, 0, Math.PI*2); x.stroke();
+  return style;
+}
+
+// Legendary/mythic overlay — small corner gem stud that signals premium tier.
+// Draws in the bottom-right of the icon.
+function gearIconOverlay(x, S, rarity){
+  const style = GEAR_RARITY_STYLE[rarity];
+  if(!style) return;
+  if(style.hasGem){
+    // Corner gem — small faceted stone at bottom-right
+    const gx = S - 8, gy = S - 8;
+    x.save();
+    x.fillStyle = style.color;
+    x.shadowColor = style.color;
+    x.shadowBlur = 6;
+    x.beginPath();
+    x.moveTo(gx, gy-3);
+    x.lineTo(gx+3, gy);
+    x.lineTo(gx, gy+3);
+    x.lineTo(gx-3, gy);
+    x.closePath();
+    x.fill();
+    // Gem sparkle
+    x.shadowBlur = 0;
+    x.fillStyle = 'rgba(255,255,255,0.85)';
+    x.beginPath();
+    x.moveTo(gx-1, gy-1);
+    x.lineTo(gx+0.5, gy-1.5);
+    x.lineTo(gx, gy);
+    x.closePath();
+    x.fill();
+    x.restore();
+  }
+  if(style.hasEmber){
+    // Mythic — animated embers floating up (drawn as static particles here;
+    // caller can redraw periodically for animation if desired)
+    x.save();
+    x.fillStyle = '#ff6b6b';
+    x.shadowColor = '#ff6b6b'; x.shadowBlur = 4;
+    [[8,46],[12,42],[44,44],[46,40]].forEach(([px, py]) => {
+      x.beginPath(); x.arc(px, py, 1, 0, Math.PI*2); x.fill();
+    });
+    x.restore();
+  }
+}
+
+// Main entry point — draws a full gear icon onto a given canvas.
+// Canvas should be 52x52 (matches ability icon size for visual cohesion).
+function drawGearIcon(canvas, slot, rarity){
+  if(!canvas || !canvas.getContext) return;
+  const S = canvas.width;
+  const x = canvas.getContext('2d');
+  x.clearRect(0, 0, S, S);
+  const style = gearIconBG(x, S, rarity);
+  const drawer = GEAR_ICON_DRAWERS[slot];
+  if(drawer){
+    drawer(x, S, style.color);
+  }
+  gearIconOverlay(x, S, rarity);
+}
+
+
 // ═══════ GAME STATE ══════════════════════════════════════
 let running=false,lastTime=0,kills=0;
 let camX=WORLD_W/2,camY=WORLD_H/2;
