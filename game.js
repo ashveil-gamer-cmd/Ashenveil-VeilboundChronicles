@@ -3318,14 +3318,38 @@ function loop(ts){
   requestAnimationFrame(loop);
 }
 
-// ═══════ SAVE / LOAD ═══════════════════════════════════════
-// Save format is versioned. Bumping SAVE_VERSION lets us change shape later
-// without breaking old saves — loadSave() gracefully handles missing fields.
-const SAVE_KEY='ashenveil_save_v1';
-const SAVE_VERSION=1;
+// ═══════ SAVE / LOAD — MULTI-CHARACTER PROFILE SYSTEM ═══════════════
+// Profile structure in localStorage:
+//   ashenveil_profile_v2 = {
+//     v: 2,
+//     activeSlot: 0,          // which character index is currently loaded
+//     characters: [           // up to MAX_CHARACTERS entries; slot 0 is char 1
+//       {id, name, createdAt, lastPlayedAt, save: {...same shape as old buildSave}},
+//       ...
+//     ]
+//   }
+// Migration: if ashenveil_profile_v2 doesn't exist but ashenveil_save_v1 does,
+// we auto-wrap the v1 save as character 0 of a new v2 profile. Old key is kept
+// for one release in case something goes wrong with migration, then can be
+// deleted in a future cleanup pass.
+
+const SAVE_KEY='ashenveil_save_v1';       // legacy key — still read for migration
+const PROFILE_KEY='ashenveil_profile_v2'; // current key
+const SAVE_VERSION=2;
+const MAX_CHARACTERS=10;
 let lastSaveTime=0;
 const AUTOSAVE_INTERVAL=10000; // ms — save every 10s during play
 
+// The current in-memory profile (loaded from localStorage).
+// Stays in sync with localStorage via writeProfile.
+let profile = {
+  v: SAVE_VERSION,
+  activeSlot: 0,
+  characters: []
+};
+
+// Build a full character save snapshot from current game state.
+// This is what goes into profile.characters[i].save — the character-specific data.
 function buildSave(){
   return {
     v:SAVE_VERSION,
@@ -3340,7 +3364,7 @@ function buildSave(){
     },
     stats:{kills},
     zoneId:curZone?.id||1,
-    equipped:JSON.parse(JSON.stringify(equipped)), // deep clone so mutations don't corrupt save
+    equipped:JSON.parse(JSON.stringify(equipped)),
     inventory:typeof inventory!=='undefined'?JSON.parse(JSON.stringify(inventory)):[],
     shopState:typeof shopState!=='undefined'?JSON.parse(JSON.stringify(shopState)):null,
     professions:JSON.parse(JSON.stringify(professions)),
@@ -3348,38 +3372,158 @@ function buildSave(){
   };
 }
 
-function writeSave(){
+// Read the full profile from localStorage. If a v1 save exists but no v2 profile,
+// migrate it to a new v2 profile seamlessly (old character becomes slot 0).
+// Returns a valid profile object always (empty if no data).
+function readProfile(){
   try{
-    const data=buildSave();
-    localStorage.setItem(SAVE_KEY,JSON.stringify(data));
-    lastSaveTime=performance.now();
+    const raw=localStorage.getItem(PROFILE_KEY);
+    if(raw){
+      const data=JSON.parse(raw);
+      if(data && data.v===SAVE_VERSION && Array.isArray(data.characters)){
+        return data;
+      }
+    }
+    // No valid v2 profile — check for legacy v1 save
+    const legacyRaw=localStorage.getItem(SAVE_KEY);
+    if(legacyRaw){
+      const legacySave=JSON.parse(legacyRaw);
+      if(legacySave && typeof legacySave==='object'){
+        // Wrap legacy save as character 0 of fresh v2 profile
+        const now=Date.now();
+        const cls = legacySave.player?.classId || 'hollowcaller';
+        const clsName = (typeof CLASS_DEFS!=='undefined' && CLASS_DEFS[cls]?.name) || 'Hollowcaller';
+        const migratedProfile = {
+          v:SAVE_VERSION,
+          activeSlot:0,
+          characters:[{
+            id: 'migrated_'+now,
+            name: clsName + ' I',
+            classId: cls,                      // stored directly for consistency
+            createdAt: legacySave.savedAt || now,
+            lastPlayedAt: legacySave.savedAt || now,
+            save: { ...legacySave, v:SAVE_VERSION }, // stamp new version
+          }]
+        };
+        // Save the migrated profile immediately so future loads skip migration
+        try{ localStorage.setItem(PROFILE_KEY, JSON.stringify(migratedProfile)); }catch(e){}
+        return migratedProfile;
+      }
+    }
+    // No data anywhere — return empty profile
+    return { v:SAVE_VERSION, activeSlot:0, characters:[] };
+  }catch(e){
+    console.warn('Profile read failed:', e);
+    return { v:SAVE_VERSION, activeSlot:0, characters:[] };
+  }
+}
+
+// Persist the full profile to localStorage.
+function writeProfile(){
+  try{
+    localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
     return true;
   }catch(e){
-    // localStorage can fail in private mode or when full — fail silent, don't crash game
-    console.warn('Save failed:',e);
+    console.warn('Profile write failed:', e);
     return false;
   }
 }
 
-function readSave(){
+// Save the active character's current state into profile.characters[activeSlot].save,
+// update lastPlayedAt, and persist the whole profile. Called by autosave + emergencySave.
+function writeSave(){
   try{
-    const raw=localStorage.getItem(SAVE_KEY);
-    if(!raw)return null;
-    const data=JSON.parse(raw);
-    if(!data||typeof data!=='object')return null;
-    if(data.v!==SAVE_VERSION)return null; // future: handle migration here
-    return data;
+    if(!profile.characters[profile.activeSlot]){
+      // No active character — can't save. Should never happen during play.
+      return false;
+    }
+    const chr = profile.characters[profile.activeSlot];
+    chr.save = buildSave();
+    chr.lastPlayedAt = Date.now();
+    // Mirror key fields to character metadata for character-select preview display
+    chr.name = chr.name || autoCharacterName(chr.save.player?.classId);
+    return writeProfile();
   }catch(e){
-    console.warn('Save read failed:',e);
-    return null;
+    console.warn('Save failed:', e);
+    return false;
   }
 }
 
-function hasSave(){return readSave()!==null;}
-
-function deleteSave(){
-  try{localStorage.removeItem(SAVE_KEY);}catch(e){}
+// Read the currently-active character's save (what the game should load on start)
+function readSave(){
+  const chr = profile.characters[profile.activeSlot];
+  return chr?.save || null;
 }
+
+// Compatibility wrapper: true if any character exists in the profile
+function hasSave(){
+  return profile.characters.length > 0;
+}
+
+// Delete a character at a specific slot index. Returns true on success.
+// After deletion, activeSlot shifts to 0 if it was deleted or out of range.
+function deleteCharacterAt(index){
+  if(index < 0 || index >= profile.characters.length) return false;
+  profile.characters.splice(index, 1);
+  // Reclamp activeSlot
+  if(profile.activeSlot >= profile.characters.length){
+    profile.activeSlot = Math.max(0, profile.characters.length - 1);
+  }
+  return writeProfile();
+}
+
+// Compatibility shim — some old code calls deleteSave(). Now means "delete active char".
+function deleteSave(){
+  if(profile.characters.length === 0) return;
+  deleteCharacterAt(profile.activeSlot);
+}
+
+// Auto-generate a name like "Hollowcaller III" based on how many of that class exist.
+function autoCharacterName(classId){
+  const cls = (typeof CLASS_DEFS!=='undefined' && CLASS_DEFS[classId]) || {name:'Character'};
+  const roman = ['I','II','III','IV','V','VI','VII','VIII','IX','X'];
+  // Count existing characters of same class. Check both the character's direct
+  // classId (populated at creation time, so it's immediately available) AND
+  // the nested save (for safety against legacy data). Either match counts.
+  const count = profile.characters.filter(c => {
+    if(c.classId === classId) return true;
+    if(c.save?.player?.classId === classId) return true;
+    return false;
+  }).length;
+  return cls.name + ' ' + (roman[count] || String(count+1));
+}
+
+// Create a new character slot for a given class. Returns true on success,
+// false if the profile is full. Sets activeSlot to the new character.
+function createCharacter(classId){
+  if(profile.characters.length >= MAX_CHARACTERS){
+    return false;
+  }
+  const now = Date.now();
+  const newChar = {
+    id: 'char_' + now + '_' + Math.floor(Math.random()*1000),
+    name: autoCharacterName(classId),
+    classId: classId,              // stored directly so autoCharacterName can count before first writeSave
+    createdAt: now,
+    lastPlayedAt: now,
+    save: null, // will be populated by first writeSave after game starts
+  };
+  profile.characters.push(newChar);
+  profile.activeSlot = profile.characters.length - 1;
+  writeProfile();
+  return true;
+}
+
+// Select an existing character by slot index. Returns true if valid slot.
+function selectCharacter(index){
+  if(index < 0 || index >= profile.characters.length) return false;
+  profile.activeSlot = index;
+  writeProfile();
+  return true;
+}
+
+// Initialize: load profile from storage on script boot.
+profile = readProfile();
 
 // Apply a loaded save to the live game state. Called from startGame when continuing.
 function applySave(data){
@@ -3462,22 +3606,22 @@ function maybeAutoSave(now){
 // Refresh the title screen's buttons based on whether a save exists.
 // Shows "Continue" + "New Game" if save present; just "Enter the Veil" if not.
 function refreshTitleButtons(){
+  // With the multi-character profile, the title always shows just the
+  // "Enter the Veil" button which routes to Character Select. Continue/NewGame
+  // buttons are legacy and hidden; Character Select handles those flows.
   const startBtn=document.getElementById('startBtn');
   const continueBtn=document.getElementById('continueBtn');
   const newGameBtn=document.getElementById('newGameBtn');
-  if(!continueBtn||!newGameBtn||!startBtn)return;
-  if(hasSave()){
-    const save=readSave();
-    const lv=save?.player?.level||1;
-    startBtn.style.display='none';
-    continueBtn.style.display='inline-block';
-    newGameBtn.style.display='inline-block';
-    continueBtn.textContent=`⚡ CONTINUE — LV ${lv}`;
+  if(!startBtn)return;
+  startBtn.style.display='inline-block';
+  // Update label based on whether player has any characters
+  if(profile && profile.characters && profile.characters.length > 0){
+    startBtn.textContent = '⚡ Enter the Veil';
   } else {
-    startBtn.style.display='inline-block';
-    continueBtn.style.display='none';
-    newGameBtn.style.display='none';
+    startBtn.textContent = '⚡ Begin Your Journey';
   }
+  if(continueBtn) continueBtn.style.display='none';
+  if(newGameBtn) newGameBtn.style.display='none';
 }
 
 // ═══════ START ═══════════════════════════════════════════
@@ -3531,6 +3675,8 @@ function startGame(continueFromSave=false){
   } else {
     addFeed('THE VEIL CALLS YOU','#c084fc');
     addFeed('WASD/Arrow keys · Q W E R abilities','#3d2555');
+    // New characters — write their initial save immediately so they persist
+    if(typeof writeSave==='function') writeSave();
   }
   lastSaveTime=performance.now(); // prevent immediate auto-save on load
 }
@@ -3624,28 +3770,172 @@ function handleMuteToggle(){
   }
 })();
 
-document.getElementById('startBtn').addEventListener('click',()=>openClassSelect());
-// New continue/newgame buttons — only present if HTML has been updated
-const _continueBtn=document.getElementById('continueBtn');
-if(_continueBtn)_continueBtn.addEventListener('click',()=>startGame(true));
-const _newGameBtn=document.getElementById('newGameBtn');
-if(_newGameBtn)_newGameBtn.addEventListener('click',()=>{
-  if(newGameConfirmCheck())openClassSelect();
+// ─── ORIENTATION WATCHER ─────────────────────────────────────────
+// Shows "rotate your device" notice when on a narrow screen in portrait mode.
+// Uses window.innerWidth + innerHeight (not CSS media queries) because mobile
+// browsers sometimes cache media query results and don't re-fire until reload.
+// Runs on: load, resize, orientationchange. Responsive on all devices.
+function updateOrientationNotice(){
+  const notice = document.getElementById('rotateNotice');
+  if(!notice) return;
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  // Consider it "phone portrait" if: width under 900px AND portrait orientation
+  const isPortraitPhone = w < 900 && h > w;
+  if(isPortraitPhone){
+    notice.classList.add('active');
+  } else {
+    notice.classList.remove('active');
+  }
+}
+// Run once on load, then on any size/orientation change
+updateOrientationNotice();
+window.addEventListener('resize', updateOrientationNotice);
+window.addEventListener('orientationchange', ()=>{
+  // Some mobile browsers need a small delay after orientationchange for the
+  // innerWidth/innerHeight values to update
+  setTimeout(updateOrientationNotice, 120);
 });
+
+// Title button wiring — route through Character Select screen.
+// Clicking "Enter the Veil" opens the character select. From there player can:
+//  - pick an existing character (loads their save, enters game)
+//  - create a new character (goes to class select, then into game)
+//  - delete a character (confirmation for level 10+)
+document.getElementById('startBtn').addEventListener('click',()=>{
+  openCharacterSelect();
+});
+// Legacy continue/newgame buttons — now also route through character select
+const _continueBtn=document.getElementById('continueBtn');
+if(_continueBtn)_continueBtn.addEventListener('click',()=>openCharacterSelect());
+const _newGameBtn=document.getElementById('newGameBtn');
+if(_newGameBtn)_newGameBtn.addEventListener('click',()=>openCharacterSelect());
+
+// ═══════ CHARACTER SELECT SCREEN ══════════════════════════════
+function openCharacterSelect(){
+  const titleScr = document.getElementById('titleScreen');
+  const classScr = document.getElementById('classSelectScreen');
+  const charScr  = document.getElementById('characterSelectScreen');
+  if(titleScr) titleScr.style.display='none';
+  if(classScr) classScr.style.display='none';
+  if(charScr)  charScr.style.display='flex';
+  renderCharacterSelect();
+}
+function closeCharacterSelect(){
+  const titleScr = document.getElementById('titleScreen');
+  const charScr  = document.getElementById('characterSelectScreen');
+  if(charScr)  charScr.style.display='none';
+  if(titleScr) titleScr.style.display='flex';
+}
+function renderCharacterSelect(){
+  const grid = document.getElementById('characterSelectGrid');
+  const countEl = document.getElementById('charSelectCount');
+  if(!grid) return;
+  grid.innerHTML='';
+  const characters = profile.characters;
+  if(countEl) countEl.textContent = `${characters.length} / ${MAX_CHARACTERS} slots used`;
+  // Sort by lastPlayedAt DESC so most recent is on top
+  const ordered = characters.map((c,i)=>({chr:c, origIndex:i}))
+    .sort((a,b) => (b.chr.lastPlayedAt||0) - (a.chr.lastPlayedAt||0));
+  // Render existing character cards
+  ordered.forEach(({chr, origIndex})=>{
+    // Classify character by classId (stored on creation) falling back to save if present
+    const chrClassId = chr.classId || chr.save?.player?.classId || 'hollowcaller';
+    const cls = (typeof CLASS_DEFS!=='undefined' && CLASS_DEFS[chrClassId]) || {name:'Unknown',resourceColor:'#9ca3af'};
+    const level = chr.save?.player?.level || 1;
+    const gold = chr.save?.player?.gold || 0;
+    const kills = chr.save?.stats?.kills || 0;
+    const lastPlayedDays = chr.lastPlayedAt ? Math.floor((Date.now() - chr.lastPlayedAt) / 86400000) : 0;
+    const lastPlayedStr = (()=>{
+      if(!chr.lastPlayedAt) return 'Never';
+      const diff = Date.now() - chr.lastPlayedAt;
+      if(diff < 60000) return 'Just now';
+      if(diff < 3600000) return Math.floor(diff/60000) + ' min ago';
+      if(diff < 86400000) return Math.floor(diff/3600000) + ' hrs ago';
+      return lastPlayedDays + ' day' + (lastPlayedDays===1?'':'s') + ' ago';
+    })();
+    const icon = chrClassId === 'ironwake' ? '⚔' : '🜲';
+    const card = document.createElement('div');
+    card.className = 'char-card';
+    card.style.borderColor = cls.resourceColor + '66';
+    card.innerHTML = `
+      <div class="char-card-icon" style="color:${cls.resourceColor};text-shadow:0 0 16px ${cls.resourceColor}88">${icon}</div>
+      <div class="char-card-name">${chr.name}</div>
+      <div class="char-card-class" style="color:${cls.resourceColor}">${cls.name}</div>
+      <div class="char-card-stats">
+        <div class="char-stat"><span class="char-stat-label">LV</span><span class="char-stat-val">${level}</span></div>
+        <div class="char-stat"><span class="char-stat-label">GOLD</span><span class="char-stat-val">${gold}</span></div>
+        <div class="char-stat"><span class="char-stat-label">KILLS</span><span class="char-stat-val">${kills}</span></div>
+      </div>
+      <div class="char-card-lastplayed">${lastPlayedStr}</div>
+      <div class="char-card-actions">
+        <button class="char-action-play" style="color:${cls.resourceColor};border-color:${cls.resourceColor}66">▶ PLAY</button>
+        <button class="char-action-delete">✗ DELETE</button>
+      </div>
+    `;
+    card.querySelector('.char-action-play').addEventListener('click',()=>{
+      selectCharacter(origIndex);
+      const charScr = document.getElementById('characterSelectScreen');
+      if(charScr) charScr.style.display='none';
+      startGame(true); // continue from save
+    });
+    card.querySelector('.char-action-delete').addEventListener('click',()=>{
+      // Confirmation threshold — higher level = more investment lost
+      const lv = chr.save?.player?.level || 1;
+      let msg = `Delete ${chr.name}?\n\nThis character will be permanently removed.`;
+      if(lv >= 10){
+        msg = `⚠ Delete ${chr.name} (Level ${lv})?\n\nThis character has meaningful progress. This action cannot be undone.`;
+      }
+      if(confirm(msg)){
+        deleteCharacterAt(origIndex);
+        renderCharacterSelect();
+      }
+    });
+    grid.appendChild(card);
+  });
+  // Render "create new" card if we have room
+  if(characters.length < MAX_CHARACTERS){
+    const createCard = document.createElement('div');
+    createCard.className = 'char-card char-card-empty';
+    createCard.innerHTML = `
+      <div class="char-card-icon char-card-plus">+</div>
+      <div class="char-card-name">Create New</div>
+      <div class="char-card-class">${MAX_CHARACTERS - characters.length} slot${MAX_CHARACTERS - characters.length===1?'':'s'} remaining</div>
+      <button class="char-action-create">CHOOSE CLASS</button>
+    `;
+    createCard.querySelector('.char-action-create').addEventListener('click',()=>{
+      openClassSelect(); // existing function, chooseClass now creates a new char
+    });
+    grid.appendChild(createCard);
+  }
+  const cancelBtn = document.getElementById('charSelectCancelBtn');
+  if(cancelBtn){
+    cancelBtn.onclick = ()=>closeCharacterSelect();
+  }
+}
 
 // Class-select screen: shows both classes as big cards, player picks one, then starts game.
 function openClassSelect(){
   const titleScr = document.getElementById('titleScreen');
   const classScr = document.getElementById('classSelectScreen');
+  const charScr  = document.getElementById('characterSelectScreen');
   if(titleScr) titleScr.style.display='none';
+  if(charScr)  charScr.style.display='none';
   if(classScr) classScr.style.display='flex';
   renderClassSelect();
 }
 function closeClassSelect(){
-  const titleScr = document.getElementById('titleScreen');
+  const charScr  = document.getElementById('characterSelectScreen');
   const classScr = document.getElementById('classSelectScreen');
   if(classScr) classScr.style.display='none';
-  if(titleScr) titleScr.style.display='flex';
+  // Return to character select if we have any chars, else to title
+  if(charScr && profile.characters.length > 0){
+    charScr.style.display='flex';
+    renderCharacterSelect();
+  } else {
+    const titleScr = document.getElementById('titleScreen');
+    if(titleScr) titleScr.style.display='flex';
+  }
 }
 function renderClassSelect(){
   const grid = document.getElementById('classSelectGrid');
@@ -3680,15 +3970,24 @@ function renderClassSelect(){
   }
 }
 function chooseClass(classId){
-  // Clear any in-progress save — new game always starts fresh
-  try{ localStorage.removeItem(SAVE_KEY); }catch(e){}
-  // Set class on player BEFORE startGame computes stats
+  // Check if profile is full before creating
+  if(profile.characters.length >= MAX_CHARACTERS){
+    alert(`Character slots are full (${MAX_CHARACTERS}). Delete a character from the Character Select screen to make room.`);
+    return;
+  }
+  // Create a new character slot for this class — this sets activeSlot to the new char
+  const created = createCharacter(classId);
+  if(!created){
+    alert('Could not create character.');
+    return;
+  }
+  // Initialize live player state for the new character
   player.classId = classId;
   player.wrath = 0;
   player.bulwarkUntil = 0;
   player.retributionUntil = 0;
   player.furyChargeUntil = 0;
-  // Hide class-select, start game fresh
+  // Hide class-select, start game fresh (no save to load — this is a new char)
   const classScr = document.getElementById('classSelectScreen');
   if(classScr) classScr.style.display='none';
   startGame(false);
