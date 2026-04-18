@@ -2337,8 +2337,11 @@ function drawWorld(now){
 function spawnEnemy(typeOverride=null){
   // No combat spawns in camp zones — The Procession is a safe hub
   if(curZone?.isCamp) return;
+  // Mob density scales with player level (idle-game feel: higher levels = busier world)
+  const densityMult = (typeof mobDensityMult === 'function') ? mobDensityMult(player.level) : 1.0;
+  const cap = Math.round(MAX_ENEMIES * densityMult);
   const living=enemies.filter(e=>!e.dead).length;
-  if(living>=MAX_ENEMIES)return;
+  if(living>=cap)return;
   const angle=Math.random()*Math.PI*2;
   const d=300+Math.random()*260;
   let x=Math.max(60,Math.min(WORLD_W-60,player.x+Math.cos(angle)*d));
@@ -2353,20 +2356,16 @@ function spawnEnemy(typeOverride=null){
     if(Math.random()<0.55&&bias.length){const t=bias[Math.floor(Math.random()*bias.length)];typeData=ENEMY_TYPES.find(e=>e.type===t);}
     if(!typeData){const pool=ENEMY_TYPES.filter(t=>!t.elite||(player.level>=8&&Math.random()<0.12));typeData=pool[Math.floor(Math.random()*pool.length)];}
   }
-  // Roll enemy level from zone's enemy level band (classic WoW — zones are
-  // level-gated). Each enemy gets its own level; not all enemies in a zone
-  // are at the same level, giving fights some variety.
-  const enemyLv = rollEnemyLevel(curZone);
-  const isElite=enemyLv>=5&&Math.random()<0.08;
-  // Stat scaling now uses the enemy's own level, not the player's.
-  // This is the key difference: outleveling a zone means enemies are
-  // genuinely weaker; underleveling means they're genuinely stronger.
-  const hs=enemyHpScale(enemyLv),ds=enemyDmgScale(enemyLv);
-  const base=enemyLv<=5?150:enemyLv<=10?175:enemyLv<=20?220:enemyLv<=35?280:360;
-  const baseAtk=enemyLv<=5?22:enemyLv<=10?26:enemyLv<=20?32:enemyLv<=35?40:52;
+  const isElite=player.level>=5&&Math.random()<0.08;
+  // Enemy stats scale from player level. Fights are always level-appropriate;
+  // breakthrough difficulty comes from gear, not level gaps.
+  const hs=enemyHpScale(player.level),ds=enemyDmgScale(player.level);
+  // Base HP doubled from previous values so fights take 3-5s with basic attacks
+  // instead of dying in one hit. Pairs with slower XP curve for satisfying combat.
+  const base = 510 + player.level * 10;
+  const baseAtk = 22 + player.level * 0.8;
   enemies.push({
     id:enemyId++,x,y,vx:0,vy:0,
-    level: enemyLv,
     hp:base*hs*typeData.hp*(isElite?2.4:1),
     maxHp:base*hs*typeData.hp*(isElite?2.4:1),
     attack:baseAtk*ds*typeData.dmg*(isElite?1.6:1),
@@ -2462,16 +2461,11 @@ function spawnDungeonWave(waveIndex){
       // Nudge away from collidable props
       const clear=findClearPosition(x,y,22);
       x=clear.x;y=clear.y;
-      // Dungeon enemies scale to the dungeon's minLevel + a small spread
-      // for variety. This is slightly above the zone the dungeon sits in.
-      const dMin = (dungeonState.def?.minLevel || 1);
-      const enemyLv = Math.max(1, dMin + Math.floor(Math.random() * 4));
-      const hs=enemyHpScale(enemyLv),ds=enemyDmgScale(enemyLv);
-      const base=enemyLv<=5?150:enemyLv<=10?175:enemyLv<=20?220:enemyLv<=35?280:360;
-      const baseAtk=enemyLv<=5?22:enemyLv<=10?26:enemyLv<=20?32:enemyLv<=35?40:52;
+      const hs=enemyHpScale(player.level),ds=enemyDmgScale(player.level);
+      const base = 510 + player.level * 10;
+      const baseAtk = 22 + player.level * 0.8;
       enemies.push({
         id:enemyId++,x,y,vx:0,vy:0,
-        level: enemyLv,
         hp:base*hs*typeData.hp*(isElite?2.4:1),
         maxHp:base*hs*typeData.hp*(isElite?2.4:1),
         attack:baseAtk*ds*typeData.dmg*(isElite?1.6:1),
@@ -2488,12 +2482,9 @@ function spawnDungeonWave(waveIndex){
 function spawnDungeonBoss(){
   const bd=dungeonState.def.boss;
   const typeData=ENEMY_TYPES.find(t=>t.type===bd.baseType)||ENEMY_TYPES[0];
-  // Boss level is the dungeon's minLevel + 2 — it's the hardest encounter
-  // of the dungeon, and should feel like the culmination of the run.
-  const bossLv = Math.max(1, (dungeonState.def?.minLevel || 1) + 2);
-  const hs=enemyHpScale(bossLv),ds=enemyDmgScale(bossLv);
-  const base=bossLv<=5?150:bossLv<=10?175:bossLv<=20?220:bossLv<=35?280:360;
-  const baseAtk=bossLv<=5?22:bossLv<=10?26:bossLv<=20?32:bossLv<=35?40:52;
+  const hs=enemyHpScale(player.level),ds=enemyDmgScale(player.level);
+  const base = 510 + player.level * 10;
+  const baseAtk = 22 + player.level * 0.8;
   // Spawn boss directly in front of player for a heroic entrance
   const angle=player.facing||0;
   let x=player.x+Math.cos(angle)*280;
@@ -2503,7 +2494,6 @@ function spawnDungeonBoss(){
   x=clear.x;y=clear.y;
   const boss={
     id:enemyId++,x,y,vx:0,vy:0,
-    level: bossLv,
     hp:base*hs*typeData.hp*bd.hpMult,
     maxHp:base*hs*typeData.hp*bd.hpMult,
     attack:baseAtk*ds*typeData.dmg*bd.atkMult,
@@ -2604,11 +2594,9 @@ function resolveBossAbility(boss){
   if(ab.type==='summonThralls'){
     // Summon skeleton thralls at the boss's position
     const typeData=ENEMY_TYPES.find(t=>t.type==='skeleton')||ENEMY_TYPES[0];
-    // Thralls inherit the boss's level (minus 1 — weaker minions)
-    const thrallLv = Math.max(1, (boss.level || player.level) - 1);
-    const hs=enemyHpScale(thrallLv),ds=enemyDmgScale(thrallLv);
-    const base=thrallLv<=5?150:thrallLv<=10?175:thrallLv<=20?220:thrallLv<=35?280:360;
-    const baseAtk=thrallLv<=5?22:thrallLv<=10?26:thrallLv<=20?32:thrallLv<=35?40:52;
+    const hs=enemyHpScale(player.level),ds=enemyDmgScale(player.level);
+    const base = 510 + player.level * 10;
+    const baseAtk = 22 + player.level * 0.8;
     for(let i=0;i<(ab.count||2);i++){
       const a=(i/ab.count)*Math.PI*2;
       const tx=boss.x+Math.cos(a)*boss.size*1.2;
@@ -2616,7 +2604,6 @@ function resolveBossAbility(boss){
       const clear=findClearPosition(tx,ty,22);
       enemies.push({
         id:enemyId++,x:clear.x,y:clear.y,vx:0,vy:0,
-        level: thrallLv,
         hp:base*hs*typeData.hp*0.6, // thralls are weaker than normal skeletons
         maxHp:base*hs*typeData.hp*0.6,
         attack:baseAtk*ds*typeData.dmg*0.8,
@@ -3127,7 +3114,14 @@ function effectiveCD(idx){
   let cdrPct=_tb('cdrPct');
   // Hollowcaller Raise-specific CDR bonus (only applies to its slot 0)
   if(idx===0 && player.classId==='hollowcaller')cdrPct+=_tb('raiseCdrPct');
-  return base*(1-Math.min(cdrPct,70)/100); // cap CDR at 70% to prevent infinite loops
+  let cd = base*(1-Math.min(cdrPct,70)/100); // cap CDR at 70% to prevent infinite loops
+  // Apply level-based attack speed bonus — faster abilities at higher levels.
+  // 0.3% per level past 1 (15% at level 50, 30% at level 100).
+  const atkSpdMult = (typeof playerAttackSpeedBonus === 'function')
+    ? playerAttackSpeedBonus(player.level)
+    : 1.0;
+  cd = cd / atkSpdMult;
+  return cd;
 }
 
 // Damage multiplier applied to every ability. Stacks with per-spirit bonus.
@@ -3352,13 +3346,7 @@ function hitEnemy(e,dmg,isCrit=false,fromX,fromY){
   }
   const critChance=0.12+_tb('critPct')/100;
   const critRoll=Math.random()<critChance;
-  // Apply level-gap multiplier. Enemy level defaults to player level if
-  // missing (for bosses or legacy enemies without a level set).
-  const eLv = (typeof e.level === 'number') ? e.level : player.level;
-  const gapMult = (typeof playerVsEnemyDmgMult === 'function')
-    ? playerVsEnemyDmgMult(player.level, eLv)
-    : 1.0;
-  const finalDmg = (critRoll ? dmg*2.2 : dmg) * gapMult;
+  const finalDmg = critRoll ? dmg * 2.2 : dmg;
   e.hp-=finalDmg;e.hitFlash=0.18;
   spawnDmgText(e.x,e.y-e.size,Math.round(finalDmg),critRoll?'#fde68a':'#fff',critRoll);
   // Directional impact sparks (if we know where the hit came from, sparks fly away from source)
@@ -3378,17 +3366,11 @@ function hitEnemy(e,dmg,isCrit=false,fromX,fromY){
 function killEnemy(e){
   e.dead=true;kills++;
   document.getElementById('killCount').textContent=`☠ ${kills}`;
-  // XP and gold rewards — tuned for classic-WoW-style slow progression.
-  // Level gap modifies reward: grey mobs (far below) give almost nothing,
-  // orange mobs (above you) give bonus XP, same-level gives full.
-  const baseXp = e.isElite ? 120 : 30;
-  const baseGold = e.isElite ? 50 : 10;
-  const eLv = (typeof e.level === 'number') ? e.level : player.level;
-  const xpMult = (typeof xpRewardMult === 'function')
-    ? xpRewardMult(player.level, eLv)
-    : 1.0;
-  const xpG = Math.max(1, Math.round(baseXp * xpMult));
-  const goldG = Math.max(1, Math.round(baseGold * xpMult));
+  // Flat XP and gold rewards — enemies are always level-appropriate so no
+  // gap scaling needed. Pairs with the slower XP curve to give earned-feeling
+  // progression.
+  const xpG = e.isElite ? 120 : 30;
+  const goldG = e.isElite ? 50 : 10;
   addXP(xpG);player.gold+=goldG;
   SFX[e.isElite?'eliteDeath':'enemyDeath']();
   spawnDmgText(e.x,e.y-40,`+${xpG}XP`,'#8b5cf6',false);
@@ -3688,10 +3670,15 @@ function update(dt,now){
   const isAfk=now-player.lastInput>AFK_IDLE;
   // Class-specific speed multiplier — Ironwake is slower than Hollowcaller
   const classSpdMult = (CLASS_DEFS[player.classId]||CLASS_DEFS.hollowcaller).speedMult || 1.0;
+  // Level-based passive speed bonus (idle-game feel — leveling makes you faster).
+  // 0.5% per level past 1. At level 50: +25%. At level 100: +50%.
+  const levelSpdBonus = (typeof playerSpeedBonus === 'function')
+    ? playerSpeedBonus(player.level)
+    : 1.0;
 
   if(ix!==0||iy!==0){
     const m=Math.sqrt(ix*ix+iy*iy)||1;
-    const spdMult=(1+_tb('moveSpdPct')/100) * classSpdMult;
+    const spdMult=(1+_tb('moveSpdPct')/100) * classSpdMult * levelSpdBonus;
     player.vx=(ix/m)*PLAYER_SPEED*spdMult;player.vy=(iy/m)*PLAYER_SPEED*spdMult;
     player.facing=Math.atan2(iy,ix);
   } else if(isAfk){
@@ -3701,7 +3688,7 @@ function update(dt,now){
     let mx=tx,my=ty,md=d;
     if(ne){mx=ne.x-player.x;my=ne.y-player.y;md=Math.sqrt(mx*mx+my*my)||1;}
     if(d<80||player.afkTimer>player.afkCommit){player.visitedSectors[player.sector]=true;setAfkWaypoint();}
-    const spdMult=(1+_tb('moveSpdPct')/100) * classSpdMult;
+    const spdMult=(1+_tb('moveSpdPct')/100) * classSpdMult * levelSpdBonus;
     const spd=(ne&&md<320?PLAYER_SPEED*0.9:PLAYER_SPEED*0.72)*spdMult;
     player.vx=(mx/md)*spd;player.vy=(my/md)*spd;
     player.facing=Math.atan2(my,mx);
@@ -3721,7 +3708,12 @@ function update(dt,now){
 
   // Auto attack — uses class attack range (Hollowcaller 220, Ironwake 85)
   const classAttackRange = (CLASS_DEFS[player.classId]||CLASS_DEFS.hollowcaller).attackRange || ATTACK_RANGE;
-  if(now-player.lastAttack>ATTACK_CD){
+  // Level-based attack speed bonus shortens the attack interval
+  const atkSpdBonus = (typeof playerAttackSpeedBonus === 'function')
+    ? playerAttackSpeedBonus(player.level)
+    : 1.0;
+  const effAtkCD = ATTACK_CD / atkSpdBonus;
+  if(now-player.lastAttack>effAtkCD){
     const t=getNearestEnemy(classAttackRange);
     if(t){player.lastAttack=now;hitEnemy(t,player.attack);SFX.hit();
       // Attack arc particles — Ironwake red, Hollowcaller purple
@@ -3803,15 +3795,9 @@ function update(dt,now){
       // Recompute distance now — player may have dodged out of range
       const ndx=player.x-e.x,ndy=player.y-e.y,nd=Math.sqrt(ndx*ndx+ndy*ndy)||1;
       if(nd<=e.attackRange&&player.iframes<=0){
-        // Apply level-gap multiplier — higher-level enemies hit harder,
-        // lower-level barely scratch you
-        const eLv = (typeof e.level === 'number') ? e.level : player.level;
-        const gapMult = (typeof enemyVsPlayerDmgMult === 'function')
-          ? enemyVsPlayerDmgMult(eLv, player.level)
-          : 1.0;
         // Apply damage reduction talent
         const dmgReducePct=_tb('dmgReducePct');
-        let incomingDmg=e.attack * gapMult * (1-Math.min(dmgReducePct,80)/100);
+        let incomingDmg=e.attack*(1-Math.min(dmgReducePct,80)/100);
         // Ironwake Bulwark — 70% damage reduction during active window
         if(player.classId==='ironwake' && player.bulwarkUntil && now < player.bulwarkUntil){
           incomingDmg *= 0.3;
@@ -3959,27 +3945,12 @@ function render(now){
     if(e.isElite){
       ctx.strokeStyle='#fbbf24';ctx.lineWidth=1.5;
       ctx.beginPath();ctx.roundRect(e.x-bw/2,e.y-e.size-16,bw,6,2);ctx.stroke();
+      // Elite crown
+      ctx.fillStyle='#fbbf24';ctx.shadowColor='#fbbf24';ctx.shadowBlur=6;
+      ctx.font='10px serif';ctx.textAlign='center';ctx.fillText('👑',e.x,e.y-e.size-20);
+      ctx.shadowBlur=0;
+      ctx.textAlign='start';
     }
-    // Level label above HP bar, color-coded by difficulty relative to player
-    // (matches WoW's grey/green/white/yellow/orange/red system).
-    if(typeof e.level === 'number'){
-      const dColor = (typeof enemyDifficultyColor === 'function')
-        ? enemyDifficultyColor(player.level, e.level)
-        : '#ffffff';
-      const labelY = e.y - e.size - 22;
-      const labelText = e.isElite ? `★ Lv ${e.level}` : `Lv ${e.level}`;
-      ctx.font = 'bold 10px Cinzel, serif';
-      ctx.textAlign = 'center';
-      // Backdrop for readability against the world
-      const textW = ctx.measureText(labelText).width;
-      ctx.fillStyle = 'rgba(0,0,0,0.65)';
-      ctx.fillRect(e.x - textW/2 - 4, labelY - 8, textW + 8, 12);
-      ctx.fillStyle = dColor;
-      ctx.shadowColor = dColor; ctx.shadowBlur = 4;
-      ctx.fillText(labelText, e.x, labelY);
-      ctx.shadowBlur = 0;
-    }
-    ctx.textAlign = 'start';
   });
 
   // Player
