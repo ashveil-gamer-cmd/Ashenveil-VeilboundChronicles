@@ -22,6 +22,25 @@ const ctx = canvas.getContext('2d');
   };
 })();
 
+// Same guard for ctx.arc — 131 arc call sites throughout the codebase,
+// and a single negative radius from ANY of them will throw and abort the
+// render loop for that frame, causing a blank screen bug. Clamp to 0.
+// This is the fix for "player and mobs not visible but game is running".
+(function(){
+  const origArc = ctx.arc.bind(ctx);
+  ctx.arc = function(x, y, r, start, end, ccw){
+    const safeR = Math.max(0, r || 0);
+    return origArc(x, y, safeR, start, end, ccw);
+  };
+  // Also guard ellipse since it has a similar failure mode
+  const origEllipse = ctx.ellipse.bind(ctx);
+  ctx.ellipse = function(x, y, rx, ry, rot, start, end, ccw){
+    const safeRx = Math.max(0, rx || 0);
+    const safeRy = Math.max(0, ry || 0);
+    return origEllipse(x, y, safeRx, safeRy, rot, start, end, ccw);
+  };
+})();
+
 let W, H;
 function resize(){ W=canvas.width=window.innerWidth; H=canvas.height=window.innerHeight; }
 resize(); window.addEventListener('resize',resize);
