@@ -2783,6 +2783,10 @@ function updateGroundFX(dt,now){
 // so effects look like they're painted on the floor beneath characters.
 function drawGroundFX(now){
   groundFX.forEach(fx=>{
+    // Guard against negative/invalid radii — fx radii can shrink with life
+    // to below 0 during rapid transitions; arc() throws on negative values.
+    if(typeof fx.r === 'number' && fx.r < 0.5) return;
+    if(typeof fx.maxR === 'number' && fx.maxR < 0.5) return;
     const a=Math.max(0,fx.life/fx.maxLife);
     ctx.save();
     if(fx.type==='telegraph'){
@@ -3190,10 +3194,11 @@ function render(now){
 
   // Particles (behind entities)
   particles.forEach(p=>{
-    const a=p.life/p.maxLife;
+    const a=Math.max(0, p.life/p.maxLife);
+    const r=Math.max(0.5, p.size*(p.soul?a:1));
     ctx.globalAlpha=a;ctx.fillStyle=p.color;
     ctx.shadowColor=p.color;ctx.shadowBlur=p.soul?12:5;
-    ctx.beginPath();ctx.arc(p.x,p.y,p.size*(p.soul?a:1),0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.fill();
   });
   ctx.globalAlpha=1;ctx.shadowBlur=0;
 
@@ -3625,7 +3630,99 @@ function refreshTitleButtons(){
 }
 
 // ═══════ START ═══════════════════════════════════════════
+// Tracked setTimeout IDs from the current game so stopGame can cancel them all.
+// Prevents old game's setTimeouts (enemy spawns, delayed FX) from firing into
+// the new game and polluting its world state.
+let _gameTimeouts = [];
+function trackTimeout(fn, delay){
+  const id = setTimeout(() => {
+    // Remove ourselves from the array once we run
+    const idx = _gameTimeouts.indexOf(id);
+    if(idx >= 0) _gameTimeouts.splice(idx, 1);
+    fn();
+  }, delay);
+  _gameTimeouts.push(id);
+  return id;
+}
+
+// Stops the running game loop and clears all world-state arrays so a fresh
+// game can start cleanly without the old loop's timers/enemies/particles
+// bleeding into the new game. Called when switching characters or returning
+// to character select mid-game.
+function stopGame(){
+  running=false;
+  // Cancel any pending tracked timeouts from the previous game session
+  _gameTimeouts.forEach(id => clearTimeout(id));
+  _gameTimeouts.length = 0;
+  // Clear world-state arrays so starting a new character doesn't inherit the old one's world
+  if(typeof enemies!=='undefined') enemies.length=0;
+  if(typeof particles!=='undefined') particles.length=0;
+  if(typeof groundFX!=='undefined') groundFX.length=0;
+  if(typeof dmgTexts!=='undefined') dmgTexts.length=0;
+  if(typeof spirits!=='undefined') spirits.length=0;
+  if(typeof envProps!=='undefined') envProps.length=0;
+  // Clear ability cooldowns so the new character doesn't see old CDs
+  if(typeof abilityCDs!=='undefined'){
+    for(let i=0;i<abilityCDs.length;i++) abilityCDs[i]=0;
+  }
+  // Clear any in-progress bosses, dungeons, portals
+  if(typeof bossTarget!=='undefined') bossTarget=null;
+  if(typeof dungeonState!=='undefined' && dungeonState){
+    dungeonState.active=false;
+    dungeonState.def=null;
+    if(typeof dungeonState.wave!=='undefined') dungeonState.wave=0;
+  }
+  if(typeof portals!=='undefined') portals.length=0;
+  // Stop ambient music cleanly so it doesn't fight the next character's startMusic
+  if(typeof ambientState!=='undefined' && ambientState.running){
+    ambientState.running=false;
+    if(typeof tearDownAmbientLayers==='function'){
+      tearDownAmbientLayers(0.3, ()=>{});
+    }
+    ambientState.currentZoneId=null;
+  }
+  // Reset shake/cluster timers
+  if(typeof shakeTimer!=='undefined') shakeTimer=0;
+  if(typeof clusterTimer!=='undefined') clusterTimer=0;
+  // Player transient state — invuln frames, ability timers
+  if(typeof player!=='undefined'){
+    player.iframes=0;
+    player.hitFlash=0;
+    player.isDead=false;
+    player.bulwarkUntil=0;
+    player.retributionUntil=0;
+    player.furyChargeUntil=0;
+    player._cheatDeathUsed=false;
+    player.afkTimer=0;
+  }
+}
+
+// Exit from in-game back to the Character Select screen. Saves current
+// character's progress first, then stops the game and shows the select screen.
+// Called by the "EXIT" menu button during gameplay.
+function exitToCharacterSelect(){
+  if(!confirm('Return to Character Select?\n\nYour progress will be saved.')) return;
+  // Save current character's state
+  if(typeof writeSave==='function') writeSave();
+  // Stop the game loop + clear world state
+  stopGame();
+  // Hide all in-game UI
+  ['hud','abilityBar','feedLog','spiritPanel','menuBar','zoneLabel','minimap'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.style.display='none';
+  });
+  // Close any open panels
+  ['gearPanel','inventoryPanel','shopPanel','talentPanel','profPanel'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.style.display='none';
+  });
+  // Open character select
+  if(typeof openCharacterSelect==='function') openCharacterSelect();
+}
+
 function startGame(continueFromSave=false){
+  // Stop any previous game cleanly before starting this one
+  stopGame();
   getAC(); // unlock audio context on user gesture
   document.getElementById('titleScreen').style.display='none';
   ['hud','abilityBar','feedLog','spiritPanel','menuBar','zoneLabel','minimap'].forEach(id=>{
@@ -3667,7 +3764,7 @@ function startGame(continueFromSave=false){
   }
   drawAbilityIcons();
   startMusic();
-  for(let i=0;i<8;i++)setTimeout(()=>spawnEnemy(),i*400);
+  for(let i=0;i<8;i++)trackTimeout(()=>spawnEnemy(),i*400);
   running=true;lastTime=performance.now();
   requestAnimationFrame(loop);
   if(continueFromSave){
