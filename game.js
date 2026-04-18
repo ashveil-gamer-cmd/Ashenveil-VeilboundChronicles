@@ -2379,10 +2379,11 @@ function spawnEnemy(typeOverride=null){
   // Enemy stats scale from player level. Fights are always level-appropriate;
   // breakthrough difficulty comes from gear, not level gaps.
   const hs=enemyHpScale(player.level),ds=enemyDmgScale(player.level);
-  // Base HP doubled from previous values so fights take 3-5s with basic attacks
-  // instead of dying in one hit. Pairs with slower XP curve for satisfying combat.
-  const base = 340 + player.level * 6;
-  const baseAtk = 22 + player.level * 0.8;
+  // Base HP tuned so autoattack TTK at lv 1 is ~10-12 hits (~5-6s), with
+  // abilities closing the fight faster. Scales modestly with level; gear
+  // is the real damage lever that makes later fights satisfying.
+  const base = 200 + player.level * 5;
+  const baseAtk = 20 + player.level * 0.7;
   enemies.push({
     id:enemyId++,x,y,vx:0,vy:0,
     hp:base*hs*typeData.hp*(isElite?2.4:1),
@@ -2481,8 +2482,8 @@ function spawnDungeonWave(waveIndex){
       const clear=findClearPosition(x,y,22);
       x=clear.x;y=clear.y;
       const hs=enemyHpScale(player.level),ds=enemyDmgScale(player.level);
-      const base = 340 + player.level * 6;
-      const baseAtk = 22 + player.level * 0.8;
+      const base = 200 + player.level * 5;
+      const baseAtk = 20 + player.level * 0.7;
       enemies.push({
         id:enemyId++,x,y,vx:0,vy:0,
         hp:base*hs*typeData.hp*(isElite?2.4:1),
@@ -2502,8 +2503,8 @@ function spawnDungeonBoss(){
   const bd=dungeonState.def.boss;
   const typeData=ENEMY_TYPES.find(t=>t.type===bd.baseType)||ENEMY_TYPES[0];
   const hs=enemyHpScale(player.level),ds=enemyDmgScale(player.level);
-  const base = 340 + player.level * 6;
-  const baseAtk = 22 + player.level * 0.8;
+  const base = 200 + player.level * 5;
+  const baseAtk = 20 + player.level * 0.7;
   // Spawn boss directly in front of player for a heroic entrance
   const angle=player.facing||0;
   let x=player.x+Math.cos(angle)*280;
@@ -2614,8 +2615,8 @@ function resolveBossAbility(boss){
     // Summon skeleton thralls at the boss's position
     const typeData=ENEMY_TYPES.find(t=>t.type==='skeleton')||ENEMY_TYPES[0];
     const hs=enemyHpScale(player.level),ds=enemyDmgScale(player.level);
-    const base = 340 + player.level * 6;
-    const baseAtk = 22 + player.level * 0.8;
+    const base = 200 + player.level * 5;
+    const baseAtk = 20 + player.level * 0.7;
     for(let i=0;i<(ab.count||2);i++){
       const a=(i/ab.count)*Math.PI*2;
       const tx=boss.x+Math.cos(a)*boss.size*1.2;
@@ -3385,11 +3386,12 @@ function hitEnemy(e,dmg,isCrit=false,fromX,fromY){
 function killEnemy(e){
   e.dead=true;kills++;
   document.getElementById('killCount').textContent=`☠ ${kills}`;
-  // Flat XP and gold rewards — enemies are always level-appropriate so no
-  // gap scaling needed. Pairs with the slower XP curve to give earned-feeling
-  // progression.
-  const xpG = e.isElite ? 120 : 30;
-  const goldG = e.isElite ? 50 : 10;
+  // XP and gold rewards — tuned for ~3-4 min to reach level 5 and ~20 hours
+  // total to level 50 at observed kill rate (~48 kills/min). Previous values
+  // (30/120) leveled too fast because kill rate turned out to be faster than
+  // the original 5s/kill estimate.
+  const xpG = e.isElite ? 32 : 8;
+  const goldG = e.isElite ? 40 : 8;
   addXP(xpG);player.gold+=goldG;
   SFX[e.isElite?'eliteDeath':'enemyDeath']();
   spawnDmgText(e.x,e.y-40,`+${xpG}XP`,'#8b5cf6',false);
@@ -3798,15 +3800,10 @@ function update(dt,now){
       const windupMs=e.isElite?900:700; // elites take longer to wind up — bigger hit
       e.chargingUntil=now+windupMs;
       e.attackRange=(e.size+40); // snapshot range at cast time
-      // Spawn telegraph FX that follows the enemy and marks the danger zone
-      pushGroundFX({
-        type:'telegraph',x:e.x,y:e.y,
-        r:e.attackRange,maxR:e.attackRange,
-        color:e.isElite?'#fbbf24':'#ef4444',
-        life:windupMs/1000,maxLife:windupMs/1000,
-        follow:e,
-        pulse:true,
-      });
+      // NOTE: Per-enemy attack telegraph circles are intentionally disabled.
+      // With idle-game mob density, 20+ red circles on screen at once was
+      // visually overwhelming. Only boss telegraphs (separately spawned)
+      // remain visible.
     }
     // Resolve attack at end of windup
     if(e.chargingUntil&&now>=e.chargingUntil){
