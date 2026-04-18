@@ -305,10 +305,10 @@ function drawWraith(e,t){
   const fl=e.hitFlash>0,p=0.88+Math.sin(t/600+e.id)*0.12;
   ctx.save();
   ctx.shadowColor=e.typeData.color; ctx.shadowBlur=fl?28:16;
-  // Outer aura
-  const ag=ctx.createRadialGradient(e.x,e.y,0,e.x,e.y,e.size*2.5);
-  ag.addColorStop(0,'rgba(168,85,247,0.15)');ag.addColorStop(1,'rgba(168,85,247,0)');
-  ctx.fillStyle=ag;ctx.beginPath();ctx.arc(e.x,e.y,e.size*2.5,0,Math.PI*2);ctx.fill();
+  // Outer aura — softened so crowds don't visually stack into overload
+  const ag=ctx.createRadialGradient(e.x,e.y,0,e.x,e.y,e.size*2.2);
+  ag.addColorStop(0,'rgba(168,85,247,0.07)');ag.addColorStop(1,'rgba(168,85,247,0)');
+  ctx.fillStyle=ag;ctx.beginPath();ctx.arc(e.x,e.y,e.size*2.2,0,Math.PI*2);ctx.fill();
   // Robe
   ctx.fillStyle=fl?'#fff':e.typeData.color; ctx.globalAlpha=0.92*p;
   ctx.beginPath();ctx.ellipse(e.x,e.y,e.size*0.72,e.size,0,0,Math.PI*2);ctx.fill();
@@ -358,10 +358,11 @@ function drawCrawler(e,t){
   const fl=e.hitFlash>0,scurry=Math.sin(t/80+e.id)*4;
   ctx.save();
   ctx.shadowColor='#ef4444'; ctx.shadowBlur=fl?22:10;
-  // Body glow
-  const bg=ctx.createRadialGradient(e.x,e.y,0,e.x,e.y,e.size*1.5);
-  bg.addColorStop(0,'rgba(239,68,68,0.2)');bg.addColorStop(1,'rgba(239,68,68,0)');
-  ctx.fillStyle=bg;ctx.beginPath();ctx.arc(e.x,e.y,e.size*1.5,0,Math.PI*2);ctx.fill();
+  // Body glow — soft rather than a bright red ring so many crawlers on screen
+  // don't visually overload the player
+  const bg=ctx.createRadialGradient(e.x,e.y,0,e.x,e.y,e.size*1.3);
+  bg.addColorStop(0,'rgba(239,68,68,0.08)');bg.addColorStop(1,'rgba(239,68,68,0)');
+  ctx.fillStyle=bg;ctx.beginPath();ctx.arc(e.x,e.y,e.size*1.3,0,Math.PI*2);ctx.fill();
   // Legs (8)
   ctx.strokeStyle=fl?'#fff':'#7f1d1d'; ctx.lineWidth=1.8;
   for(let i=0;i<4;i++){
@@ -449,10 +450,10 @@ function drawAbomination(e,t){
   const fl=e.hitFlash>0;
   ctx.save();
   ctx.shadowColor='#34d399'; ctx.shadowBlur=fl?35:22;
-  // Outer toxic aura
-  const ag=ctx.createRadialGradient(e.x,e.y,0,e.x,e.y,e.size*3);
-  ag.addColorStop(0,'rgba(52,211,153,0.1)');ag.addColorStop(1,'rgba(52,211,153,0)');
-  ctx.fillStyle=ag;ctx.beginPath();ctx.arc(e.x,e.y,e.size*3,0,Math.PI*2);ctx.fill();
+  // Outer toxic aura — softened
+  const ag=ctx.createRadialGradient(e.x,e.y,0,e.x,e.y,e.size*2.5);
+  ag.addColorStop(0,'rgba(52,211,153,0.05)');ag.addColorStop(1,'rgba(52,211,153,0)');
+  ctx.fillStyle=ag;ctx.beginPath();ctx.arc(e.x,e.y,e.size*2.5,0,Math.PI*2);ctx.fill();
   // Blob body parts
   for(let i=0;i<7;i++){
     const a=(i/7)*Math.PI*2+t/2200;
