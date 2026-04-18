@@ -7,6 +7,21 @@
 
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
+
+// Guard against negative-radius bugs in createRadialGradient anywhere in the
+// code base. Rather than audit every one of 29 call sites, we override the
+// method to clamp radii to 0 before calling the native impl. This turns a
+// throw into a silent no-render for the bad frame, which is far safer.
+(function(){
+  const origCreateRadialGradient = ctx.createRadialGradient.bind(ctx);
+  ctx.createRadialGradient = function(x0, y0, r0, x1, y1, r1){
+    // Clamp any negative radius to 0 — the native API accepts 0, rejects <0
+    const safeR0 = Math.max(0, r0 || 0);
+    const safeR1 = Math.max(0, r1 || 0);
+    return origCreateRadialGradient(x0, y0, safeR0, x1, y1, safeR1);
+  };
+})();
+
 let W, H;
 function resize(){ W=canvas.width=window.innerWidth; H=canvas.height=window.innerHeight; }
 resize(); window.addEventListener('resize',resize);
