@@ -118,7 +118,8 @@ const CAMP_SPAWN_POINT = { x: 0, y: 260 };
 
 const ZONES=[
   // ── ASHEN WASTES ── dusty cool-gray plains with scattered dead trees and bone piles
-  {id:'ashen',name:'Ashen Wastes',tier:'ZONE I',minLv:1,ambColor:'#8a7e9a',
+  // Enemy levels 1-10 — the starter zone
+  {id:'ashen',name:'Ashen Wastes',tier:'ZONE I',minLv:1,enemyLvMin:1,enemyLvMax:10,ambColor:'#8a7e9a',
    skyA:'#1a1620',skyB:'#0f0c14',skyC:'#07060a',
    groundBase:'#1c1a24',
    patchA:'rgba(90,82,100,0.22)',
@@ -137,7 +138,8 @@ const ZONES=[
    bias:['wraith','skeleton','shade'],ashFx:true},
 
   // ── BONE CRYPTS ── warm amber-lit ruins, tan sandstone, buried bones
-  {id:'crypts',name:'Bone Crypts',tier:'ZONE II',minLv:8,ambColor:'#d4a04a',
+  // Enemy levels 8-22 — overlaps with late Ashen for smooth transition
+  {id:'crypts',name:'Bone Crypts',tier:'ZONE II',minLv:8,enemyLvMin:8,enemyLvMax:22,ambColor:'#d4a04a',
    skyA:'#1a0e06',skyB:'#0d0703',skyC:'#050301',
    groundBase:'#241a0c',
    patchA:'rgba(180,130,60,0.22)',
@@ -156,7 +158,8 @@ const ZONES=[
    bias:['skeleton','golem','abomination'],boneDust:true},
 
   // ── ABYSSAL MIRE ── lush green swamp, mossy rocks, actual live trees, water ponds
-  {id:'mire',name:'Abyssal Mire',tier:'ZONE III',minLv:18,ambColor:'#4ec96e',
+  // Enemy levels 20-38 — middle grind
+  {id:'mire',name:'Abyssal Mire',tier:'ZONE III',minLv:18,enemyLvMin:20,enemyLvMax:38,ambColor:'#4ec96e',
    skyA:'#081a0a',skyB:'#040c05',skyC:'#020602',
    groundBase:'#0a1e0c',
    patchA:'rgba(60,120,70,0.26)',
@@ -175,7 +178,8 @@ const ZONES=[
    bias:['crawler','abomination','specter'],toxicFx:true},
 
   // ── VEIL'S SPIRE ── volcanic red wasteland, black obsidian, lava cracks
-  {id:'spire',name:"Veil's Spire",tier:'ZONE IV',minLv:30,ambColor:'#ff6b2c',
+  // Enemy levels 35-60 — endgame zone
+  {id:'spire',name:"Veil's Spire",tier:'ZONE IV',minLv:30,enemyLvMin:35,enemyLvMax:60,ambColor:'#ff6b2c',
    skyA:'#200602',skyB:'#100301',skyC:'#080100',
    groundBase:'#1a0805',
    patchA:'rgba(180,50,20,0.26)',
@@ -214,9 +218,89 @@ function computeAttack(lv){
   }
   return base;
 }
-function xpForLevel(lv){return Math.floor(100*Math.pow(lv,1.65));}
+// XP curve — classic-WoW-style slow progression. Shape:
+//   Levels 1-10: fast hook (<30 min)
+//   Levels 10-30: moderate grind (~5 hours)
+//   Levels 30-50: commitment (~15 hours) — the classic WoW "wall"
+//   Levels 50-100: long haul (~100 hours)
+// Total time to level 50 at ~5s per kill: ~20 hours.
+// Total time to level 100: ~125 hours.
+// Shape: xp_for_level(lv) = 60 * lv^1.6
+function xpForLevel(lv){return Math.floor(60*Math.pow(lv,1.6));}
 function enemyHpScale(lv){return lv<=5?0.72:lv<=10?0.88:lv<=20?1.05:1.4;}
 function enemyDmgScale(lv){return lv<=5?0.65:lv<=10?0.82:lv<=20?0.98:1.25;}
+
+// ═══════ LEVEL-DIFFERENCE FORMULAS (Classic WoW-style) ═══════════════
+// Each of these takes attacker level + defender level and returns a
+// multiplier that represents how the level gap affects the interaction.
+
+// Roll an enemy level for a zone. Uses weighted random biased toward the
+// middle of the band — edge levels are less common. Returns integer 1+.
+function rollEnemyLevel(zone){
+  const lo = zone?.enemyLvMin || 1;
+  const hi = zone?.enemyLvMax || lo + 5;
+  // Weighted random: average of two uniforms gives a triangle distribution
+  // centered on the middle of the range. Gives more "typical" enemies.
+  const r = (Math.random() + Math.random()) / 2;
+  return Math.max(1, Math.round(lo + r * (hi - lo)));
+}
+
+// Multiplier applied when PLAYER hits ENEMY.
+//   player same level as enemy: 1.0x (full damage)
+//   enemy higher: damage reduced (harder fight)
+//   player higher: slight bonus (easier fight, but not massive — WoW style)
+function playerVsEnemyDmgMult(playerLv, enemyLv){
+  const diff = playerLv - enemyLv; // +diff = player is higher
+  if(diff >= 10) return 1.35;
+  if(diff >= 5)  return 1.20;
+  if(diff >= 2)  return 1.08;
+  if(diff >= -2) return 1.00;   // 2 above or below — normal
+  if(diff >= -4) return 0.75;   // enemy 3-4 above — tough
+  if(diff >= -6) return 0.50;   // enemy 5-6 above — hard
+  if(diff >= -9) return 0.25;   // enemy 7-9 above — very hard
+  return 0.10;                  // enemy 10+ above — you can barely scratch them
+}
+
+// Multiplier applied when ENEMY hits PLAYER.
+//   Symmetric idea: higher-level enemies hit much harder.
+function enemyVsPlayerDmgMult(enemyLv, playerLv){
+  const diff = enemyLv - playerLv; // +diff = enemy is higher
+  if(diff >= 10) return 2.50;
+  if(diff >= 5)  return 1.70;
+  if(diff >= 3)  return 1.30;
+  if(diff >= -2) return 1.00;
+  if(diff >= -4) return 0.70;
+  if(diff >= -6) return 0.40;
+  return 0.20;                  // trivial enemies barely scratch you
+}
+
+// XP reward multiplier based on level gap when PLAYER kills ENEMY.
+//   Grey mobs (far below) give almost nothing — forces player to move on.
+//   Orange mobs (above) give bonus — reward risk.
+function xpRewardMult(playerLv, enemyLv){
+  const diff = playerLv - enemyLv; // +diff = you outlevel enemy
+  if(diff >= 8)  return 0.10;   // grey — not worth farming
+  if(diff >= 5)  return 0.40;   // green
+  if(diff >= 3)  return 0.70;   // yellow-down
+  if(diff >= -1) return 1.00;   // same/nearby level
+  if(diff >= -3) return 1.15;   // slightly above — small bonus
+  if(diff >= -5) return 1.30;   // orange — solid bonus
+  return 1.50;                  // red — risky but rewarding
+}
+
+// Get the difficulty color for an enemy's level label, relative to the
+// player. Used for visual feedback in the HUD and enemy name plates.
+function enemyDifficultyColor(playerLv, enemyLv){
+  const diff = playerLv - enemyLv;
+  if(diff >= 8)  return '#808080'; // grey — trivial
+  if(diff >= 5)  return '#5dd876'; // green — easy
+  if(diff >= 3)  return '#e6e6e6'; // near-white — slightly easy
+  if(diff >= -1) return '#ffffff'; // white — equal
+  if(diff >= -3) return '#ffcc00'; // yellow — tough
+  if(diff >= -5) return '#ff8c00'; // orange — hard
+  return '#ff4040';                // red — deadly
+}
+
 function dist2(x1,y1,x2,y2){return Math.sqrt((x2-x1)**2+(y2-y1)**2);}
 
 // ═══════ ENEMY TYPES ═════════════════════════════════════
