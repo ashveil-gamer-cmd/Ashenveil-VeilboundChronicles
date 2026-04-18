@@ -1176,6 +1176,8 @@ canvas#c{display:block;position:fixed;top:0;left:0}
 }
 
 /* ─── MOBILE PORTRAIT LOCK — request landscape ─── */
+/* Visibility controlled entirely by JS (see game.js orientation watcher) so it
+   actually responds to device rotation on mobile. CSS only provides styling. */
 #rotateNotice{
   display:none;
   position:fixed;inset:0;z-index:9000;
@@ -1184,6 +1186,7 @@ canvas#c{display:block;position:fixed;top:0;left:0}
   padding:24px;text-align:center;
   font-family:'Cinzel',serif;
 }
+#rotateNotice.active{display:flex}
 .rotate-icon{
   font-size:64px;margin-bottom:20px;
   color:#c084fc;
@@ -1200,6 +1203,121 @@ canvas#c{display:block;position:fixed;top:0;left:0}
   font-size:12px;letter-spacing:2px;color:#b8a8d0;line-height:1.6;
   max-width:280px;
 }
-@media (max-width:900px) and (orientation:portrait){
-  #rotateNotice{display:flex}
+
+/* ─── CHARACTER SELECT SCREEN ─── */
+#characterSelectScreen{
+  position:fixed;inset:0;z-index:500;
+  display:none;flex-direction:column;align-items:center;
+  padding:clamp(16px,3vw,40px);
+  background:radial-gradient(ellipse at center,#1a0d2e 0%,#06001a 70%,#000 100%);
+  overflow-y:auto;
+}
+.char-select-header{
+  text-align:center;
+  margin-bottom:clamp(16px,2vw,28px);
+  flex-shrink:0;
+}
+.char-select-title{
+  font-size:clamp(20px,3.5vw,34px);letter-spacing:5px;
+  color:#e8dfc8;text-shadow:0 0 22px rgba(192,132,252,0.3);margin-top:6px;
+}
+.char-select-count{
+  font-family:'Cinzel',serif;font-size:clamp(9px,1vw,11px);
+  letter-spacing:2.5px;color:#b8a8d0;margin-top:10px;text-transform:uppercase;
+}
+#characterSelectGrid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+  gap:clamp(12px,1.8vw,20px);
+  max-width:900px;width:100%;
+  margin-bottom:clamp(16px,2vw,24px);
+  padding-bottom:20px;
+}
+.char-card{
+  display:flex;flex-direction:column;align-items:center;gap:8px;
+  padding:clamp(16px,2vw,22px) clamp(14px,1.8vw,20px);
+  background:linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.01));
+  border:2px solid;border-radius:10px;
+  transition:all 0.18s ease;
+}
+.char-card:hover{
+  transform:translateY(-2px);
+  box-shadow:0 8px 28px rgba(0,0,0,0.55);
+}
+.char-card-icon{
+  font-size:clamp(38px,5vw,54px);line-height:1;font-weight:700;
+}
+.char-card-name{
+  font-family:'Cinzel',serif;
+  font-size:clamp(14px,1.5vw,17px);
+  letter-spacing:2.5px;color:#e8dfc8;font-weight:700;
+  text-align:center;
+}
+.char-card-class{
+  font-family:'Cinzel',serif;
+  font-size:clamp(9px,1vw,11px);
+  letter-spacing:2.5px;text-transform:uppercase;
+}
+.char-card-stats{
+  display:grid;grid-template-columns:repeat(3,1fr);gap:6px;
+  width:100%;
+  margin-top:6px;padding:8px 6px;
+  background:rgba(0,0,0,0.3);border-radius:5px;
+  border:1px solid rgba(255,255,255,0.05);
+}
+.char-stat{
+  display:flex;flex-direction:column;align-items:center;gap:2px;
+  font-size:clamp(9px,1vw,11px);
+}
+.char-stat-label{
+  font-family:'Cinzel',serif;color:#8a7aa8;letter-spacing:1.5px;font-size:clamp(7px,0.8vw,9px);
+}
+.char-stat-val{
+  font-family:'Cinzel',serif;color:#e8dfc8;font-weight:700;
+  font-size:clamp(11px,1.2vw,14px);
+}
+.char-card-lastplayed{
+  font-family:'Cinzel',serif;font-size:clamp(8px,0.9vw,10px);
+  letter-spacing:1.5px;color:#6b4d8a;font-style:italic;
+  margin-top:2px;
+}
+.char-card-actions{
+  display:flex;gap:6px;width:100%;margin-top:8px;
+}
+.char-action-play, .char-action-delete, .char-action-create{
+  flex:1;
+  font-family:'Cinzel',serif;
+  font-size:clamp(9px,1vw,11px);
+  letter-spacing:2px;font-weight:700;
+  padding:clamp(8px,1.1vw,11px) clamp(10px,1.3vw,14px);
+  background:transparent;border:1.5px solid;border-radius:4px;cursor:pointer;
+  transition:all 0.15s;
+}
+.char-action-play:hover{
+  background:rgba(255,255,255,0.05);
+  box-shadow:0 0 14px currentColor;
+}
+.char-action-delete{
+  color:#ef4444;border-color:rgba(239,68,68,0.35);
+}
+.char-action-delete:hover{
+  background:rgba(239,68,68,0.08);border-color:#ef4444;color:#ef4444;
+}
+.char-action-create{
+  color:#c084fc;border-color:rgba(192,132,252,0.5);
+  width:100%;
+}
+.char-action-create:hover{
+  background:rgba(192,132,252,0.12);border-color:#c084fc;
+  box-shadow:0 0 14px rgba(192,132,252,0.3);
+}
+.char-card-empty{
+  border-color:rgba(192,132,252,0.3);
+  border-style:dashed;
+  opacity:0.85;
+}
+.char-card-empty:hover{opacity:1}
+.char-card-plus{
+  color:#c084fc;font-size:clamp(42px,5.5vw,60px);
+  text-shadow:0 0 14px rgba(192,132,252,0.5);
 }
