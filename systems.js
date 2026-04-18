@@ -485,7 +485,7 @@ function renderGearPanel(){
       const craftedBadge=item.crafted?`<span class="gear-crafted-badge">⚒ CRAFTED</span>`:'';
       div.innerHTML=`
         <div class="gear-slot-header">
-          <span class="gear-slot-icon" style="color:${rarityCol}">${slotIcon}</span>
+          <canvas class="gear-slot-icon-canvas" data-slot="${slot}" data-rarity="${item.rarity}" width="52" height="52"></canvas>
           <span class="gear-slot-name">${slot}</span>
           <span class="gear-rarity-tag" style="color:${rarityCol};border-color:${rarityCol}66;background:${rarityCol}22">${rarityLabel}</span>
         </div>
@@ -493,6 +493,11 @@ function renderGearPanel(){
         <div class="gear-stats-block">${statsHtml}</div>
         ${setLine}
       `;
+      // Render the gear icon into the canvas
+      const iconCanvas = div.querySelector('.gear-slot-icon-canvas');
+      if(iconCanvas && typeof drawGearIcon === 'function'){
+        drawGearIcon(iconCanvas, slot, item.rarity);
+      }
       // Click-to-select to reveal actions
       if(_gearSelectedSlot===slot){
         div.classList.add('selected');
@@ -1098,16 +1103,20 @@ function renderInventory(){
     const item=inventory[i];
     if(item){
       const col=RARITY_COLORS[item.rarity]||'#9ca3af';
-      const icon=SLOT_ICONS[item.slot]||'✦';
       const classification=classifyBagItem(item);
       const mark=UPGRADE_MARKS[classification];
       slot.classList.add('filled');
       slot.style.borderColor=col;
       slot.innerHTML=`
         <span class="bag-slot-mark" style="color:${mark.color};text-shadow:0 0 8px ${mark.color}88" title="${mark.title}">${mark.symbol}</span>
-        <span class="bag-slot-icon" style="color:${col};text-shadow:0 0 8px ${col}66">${icon}</span>
+        <canvas class="bag-slot-icon-canvas" width="52" height="52"></canvas>
         <span class="bag-slot-rarity" style="background:${col}22;color:${col}">${RARITY_LABELS[item.rarity]||'?'}</span>
       `;
+      // Render the hand-crafted gear icon into the canvas
+      const iconCanvas = slot.querySelector('.bag-slot-icon-canvas');
+      if(iconCanvas && typeof drawGearIcon === 'function'){
+        drawGearIcon(iconCanvas, item.slot, item.rarity);
+      }
       if(i===_bagSelectedIndex)slot.classList.add('selected');
       slot.addEventListener('click',()=>{
         _bagSelectedIndex=(_bagSelectedIndex===i)?null:i;
@@ -1589,7 +1598,7 @@ function renderShop(){
         card.style.borderColor = col + 'aa';
         card.innerHTML = `
           <div class="shop-gear-top">
-            <span class="shop-gear-icon" style="color:${col};text-shadow:0 0 8px ${col}66">${icon}</span>
+            <canvas class="shop-gear-icon-canvas" width="52" height="52"></canvas>
             <span class="shop-gear-rarity" style="background:${col}22;color:${col}">${label}</span>
           </div>
           <div class="shop-gear-name" style="color:${col}">${item.name}</div>
@@ -1597,6 +1606,11 @@ function renderShop(){
           <div class="shop-gear-stats">${statsSummary}</div>
           <button class="shop-buy-btn" ${canAfford?'':'disabled'}>${item.shopPrice} G</button>
         `;
+        // Render the detailed gear icon into the card's canvas
+        const iconCanvas = card.querySelector('.shop-gear-icon-canvas');
+        if(iconCanvas && typeof drawGearIcon === 'function'){
+          drawGearIcon(iconCanvas, item.slot, item.rarity);
+        }
         const btn = card.querySelector('.shop-buy-btn');
         if (canAfford) btn.addEventListener('click', () => buyGearFromShop(idx));
         gearGrid.appendChild(card);
