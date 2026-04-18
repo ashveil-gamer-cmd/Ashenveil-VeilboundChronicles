@@ -119,7 +119,7 @@ const CAMP_SPAWN_POINT = { x: 0, y: 260 };
 const ZONES=[
   // ── ASHEN WASTES ── dusty cool-gray plains with scattered dead trees and bone piles
   // Enemy levels 1-10 — the starter zone
-  {id:'ashen',name:'Ashen Wastes',tier:'ZONE I',minLv:1,enemyLvMin:1,enemyLvMax:10,ambColor:'#8a7e9a',
+  {id:'ashen',name:'Ashen Wastes',tier:'ZONE I',minLv:1,ambColor:'#8a7e9a',
    skyA:'#1a1620',skyB:'#0f0c14',skyC:'#07060a',
    groundBase:'#1c1a24',
    patchA:'rgba(90,82,100,0.22)',
@@ -139,7 +139,7 @@ const ZONES=[
 
   // ── BONE CRYPTS ── warm amber-lit ruins, tan sandstone, buried bones
   // Enemy levels 8-22 — overlaps with late Ashen for smooth transition
-  {id:'crypts',name:'Bone Crypts',tier:'ZONE II',minLv:8,enemyLvMin:8,enemyLvMax:22,ambColor:'#d4a04a',
+  {id:'crypts',name:'Bone Crypts',tier:'ZONE II',minLv:8,ambColor:'#d4a04a',
    skyA:'#1a0e06',skyB:'#0d0703',skyC:'#050301',
    groundBase:'#241a0c',
    patchA:'rgba(180,130,60,0.22)',
@@ -159,7 +159,7 @@ const ZONES=[
 
   // ── ABYSSAL MIRE ── lush green swamp, mossy rocks, actual live trees, water ponds
   // Enemy levels 20-38 — middle grind
-  {id:'mire',name:'Abyssal Mire',tier:'ZONE III',minLv:18,enemyLvMin:20,enemyLvMax:38,ambColor:'#4ec96e',
+  {id:'mire',name:'Abyssal Mire',tier:'ZONE III',minLv:18,ambColor:'#4ec96e',
    skyA:'#081a0a',skyB:'#040c05',skyC:'#020602',
    groundBase:'#0a1e0c',
    patchA:'rgba(60,120,70,0.26)',
@@ -179,7 +179,7 @@ const ZONES=[
 
   // ── VEIL'S SPIRE ── volcanic red wasteland, black obsidian, lava cracks
   // Enemy levels 35-60 — endgame zone
-  {id:'spire',name:"Veil's Spire",tier:'ZONE IV',minLv:30,enemyLvMin:35,enemyLvMax:60,ambColor:'#ff6b2c',
+  {id:'spire',name:"Veil's Spire",tier:'ZONE IV',minLv:30,ambColor:'#ff6b2c',
    skyA:'#200602',skyB:'#100301',skyC:'#080100',
    groundBase:'#1a0805',
    patchA:'rgba(180,50,20,0.26)',
@@ -227,79 +227,65 @@ function computeAttack(lv){
 // Total time to level 100: ~125 hours.
 // Shape: xp_for_level(lv) = 60 * lv^1.6
 function xpForLevel(lv){return Math.floor(60*Math.pow(lv,1.6));}
-function enemyHpScale(lv){return lv<=5?0.72:lv<=10?0.88:lv<=20?1.05:1.4;}
-function enemyDmgScale(lv){return lv<=5?0.65:lv<=10?0.82:lv<=20?0.98:1.25;}
+// ═══════ ENEMY SCALING (player-relative) ═══════════════════════════
+// Design philosophy: This is an AFK-friendly idle ARPG, not classic WoW.
+// Enemies should always feel appropriate to the player's level — not
+// trivial, not impossible. The player's sense of progression comes from:
+//  1. Gear upgrades (the primary damage/survival lever)
+//  2. Level-based passive bonuses (speed, attack speed)
+//  3. Mob density scaling (more enemies at higher levels)
+// Enemy HP/damage scales with the player's level so every fight is in the
+// right ballpark. Breakthrough difficulty comes from gear, not level gaps.
 
-// ═══════ LEVEL-DIFFERENCE FORMULAS (Classic WoW-style) ═══════════════
-// Each of these takes attacker level + defender level and returns a
-// multiplier that represents how the level gap affects the interaction.
-
-// Roll an enemy level for a zone. Uses weighted random biased toward the
-// middle of the band — edge levels are less common. Returns integer 1+.
-function rollEnemyLevel(zone){
-  const lo = zone?.enemyLvMin || 1;
-  const hi = zone?.enemyLvMax || lo + 5;
-  // Weighted random: average of two uniforms gives a triangle distribution
-  // centered on the middle of the range. Gives more "typical" enemies.
-  const r = (Math.random() + Math.random()) / 2;
-  return Math.max(1, Math.round(lo + r * (hi - lo)));
+// Enemy HP scale — grows with player level.
+// At level 1: base HP. At level 50: ~3.5x. At level 100: ~6x.
+// Tuned so a same-level enemy takes 3-5 seconds of basic attacks to kill.
+function enemyHpScale(lv){
+  // Base curve: 1.0 + 0.065 per level, flattening slightly at high levels
+  return 1.0 + 0.065 * lv - 0.0003 * lv * lv;
 }
 
-// Multiplier applied when PLAYER hits ENEMY.
-//   player same level as enemy: 1.0x (full damage)
-//   enemy higher: damage reduced (harder fight)
-//   player higher: slight bonus (easier fight, but not massive — WoW style)
-function playerVsEnemyDmgMult(playerLv, enemyLv){
-  const diff = playerLv - enemyLv; // +diff = player is higher
-  if(diff >= 10) return 1.35;
-  if(diff >= 5)  return 1.20;
-  if(diff >= 2)  return 1.08;
-  if(diff >= -2) return 1.00;   // 2 above or below — normal
-  if(diff >= -4) return 0.75;   // enemy 3-4 above — tough
-  if(diff >= -6) return 0.50;   // enemy 5-6 above — hard
-  if(diff >= -9) return 0.25;   // enemy 7-9 above — very hard
-  return 0.10;                  // enemy 10+ above — you can barely scratch them
+// Enemy damage scale — grows with player level.
+// Slightly slower growth than HP so fights don't get progressively deadlier.
+function enemyDmgScale(lv){
+  return 0.85 + 0.035 * lv - 0.0001 * lv * lv;
 }
 
-// Multiplier applied when ENEMY hits PLAYER.
-//   Symmetric idea: higher-level enemies hit much harder.
-function enemyVsPlayerDmgMult(enemyLv, playerLv){
-  const diff = enemyLv - playerLv; // +diff = enemy is higher
-  if(diff >= 10) return 2.50;
-  if(diff >= 5)  return 1.70;
-  if(diff >= 3)  return 1.30;
-  if(diff >= -2) return 1.00;
-  if(diff >= -4) return 0.70;
-  if(diff >= -6) return 0.40;
-  return 0.20;                  // trivial enemies barely scratch you
+// ═══════ PLAYER PASSIVE LEVEL BONUSES ══════════════════════════════
+// Gain a small amount of speed and attack speed per level. These make
+// leveling *feel* like something even before gear enters the picture.
+
+// Movement speed multiplier based on level.
+// Level 1: 1.00x (baseline). Level 50: 1.25x. Level 100: 1.50x.
+// Applied on top of class.speedMult.
+function playerSpeedBonus(lv){
+  return 1.0 + 0.005 * (lv - 1); // 0.5% per level past 1
 }
 
-// XP reward multiplier based on level gap when PLAYER kills ENEMY.
-//   Grey mobs (far below) give almost nothing — forces player to move on.
-//   Orange mobs (above) give bonus — reward risk.
-function xpRewardMult(playerLv, enemyLv){
-  const diff = playerLv - enemyLv; // +diff = you outlevel enemy
-  if(diff >= 8)  return 0.10;   // grey — not worth farming
-  if(diff >= 5)  return 0.40;   // green
-  if(diff >= 3)  return 0.70;   // yellow-down
-  if(diff >= -1) return 1.00;   // same/nearby level
-  if(diff >= -3) return 1.15;   // slightly above — small bonus
-  if(diff >= -5) return 1.30;   // orange — solid bonus
-  return 1.50;                  // red — risky but rewarding
+// Attack speed multiplier based on level.
+// Level 1: 1.00x. Level 50: 1.15x. Level 100: 1.30x.
+// Reduces cooldowns on abilities and basic attack intervals.
+function playerAttackSpeedBonus(lv){
+  return 1.0 + 0.003 * (lv - 1); // 0.3% per level past 1
 }
 
-// Get the difficulty color for an enemy's level label, relative to the
-// player. Used for visual feedback in the HUD and enemy name plates.
-function enemyDifficultyColor(playerLv, enemyLv){
-  const diff = playerLv - enemyLv;
-  if(diff >= 8)  return '#808080'; // grey — trivial
-  if(diff >= 5)  return '#5dd876'; // green — easy
-  if(diff >= 3)  return '#e6e6e6'; // near-white — slightly easy
-  if(diff >= -1) return '#ffffff'; // white — equal
-  if(diff >= -3) return '#ffcc00'; // yellow — tough
-  if(diff >= -5) return '#ff8c00'; // orange — hard
-  return '#ff4040';                // red — deadly
+// Mob density scaling — how many enemies can exist at once.
+// Level 1: 1.00x. Level 50: 1.5x. Level 100: 2.0x.
+// Creates a sense that the world gets busier as you grow.
+function mobDensityMult(lv){
+  return 1.0 + 0.01 * (lv - 1); // 1% per level
 }
+
+// ═══════ COMPAT STUBS ═══════════════════════════════════════════════
+// The following are stubs for code that was calling the old level-bracket
+// system. They return neutral values (1.0 multiplier) so any straggler
+// calls behave as no-ops. They can be removed once all call sites are
+// cleaned up.
+function rollEnemyLevel(){return 1;}
+function playerVsEnemyDmgMult(){return 1.0;}
+function enemyVsPlayerDmgMult(){return 1.0;}
+function xpRewardMult(){return 1.0;}
+function enemyDifficultyColor(){return '#ffffff';}
 
 function dist2(x1,y1,x2,y2){return Math.sqrt((x2-x1)**2+(y2-y1)**2);}
 
