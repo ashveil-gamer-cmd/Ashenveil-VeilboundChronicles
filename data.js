@@ -32,6 +32,90 @@ const LANDMARKS={
 
 
 // ═══════ ZONE DEFINITIONS ═══════════════════════════════
+// ── THE PROCESSION ── the moving camp / hub zone
+// Not a combat zone. isCamp=true flag tells game loop to skip enemy spawning,
+// portal generation, and ambient combat music. NPCs render instead.
+const CAMP_ZONE = {
+  id:'procession', name:'The Procession', tier:'CAMP', minLv:0,
+  isCamp: true,
+  ambColor:'#d4a555',
+  skyA:'#1c1208', skyB:'#0d0804', skyC:'#050301',
+  groundBase:'#1a140a',
+  patchA:'rgba(180,140,80,0.20)',
+  patchB:'rgba(60,42,20,0.28)',
+  patchC:'rgba(240,200,140,0.10)',
+  pathColor:'rgba(200,170,110,0.28)',
+  canopyTint:'#5a4220', canopyDark:'#2a1e10', trunkColor:'#2a1f10',
+  grassColor:'#5a4a30', grassDark:'#2e2418', mossColor:'#4a3820',
+  mushroomCap:'#6a4a28',
+  tileA:'rgba(220,180,100,0.025)', tileB:'rgba(180,140,70,0.014)',
+  gridC:'rgba(200,160,80,0.028)', fogC:'rgba(160,120,60,', lightC:'rgba(255,215,140,',
+  hasPillars:false, edgeC:'rgba(30,22,8,0.50)',
+  // Minimal props — the procession grounds are deliberately sparse (just
+  // a few rocks, scrub, and burned stumps). NPCs and campfire are what fill the space.
+  props:['boulder','rockCluster','grassTuft','deadTree','ashStone'],
+  counts:[8, 6, 24, 4, 6],
+  bias:[], // no enemy bias — no enemies spawn here
+};
+
+// ── NPC DEFINITIONS ──
+// Each NPC is positioned relative to the world center. They render as
+// upright figures with a small label above when the player is near.
+// onInteract is the function called when player presses E in range.
+const CAMP_NPCS = [
+  {
+    id:'marken', name:'Marken, the Pathfinder', role:'pathfinder',
+    x:0, y:-340,   // placed at the TOP-center of the world (north of campfire)
+    color:'#d4a555',
+    accent:'#f4c977',
+    description:'Knows the paths between broken places.',
+    flavor:'"Where do you need to be?"',
+    onInteract:'openZoneTravel',
+  },
+  {
+    id:'old_bren', name:'Old Bren, the Toothsmith', role:'weaponsmith',
+    x:-280, y:-120,
+    color:'#c86a32',
+    accent:'#e89458',
+    description:'Forges weapons from what the earth gives back.',
+    flavor:'"Show me what you\'ve brought me, and I\'ll show you what it wants to be."',
+    onInteract:'openWeaponsmith',
+  },
+  {
+    id:'seris', name:'Seris, the Threadbare', role:'armorer',
+    x:280, y:-120,
+    color:'#e8d4a0',
+    accent:'#fff2cc',
+    description:'Weaves bone, cloth, and sorrow into armor.',
+    flavor:'"Hands to me, child. Let me feel what you need."',
+    onInteract:'openArmorer',
+  },
+  {
+    id:'voryn', name:'Voryn, the Ashkeeper', role:'merchant',
+    x:-280, y:160,
+    color:'#a89dc4',
+    accent:'#d4c4f0',
+    description:'Keeps a cart of what the world discarded.',
+    flavor:'"Something you\'ve outgrown? Something you\'d rather have?"',
+    onInteract:'openMerchant',
+  },
+  {
+    id:'sublime', name:'The Sublime', role:'ritualist',
+    x:280, y:160,
+    color:'#9DC4B0',
+    accent:'#b8e0c8',
+    description:'No one remembers their arrival. No one has heard them speak.',
+    flavor:'"..." (they nod.)',
+    onInteract:'openRitualist',
+  },
+];
+
+// Special world position: where the central campfire sits
+const CAMP_CAMPFIRE = { x: 0, y: 40 };
+
+// Spawn position when player arrives at the camp (south of campfire, facing north)
+const CAMP_SPAWN_POINT = { x: 0, y: 260 };
+
 const ZONES=[
   // ── ASHEN WASTES ── dusty cool-gray plains with scattered dead trees and bone piles
   {id:'ashen',name:'Ashen Wastes',tier:'ZONE I',minLv:1,ambColor:'#8a7e9a',
