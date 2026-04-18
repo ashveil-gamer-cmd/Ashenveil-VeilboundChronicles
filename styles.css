@@ -1703,3 +1703,42 @@ canvas#c{display:block;position:fixed;top:0;left:0}
     min-height:40px;
   }
 }
+
+/* ─── PORTRAIT: shrink elite/boss HP bar, lift feed log with backdrop ─── */
+@media (max-width: 500px) and (orientation: portrait){
+  /* Elite/boss HP bar — shrunk and moved above the feed log so it no longer
+     covers the feed text at the bottom-left of the screen. */
+  #bossBar{
+    bottom:170px;
+  }
+  .boss-bar-bg{
+    width:200px;height:7px;
+  }
+  .boss-name{
+    font-size:9px !important;
+    letter-spacing:1.5px;
+  }
+
+  /* Feed log — add a subtle dark backdrop for readability when elements
+     briefly overlap it, and lift it slightly so elite HP bars don't land on it. */
+  #feedLog{
+    bottom:100px;
+    padding:6px 8px;
+    background:linear-gradient(90deg,rgba(5,0,15,0.75),rgba(5,0,15,0.35) 80%,transparent);
+    border-radius:6px;
+    max-width:calc(100vw - 80px);
+  }
+}
+
+/* ─── LANDSCAPE: same elite bar adjustment so it doesn't cover ability bar ─── */
+@media (max-height: 500px) and (orientation: landscape){
+  #bossBar{
+    bottom:92px;
+  }
+  .boss-bar-bg{
+    width:220px;height:7px;
+  }
+  .boss-name{
+    font-size:9px !important;
+  }
+}
