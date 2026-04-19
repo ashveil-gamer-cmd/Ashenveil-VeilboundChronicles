@@ -7185,11 +7185,13 @@ function buildSave(){
       soulMastery:player.soulMastery,maxBonds:player.maxBonds,
       classId:player.classId||'hollowcaller',
       wrath:player.wrath||0,
+      _testSetsGranted: !!player._testSetsGranted,
     },
     stats:{kills},
     zoneId:curZone?.id||1,
     equipped:JSON.parse(JSON.stringify(equipped)),
     inventory:typeof inventory!=='undefined'?JSON.parse(JSON.stringify(inventory)):[],
+    setStash:typeof setStash!=='undefined'?JSON.parse(JSON.stringify(setStash)):[],
     shopState:typeof shopState!=='undefined'?JSON.parse(JSON.stringify(shopState)):null,
     professions:JSON.parse(JSON.stringify(professions)),
     talents:typeof talentState!=='undefined'?JSON.parse(JSON.stringify(talentState)):null,
@@ -7400,6 +7402,18 @@ function applySave(data){
       data.inventory.forEach(item=>inventory.push(item));
     }
     if(typeof updateInventoryBadge==='function')updateInventoryBadge();
+  }
+  // Set Stash — separate inventory tab for set pieces
+  if(typeof setStash!=='undefined'){
+    setStash.length = 0;
+    if(Array.isArray(data.setStash)){
+      data.setStash.forEach(item=>setStash.push(item));
+    }
+  }
+  // Testing flag: if a saved character has _testSetsGranted, preserve it.
+  // Otherwise, it's a new character or a character from before this system.
+  if(data.player && data.player._testSetsGranted !== undefined){
+    player._testSetsGranted = data.player._testSetsGranted;
   }
   // Shop state — restore rotation, buyback, last refresh time
   if(typeof shopState!=='undefined'&&data.shopState){
@@ -7652,6 +7666,12 @@ function startGame(continueFromSave=false){
       if(typeof updateInventoryBadge === 'function') updateInventoryBadge();
       if(typeof writeSave === 'function') writeSave();
     }
+  }
+  // TEST MODE: grant all 6 preset sets to the setStash so any build can be
+  // tested immediately. Runs ONCE per character (gated by _testSetsGranted flag).
+  // Remove this call before public launch so players have to earn their sets.
+  if(typeof grantAllPresetSetsForTesting === 'function'){
+    grantAllPresetSetsForTesting();
   }
   lastSaveTime=performance.now(); // prevent immediate auto-save on load
 }
