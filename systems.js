@@ -1377,6 +1377,7 @@ function renderTalentPanel(){
 
 function openTalents(){
   renderTalentPanel();
+  if(typeof renderPresetSelector === 'function') renderPresetSelector();
   document.getElementById('talentPanel').style.display='flex';
 }
 function closeTalents(){
@@ -1437,15 +1438,45 @@ let _bagSelectedIndex=null; // index of currently-expanded item, or null
 
 function openInventory(){
   _bagSelectedIndex=null;
+  _stashSelectedIndex=null;
   const panel=document.getElementById('inventoryPanel');
   if(!panel)return;
   panel.style.display='flex';
+  // Default to main bag tab every time panel opens
+  switchBagTab('main');
   renderInventory();
+  if(typeof renderSetStash === 'function') renderSetStash();
 }
 function closeInventory(){
   const panel=document.getElementById('inventoryPanel');
   if(panel)panel.style.display='none';
   _bagSelectedIndex=null;
+  _stashSelectedIndex=null;
+}
+
+// Switches between the main bag grid and the set stash grid.
+// Called by the tab buttons in index.html. Each tab is just show/hide with
+// the other hidden; both render functions keep their own state (selection,
+// grouping) so switching back restores what was there.
+function switchBagTab(which){
+  const mainTab  = document.getElementById('bagTabMain');
+  const stashTab = document.getElementById('bagTabStash');
+  const mainLayout  = document.getElementById('bagLayout');
+  const stashLayout = document.getElementById('setStashLayout');
+  if(!mainTab || !stashTab || !mainLayout || !stashLayout) return;
+  if(which === 'stash'){
+    mainTab.classList.remove('active');
+    stashTab.classList.add('active');
+    mainLayout.style.display = 'none';
+    stashLayout.style.display = '';
+    if(typeof renderSetStash === 'function') renderSetStash();
+  } else {
+    mainTab.classList.add('active');
+    stashTab.classList.remove('active');
+    mainLayout.style.display = '';
+    stashLayout.style.display = 'none';
+    if(typeof renderInventory === 'function') renderInventory();
+  }
 }
 
 function renderInventory(){
@@ -2123,4 +2154,504 @@ function renderShop(){
       if (canAfford) btn.addEventListener('click', () => buyBuyback());
     }
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// BUILD PRESET SYSTEM
+// ═══════════════════════════════════════════════════════════════════════
+// 6 pre-designed builds (3 per class) that give distinct playstyles through
+// talent distribution + matching set gear. Each preset has:
+//   - id, name, classId, description
+//   - talentPoints: {talentId: rank} — how talents should be distributed
+//   - setName: which set this preset uses
+//   - autoApply(): function that respec talents + equips best set gear
+//
+// In testing mode, new characters receive all 6 sets in their setStash so
+// they can test any build instantly.
+
+// ─── Set stash storage ───
+// Separate inventory for set pieces. Doesn't clutter main bag.
+// Persisted through save/load.
+let setStash = []; // array of full item objects, same shape as inventory items
+
+// ═══════ PRESET DEFINITIONS ═══════════════════════════════════════
+const BUILD_PRESETS = {
+  necrolord: {
+    id: 'necrolord',
+    name: 'Necrolord',
+    classId: 'hollowcaller',
+    tagline: 'Commander of the dead',
+    description: 'Command a massive army of spirits. Up to 8 permanent bonds. Spirits are your weapon.',
+    color: '#9DC4B0',
+    setName: 'Bonemarshal\'s Regalia',
+    // Talent points to spend (stacking to maxRank per talent)
+    // Focus: Binding tree — all spirit-related upgrades
+    talentPoints: {
+      b1: 3,  // Greater Bond — max spirit cap
+      b2: 3,  // Vicious Spirits — +30% spirit damage
+      b3: 2,  // Swift Summoning — -30% Raise cooldown
+      b4: 1,  // Echoing Call — Raise summons 2 at once
+      b5: 3,  // Spirit Pact — +9% dmg per spirit
+      b6: 1,  // Soul Eruption — spirits explode on death
+    },
+  },
+  voidweaver: {
+    id: 'voidweaver',
+    name: 'Voidweaver',
+    classId: 'hollowcaller',
+    tagline: 'The storm itself',
+    description: 'Pure spellcaster. No pets. Chain-cast void magic, crit-focused, massive burst.',
+    color: '#c084fc',
+    setName: 'Voidshard Vestments',
+    talentPoints: {
+      v1: 3,  // Searing Mark — +36% Detonate
+      v2: 3,  // Widening Veil — +75 Detonate radius
+      v3: 2,  // Deep Mark — +4 Veilmark max stacks
+      v4: 3,  // Unbound Wrath — +90 Wrath Tide radius
+      v5: 3,  // Relentless Veil — -18% all cooldowns
+      v6: 1,  // Cataclysm — Detonate echoes
+    },
+  },
+  reaverSaint: {
+    id: 'reaverSaint',
+    name: 'Reaver-Saint',
+    classId: 'hollowcaller',
+    tagline: 'Hollow yourself, wear death as armor',
+    description: 'Aggressive melee hybrid. Fewer but tankier spirits. Lifesteal and reflection.',
+    color: '#f43f5e',
+    setName: 'Carmine Reaver\'s Panoply',
+    talentPoints: {
+      // Mixed tree — Hollow focus for tankiness + some Binding
+      b1: 2,  // Greater Bond — some extra spirits
+      b2: 2,  // Vicious Spirits — stronger spirits
+      h1: 3,  // Hollow tree — TBD mapped to actual talents
+      h2: 3,
+      h3: 3,
+      h4: 3,
+      h5: 2,
+    },
+  },
+  ironguard: {
+    id: 'ironguard',
+    name: 'Ironguard',
+    classId: 'ironwake',
+    tagline: 'The fortress',
+    description: 'Pure defensive tank. Pull enemies to you. Absorb pain, return it tenfold.',
+    color: '#60a5fa',
+    setName: 'Unyielding Bulwark',
+    // Focus: HP + damage reduction + lifesteal
+    // NOTE: Using Hollow-tree talents as placeholders until Ironwake-specific
+    // talents are added. These are generic survival talents that work for tanks.
+    talentPoints: {
+      h1: 3,  // Veiled Flesh — +24% max HP
+      h2: 1,  // Hollow Step — small speed (tanks don't need much)
+      h3: 3,  // Pale Vitality — heal per kill
+      h5: 3,  // Hollow Resilience — -15% damage taken
+      h6: 1,  // Everlasting — cheat death
+    },
+  },
+  juggernaut: {
+    id: 'juggernaut',
+    name: 'Juggernaut',
+    classId: 'ironwake',
+    tagline: 'The unstoppable force',
+    description: 'Aggressive momentum-based warrior. Charge through enemies, snowball damage.',
+    color: '#f59e0b',
+    setName: 'Titan\'s Momentum',
+    // Focus: movement speed + crit + lifesteal
+    talentPoints: {
+      h1: 2,  // Some HP — still melee
+      h2: 3,  // Hollow Step — max movement speed
+      h3: 2,  // Pale Vitality — some heal per kill
+      h4: 3,  // Deft Casting — +9% crit chance
+      h5: 1,  // Hollow Resilience — minor DR
+    },
+  },
+  bloodforged: {
+    id: 'bloodforged',
+    name: 'Bloodforged',
+    classId: 'ironwake',
+    tagline: 'Pain is fuel',
+    description: 'Glass-tank berserker. Low HP = massive damage. Risk/reward lifesteal.',
+    color: '#ef4444',
+    setName: 'Bloodforged Harness',
+    // Focus: crit + lifesteal + cheat death (you need it at low HP)
+    talentPoints: {
+      h2: 2,  // Some speed
+      h3: 3,  // Pale Vitality — heals per kill
+      h4: 3,  // Deft Casting — max crit
+      h6: 1,  // Everlasting — survive a fatal blow
+    },
+  },
+};
+
+// ═══════ SET PIECE CATALOG ═══════════════════════════════════════
+// 6 sets × 8 pieces each = 48 set items. Each piece covers one gear slot
+// and has stats themed to the preset's playstyle.
+// Created at "rare" rarity baseline — can be upgraded +1/+2/+3 via scrap.
+
+function buildPresetSetItems(){
+  const items = [];
+  // Helper to build a single set piece
+  const piece = (setName, slot, name, rarity, stats) => ({
+    name, slot, rarity, stats, setName, crafted: false, upgradeLevel: 0,
+  });
+
+  // ─── NECROLORD — Bonemarshal's Regalia (spirit commander set) ───
+  const NECRO = 'Bonemarshal\'s Regalia';
+  items.push(piece(NECRO, 'Weapon', 'Bonemarshal Scepter',  'epic', {sm:22, atk:18, spiritBonus:2}));
+  items.push(piece(NECRO, 'Helmet', 'Crown of the Cortege', 'epic', {hp:180, sm:16, spiritBonus:1}));
+  items.push(piece(NECRO, 'Chest',  'Mantle of the Legion', 'epic', {hp:260, sm:18, spiritBonus:1}));
+  items.push(piece(NECRO, 'Gloves', 'Conductor\'s Grasp',   'rare', {sm:12, crit:6, atk:10}));
+  items.push(piece(NECRO, 'Boots',  'Tread of the Dead',    'rare', {hp:120, cdr:10, moveSpdPct:8}));
+  items.push(piece(NECRO, 'Belt',   'Binding Chain Girdle', 'rare', {hp:100, sm:10, spiritBonus:1}));
+  items.push(piece(NECRO, 'Ring',   'Seal of Command',      'rare', {sm:14, atk:8}));
+  items.push(piece(NECRO, 'Amulet', 'Amulet of Legions',    'epic', {sm:28, crit:5, spiritBonus:2}));
+
+  // ─── VOIDWEAVER — Voidshard Vestments (spellcaster set) ───
+  const VOID = 'Voidshard Vestments';
+  items.push(piece(VOID, 'Weapon', 'Voidshard Rod',       'epic', {sm:14, atk:28, crit:14}));
+  items.push(piece(VOID, 'Helmet', 'Crown of the Abyss',  'epic', {hp:120, sm:20, crit:8}));
+  items.push(piece(VOID, 'Chest',  'Robes of the Fissure','epic', {hp:180, sm:22, crit:6}));
+  items.push(piece(VOID, 'Gloves', 'Voidtouched Grasp',   'rare', {atk:20, crit:12, sm:8}));
+  items.push(piece(VOID, 'Boots',  'Stride of the Rift',  'rare', {hp:80, cdr:12, moveSpdPct:10}));
+  items.push(piece(VOID, 'Belt',   'Girdle of the Void',  'rare', {hp:70, sm:12, crit:8}));
+  items.push(piece(VOID, 'Ring',   'Ring of Annihilation','rare', {atk:14, crit:10}));
+  items.push(piece(VOID, 'Amulet', 'Voidheart Pendant',   'epic', {sm:18, crit:14, atk:12}));
+
+  // ─── REAVER-SAINT — Carmine Reaver's Panoply (melee hybrid set) ───
+  const REAV = 'Carmine Reaver\'s Panoply';
+  items.push(piece(REAV, 'Weapon', 'Crimson Reaver',      'epic', {atk:32, lifeOnHit:6, sm:8}));
+  items.push(piece(REAV, 'Helmet', 'Sanguine Helm',       'epic', {hp:280, atk:12, lifeOnHit:3}));
+  items.push(piece(REAV, 'Chest',  'Blood-Iron Cuirass',  'epic', {hp:380, res:8, lifeOnHit:4}));
+  items.push(piece(REAV, 'Gloves', 'Gauntlets of Carnage','rare', {atk:18, crit:8, lifeOnHit:3}));
+  items.push(piece(REAV, 'Boots',  'Ironstride Greaves',  'rare', {hp:160, res:5, moveSpdPct:6}));
+  items.push(piece(REAV, 'Belt',   'Covenant Belt',       'rare', {hp:140, atk:10, lifeOnHit:2}));
+  items.push(piece(REAV, 'Ring',   'Ring of the Covenant','rare', {atk:12, lifeOnHit:4}));
+  items.push(piece(REAV, 'Amulet', 'Amulet of Saints',    'epic', {hp:120, atk:16, lifeOnHit:5}));
+
+  // ─── IRONGUARD — Unyielding Bulwark (tank set) ───
+  const GUARD = 'Unyielding Bulwark';
+  items.push(piece(GUARD, 'Weapon', 'Bulwark Hammer',      'epic', {atk:30, hp:150, res:6}));
+  items.push(piece(GUARD, 'Helmet', 'Helm of the Unyielding','epic',{hp:360, res:10}));
+  items.push(piece(GUARD, 'Chest',  'Mountainous Cuirass', 'epic', {hp:520, res:14}));
+  items.push(piece(GUARD, 'Gloves', 'Gauntlets of Iron',   'rare', {hp:180, res:6, atk:12}));
+  items.push(piece(GUARD, 'Boots',  'Rooted Greaves',      'rare', {hp:200, res:8}));
+  items.push(piece(GUARD, 'Belt',   'Girdle of Stone',     'rare', {hp:220, res:7}));
+  items.push(piece(GUARD, 'Ring',   'Signet of the Wall',  'rare', {hp:140, res:5, atk:8}));
+  items.push(piece(GUARD, 'Amulet', 'Amulet of the Pillar','epic', {hp:260, res:12, atk:10}));
+
+  // ─── JUGGERNAUT — Titan's Momentum (mobile warrior set) ───
+  const JUG = 'Titan\'s Momentum';
+  items.push(piece(JUG, 'Weapon', 'Charging Warmaul',   'epic', {atk:42, crit:10, moveSpdPct:6}));
+  items.push(piece(JUG, 'Helmet', 'Helm of Charging',   'epic', {hp:240, atk:14, moveSpdPct:8}));
+  items.push(piece(JUG, 'Chest',  'Cuirass of Momentum','epic', {hp:340, atk:16, moveSpdPct:6}));
+  items.push(piece(JUG, 'Gloves', 'Charging Gauntlets', 'rare', {atk:24, crit:8, moveSpdPct:4}));
+  items.push(piece(JUG, 'Boots',  'Stride of Titans',   'rare', {hp:140, moveSpdPct:18, atk:10}));
+  items.push(piece(JUG, 'Belt',   'Girdle of Thrust',   'rare', {hp:140, atk:12, moveSpdPct:6}));
+  items.push(piece(JUG, 'Ring',   'Ring of Pursuit',    'rare', {atk:14, moveSpdPct:6}));
+  items.push(piece(JUG, 'Amulet', 'Amulet of the Charge','epic',{atk:22, crit:12, moveSpdPct:8}));
+
+  // ─── BLOODFORGED — Bloodforged Harness (berserker set) ───
+  const BLOOD = 'Bloodforged Harness';
+  items.push(piece(BLOOD, 'Weapon', 'Bloodforged Cleaver', 'epic', {atk:48, crit:16, lifeOnHit:5}));
+  items.push(piece(BLOOD, 'Helmet', 'Crimson Visage',      'epic', {hp:240, atk:18, crit:8}));
+  items.push(piece(BLOOD, 'Chest',  'Harness of Fury',     'epic', {hp:320, atk:22, crit:6}));
+  items.push(piece(BLOOD, 'Gloves', 'Gauntlets of Rage',   'rare', {atk:28, crit:12, lifeOnHit:3}));
+  items.push(piece(BLOOD, 'Boots',  'Boots of Frenzy',     'rare', {hp:140, atk:14, crit:6}));
+  items.push(piece(BLOOD, 'Belt',   'Sash of the Bloodrage','rare',{hp:160, atk:16, crit:5}));
+  items.push(piece(BLOOD, 'Ring',   'Band of Rage',        'rare', {atk:16, crit:10, lifeOnHit:3}));
+  items.push(piece(BLOOD, 'Amulet', 'Bloodbound Amulet',   'epic', {atk:24, crit:14, lifeOnHit:6}));
+
+  return items;
+}
+
+// ═══════ GRANT TEST SETS TO NEW CHARACTERS ═══════════════════════
+// Called once on character init. Puts all 6 sets into setStash so player
+// can test any preset immediately. Set a flag on player so we don't
+// double-grant on reload.
+function grantAllPresetSetsForTesting(){
+  if(player._testSetsGranted) return;
+  const items = buildPresetSetItems();
+  // Deep copy each item and scale its stats to player's current level (so
+  // test gear doesn't feel weaker than level-scaled drops)
+  const levelScale = 1 + Math.max(0, player.level - 1) * 0.03;
+  items.forEach(tpl=>{
+    const copy = {
+      ...tpl,
+      stats: scaleItemStats(tpl.stats, (RARITY_STAT_MULT[tpl.rarity]||1.0) * levelScale),
+    };
+    setStash.push(copy);
+  });
+  player._testSetsGranted = true;
+  addFeed(`⚒ TEST MODE: ${items.length} set pieces added to Set Stash`, '#f59e0b');
+  addFeed(`  └ Open Talents panel to apply a preset`, '#9ca3af');
+  if(typeof writeSave === 'function') writeSave();
+}
+
+// ═══════ PRESET APPLICATION ═══════════════════════════════════════
+// Main entry point: wipe current talents, respec into preset's distribution,
+// and auto-equip best-matching set gear from stash.
+function applyPreset(presetId){
+  const preset = BUILD_PRESETS[presetId];
+  if(!preset){ addFeed(`Unknown preset: ${presetId}`, '#ef4444'); return; }
+  // Guard: preset must match current class
+  if(preset.classId !== player.classId){
+    addFeed(`${preset.name} is for ${preset.classId.toUpperCase()}, not your class`, '#ef4444');
+    return;
+  }
+  // ─── STEP 1: RESPEC TALENTS ───
+  // Refund all current talent points
+  const refundedPoints = talentState.pointsEarned || 0;
+  talentState.points = refundedPoints;
+  talentState.learned = {};
+  // Apply preset talent distribution. Skip any talents that don't exist
+  // in the current TALENT_TREE (for cross-class or future expansion safety).
+  let applied = 0;
+  let skipped = 0;
+  Object.entries(preset.talentPoints).forEach(([talentId, rank])=>{
+    // Find the talent in any branch
+    let found = null;
+    Object.values(TALENT_TREE).forEach(branch=>{
+      if(found) return;
+      found = branch.talents.find(t=>t.id === talentId);
+    });
+    if(!found){
+      skipped++;
+      return;
+    }
+    const actualRank = Math.min(rank, found.maxRank);
+    if(talentState.points >= actualRank){
+      talentState.learned[talentId] = actualRank;
+      talentState.points -= actualRank;
+      applied += actualRank;
+    }
+  });
+  if(typeof computeTalentBonuses === 'function') computeTalentBonuses();
+  // ─── STEP 2: AUTO-EQUIP SET GEAR ───
+  // For each gear slot: find the best piece from setStash matching this
+  // preset's setName. Move currently equipped item to bag if any.
+  let equippedCount = 0;
+  GEAR_SLOTS.forEach(slot=>{
+    // Find all stash pieces for this preset's set AND this slot
+    const candidates = setStash
+      .map((item, idx)=>({item, idx}))
+      .filter(c => c.item.setName === preset.setName && c.item.slot === slot);
+    if(candidates.length === 0) return;
+    // Pick the best (highest upgrade level, then highest rarity tier)
+    candidates.sort((a,b)=>{
+      const aUp = a.item.upgradeLevel || 0;
+      const bUp = b.item.upgradeLevel || 0;
+      if(aUp !== bUp) return bUp - aUp;
+      const rarityOrder = {common:0, uncommon:1, rare:2, epic:3, legendary:4, mythic:5};
+      return (rarityOrder[b.item.rarity]||0) - (rarityOrder[a.item.rarity]||0);
+    });
+    const chosen = candidates[0];
+    // Move currently equipped to bag (if any)
+    const currentlyEquipped = equipped[slot];
+    if(currentlyEquipped){
+      if(inventory.length < INVENTORY_MAX){
+        inventory.push(currentlyEquipped);
+      } else {
+        // Bag full — move current equipped to setStash as fallback
+        setStash.push(currentlyEquipped);
+      }
+    }
+    // Equip the set piece and remove from setStash
+    equipped[slot] = chosen.item;
+    setStash.splice(chosen.idx, 1);
+    equippedCount++;
+  });
+  // Refresh everything
+  if(typeof recalcStats === 'function') recalcStats();
+  if(typeof checkSetBonuses === 'function') checkSetBonuses();
+  // Feed messages
+  addFeed(`◆ Applied ${preset.name.toUpperCase()} preset`, preset.color);
+  addFeed(`  └ ${applied} talent points spent, ${equippedCount} set pieces equipped`, '#9ca3af');
+  if(skipped > 0){
+    addFeed(`  └ (${skipped} talents skipped — not in ${player.classId} tree yet)`, '#6b7280');
+  }
+  // Save + refresh UI
+  if(typeof writeSave === 'function') writeSave();
+  if(typeof renderTalents === 'function') renderTalents();
+  if(typeof renderGearPanel === 'function') renderGearPanel();
+  if(typeof renderInventory === 'function') renderInventory();
+  if(typeof renderSetStash === 'function') renderSetStash();
+  return {applied, equippedCount};
+}
+
+// ═══════ SET STASH UI ═══════════════════════════════════════════════
+// Renders the stash as a grid inside a dedicated tab in the bag panel.
+// Players can click to equip-in-place or move to bag.
+
+let _stashSelectedIndex = null;
+
+function renderSetStash(){
+  const grid = document.getElementById('setStashGrid');
+  const tooltip = document.getElementById('setStashTooltip');
+  const countEl = document.getElementById('setStashCountText');
+  if(!grid) return;
+  if(countEl) countEl.textContent = `${setStash.length} pieces`;
+  grid.innerHTML = '';
+  // Group by set for nicer display — show one row/section per set
+  const bySet = {};
+  setStash.forEach((item, idx)=>{
+    const setName = item.setName || 'Unknown';
+    if(!bySet[setName]) bySet[setName] = [];
+    bySet[setName].push({item, idx});
+  });
+  Object.entries(bySet).forEach(([setName, members])=>{
+    const setSection = document.createElement('div');
+    setSection.className = 'stash-set-section';
+    const header = document.createElement('div');
+    header.className = 'stash-set-header';
+    header.textContent = `◆ ${setName}  (${members.length} pieces)`;
+    setSection.appendChild(header);
+    const pieceGrid = document.createElement('div');
+    pieceGrid.className = 'stash-piece-grid';
+    members.forEach(({item, idx})=>{
+      const slot = document.createElement('div');
+      slot.className = 'bag-slot filled';
+      const col = RARITY_COLORS[item.rarity] || '#9ca3af';
+      slot.style.borderColor = col;
+      slot.innerHTML = `
+        <canvas class="bag-slot-icon-canvas" width="52" height="52"></canvas>
+        <span class="bag-slot-rarity" style="background:${col}22;color:${col}">${item.slot}</span>
+      `;
+      const iconCanvas = slot.querySelector('.bag-slot-icon-canvas');
+      if(iconCanvas && typeof drawGearIcon === 'function'){
+        drawGearIcon(iconCanvas, item.slot, item.rarity);
+      }
+      if(idx === _stashSelectedIndex) slot.classList.add('selected');
+      slot.addEventListener('click', ()=>{
+        _stashSelectedIndex = (_stashSelectedIndex === idx) ? null : idx;
+        renderSetStash();
+      });
+      pieceGrid.appendChild(slot);
+    });
+    setSection.appendChild(pieceGrid);
+    grid.appendChild(setSection);
+  });
+  // Tooltip for selected item
+  if(tooltip){
+    if(_stashSelectedIndex === null || !setStash[_stashSelectedIndex]){
+      tooltip.style.display = 'none';
+    } else {
+      const item = setStash[_stashSelectedIndex];
+      const col = RARITY_COLORS[item.rarity] || '#9ca3af';
+      const statLines = computeStatLines(item);
+      const statsHtml = statLines.length
+        ? statLines.map(l=>`<div class="bag-stat-line" style="color:${l.color}">${l.text}</div>`).join('')
+        : '<div class="bag-stat-line" style="color:#6b4d8a">— no stats —</div>';
+      tooltip.innerHTML = `
+        <div class="bag-tooltip-header" style="border-color:${col}88">
+          <span class="bag-tt-name" style="color:${col}">${itemDisplayName(item)}</span>
+          <span class="bag-tt-rarity" style="background:${col}22;color:${col}">${RARITY_LABELS[item.rarity]||'?'}</span>
+        </div>
+        <div class="bag-tt-slot">${SLOT_ICONS[item.slot]||'✦'} ${item.slot.toUpperCase()}</div>
+        <div class="bag-tt-set" style="color:#f59e0b">◆ ${item.setName}</div>
+        <div class="bag-tt-section">
+          <div class="bag-tt-section-label">Item Stats</div>
+          ${statsHtml}
+        </div>
+        <div class="bag-tt-actions">
+          <button class="bag-btn bag-btn-equip">⚔ EQUIP NOW</button>
+          <button class="bag-btn bag-btn-tobag">◇ MOVE TO BAG</button>
+        </div>
+      `;
+      tooltip.style.display = 'flex';
+      tooltip.style.borderColor = col + '55';
+      tooltip.querySelector('.bag-btn-equip').addEventListener('click', ()=>{
+        equipFromStash(_stashSelectedIndex);
+      });
+      tooltip.querySelector('.bag-btn-tobag').addEventListener('click', ()=>{
+        moveStashToBag(_stashSelectedIndex);
+      });
+    }
+  }
+}
+
+function equipFromStash(stashIdx){
+  const item = setStash[stashIdx];
+  if(!item) return;
+  // Move currently-equipped to inventory (if any)
+  const current = equipped[item.slot];
+  if(current){
+    if(inventory.length < INVENTORY_MAX){
+      inventory.push(current);
+    } else {
+      setStash.push(current); // fallback — bag full, goes to stash
+    }
+  }
+  // Equip the stash item + remove from stash
+  equipped[item.slot] = item;
+  setStash.splice(stashIdx, 1);
+  _stashSelectedIndex = null;
+  if(typeof recalcStats === 'function') recalcStats();
+  if(typeof checkSetBonuses === 'function') checkSetBonuses();
+  addFeed(`✦ Equipped ${item.name}`, RARITY_COLORS[item.rarity] || '#9ca3af');
+  if(typeof writeSave === 'function') writeSave();
+  renderSetStash();
+  if(typeof renderGearPanel === 'function') renderGearPanel();
+  if(typeof renderInventory === 'function') renderInventory();
+}
+
+function moveStashToBag(stashIdx){
+  const item = setStash[stashIdx];
+  if(!item) return;
+  if(inventory.length >= INVENTORY_MAX){
+    addFeed('⚠ Bag is full', '#ef4444');
+    return;
+  }
+  inventory.push(item);
+  setStash.splice(stashIdx, 1);
+  _stashSelectedIndex = null;
+  addFeed(`◇ ${item.name} → bag`, '#6b9acf');
+  if(typeof writeSave === 'function') writeSave();
+  renderSetStash();
+  if(typeof updateInventoryBadge === 'function') updateInventoryBadge();
+}
+
+// ═══════ PRESET SELECTOR UI ═══════════════════════════════════════
+// Renders available presets for the player's current class. One-click apply.
+
+function renderPresetSelector(){
+  const container = document.getElementById('presetSelector');
+  if(!container) return;
+  container.innerHTML = '';
+  // Filter presets to this class
+  const available = Object.values(BUILD_PRESETS).filter(p => p.classId === player.classId);
+  if(available.length === 0){
+    container.innerHTML = '<div class="preset-empty">No presets available for this class yet.</div>';
+    return;
+  }
+  available.forEach(preset=>{
+    const card = document.createElement('div');
+    card.className = 'preset-card';
+    card.style.borderLeft = `4px solid ${preset.color}`;
+    // Count how many set pieces player has for this preset
+    const inStash = setStash.filter(i => i.setName === preset.setName).length;
+    const equippedCount = Object.values(equipped).filter(i => i && i.setName === preset.setName).length;
+    const totalSet = inStash + equippedCount;
+    card.innerHTML = `
+      <div class="preset-card-header">
+        <span class="preset-name" style="color:${preset.color}">${preset.name}</span>
+        <span class="preset-set-count">${totalSet}/8 set pieces</span>
+      </div>
+      <div class="preset-tagline">"${preset.tagline}"</div>
+      <div class="preset-desc">${preset.description}</div>
+      <div class="preset-actions">
+        <button class="preset-apply-btn" style="background:${preset.color}22;color:${preset.color};border-color:${preset.color}66">
+          ▲ APPLY PRESET
+        </button>
+      </div>
+    `;
+    card.querySelector('.preset-apply-btn').addEventListener('click', ()=>{
+      if(!confirm(`Apply ${preset.name} preset?\n\nThis will:\n• Respec all talents\n• Auto-equip ${preset.setName} pieces\n• Move currently equipped gear to bag`)){
+        return;
+      }
+      applyPreset(preset.id);
+    });
+    container.appendChild(card);
+  });
 }
