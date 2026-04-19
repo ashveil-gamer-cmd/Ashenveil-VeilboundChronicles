@@ -2612,66 +2612,76 @@ function drawPlayer(t){
   p.walkCycle+=(Math.abs(p.vx)+Math.abs(p.vy))>5?0.15:0;
 
   ctx.save();
-  const flipX=Math.cos(p.facing)<0;
   ctx.translate(p.x,p.y);
-  if(flipX)ctx.scale(-1,1);
 
-  // Aura under player
+  // Aura under player — draw BEFORE sprite/canvas body so it sits behind
   const auraR=30+spCount*5;
   const aura=ctx.createRadialGradient(0,15,0,0,15,auraR);
   aura.addColorStop(0,`rgba(157,196,176,${0.08+spCount*0.012})`);
   aura.addColorStop(1,'rgba(157,196,176,0)');
   ctx.fillStyle=aura;ctx.beginPath();ctx.ellipse(0,18,auraR,auraR*0.4,0,0,Math.PI*2);ctx.fill();
 
-  ctx.shadowColor=fl?'#ff4444':'#9DC4B0';
-  ctx.shadowBlur=fl?20:(12+spCount*3)*glow;
+  // ═══ Try rendering the sprite first (Hollowcaller only for now) ═══
+  // If sprites are loaded for this class, draw them. Otherwise fall through to
+  // the Canvas drawing below (safety net so the game never breaks if sprites
+  // fail to load).
+  const spriteDrawn = drawPlayerSprite(p, t, fl, glow, spCount);
 
-  // Robe body
-  ctx.fillStyle=fl?'#ffaaaa':'#1a1235';
-  ctx.beginPath();ctx.ellipse(0,4,10,15,0,0,Math.PI*2);ctx.fill();
-  // Robe bottom (flowing)
-  ctx.fillStyle=fl?'#ffaaaa':'#110c28';
-  ctx.beginPath();ctx.moveTo(-10,7);ctx.bezierCurveTo(-14,17,-9,24,-4,23);ctx.bezierCurveTo(-1,28,1,28,4,23);ctx.bezierCurveTo(9,24,14,17,10,7);ctx.closePath();ctx.fill();
-  // Robe arcane trim
-  ctx.strokeStyle=fl?'#fff':`rgba(192,132,252,${0.3+glow*0.25})`;ctx.lineWidth=1;
-  ctx.beginPath();ctx.moveTo(-10,7);ctx.bezierCurveTo(-14,17,-9,24,-4,23);ctx.bezierCurveTo(-1,28,1,28,4,23);ctx.bezierCurveTo(9,24,14,17,10,7);ctx.stroke();
-  // Chest rune
-  ctx.fillStyle=fl?'#fff':'rgba(192,132,252,0.5)';ctx.shadowColor='#c084fc';ctx.shadowBlur=8;
-  ctx.beginPath();ctx.arc(0,1,3,0,Math.PI*2);ctx.fill();
+  if(!spriteDrawn){
+    // ═══ FALLBACK: Canvas-drawn Hollowcaller (original implementation) ═══
+    const flipX=Math.cos(p.facing)<0;
+    if(flipX)ctx.scale(-1,1);
 
-  // Left arm
-  const armSwing=Math.sin(p.walkCycle)*7;
-  ctx.strokeStyle=fl?'#ffaaaa':'#2d2060';ctx.lineWidth=5;ctx.lineCap='round';
-  ctx.beginPath();ctx.moveTo(-7,0);ctx.lineTo(-11-armSwing*0.6,10);ctx.stroke();
-  // Right arm + staff
-  ctx.beginPath();ctx.moveTo(7,0);ctx.lineTo(12+armSwing,11);ctx.stroke();
-  // Staff shaft
-  ctx.strokeStyle=fl?'#fff':'#9DC4B0';ctx.lineWidth=2;ctx.lineCap='square';
-  ctx.beginPath();ctx.moveTo(12+armSwing,11);ctx.lineTo(17+armSwing,-10);ctx.stroke();
-  // Staff head
-  ctx.strokeStyle=fl?'#fff':'#c084fc';ctx.lineWidth=2;ctx.lineCap='round';
-  ctx.beginPath();ctx.moveTo(14+armSwing,-10);ctx.lineTo(20+armSwing,-10);ctx.stroke();
-  ctx.beginPath();ctx.moveTo(17+armSwing,-13);ctx.lineTo(17+armSwing,-7);ctx.stroke();
-  // Staff orb
-  const orbPulse=0.42+Math.sin(t/380)*0.18;
-  ctx.fillStyle='#c084fc';ctx.shadowColor='#c084fc';ctx.shadowBlur=16;
-  ctx.beginPath();ctx.arc(17+armSwing,-10,4.5,0,Math.PI*2);ctx.fill();
-  ctx.globalAlpha=orbPulse;ctx.fillStyle='#e9d5ff';
-  ctx.beginPath();ctx.arc(17+armSwing,-10,8,0,Math.PI*2);ctx.fill();
-  ctx.globalAlpha=1;
+    ctx.shadowColor=fl?'#ff4444':'#9DC4B0';
+    ctx.shadowBlur=fl?20:(12+spCount*3)*glow;
 
-  // Head/hood
-  ctx.shadowColor=fl?'#ff4444':'#c084fc';ctx.shadowBlur=10;
-  ctx.fillStyle=fl?'#ffaaaa':'#1a1235';
-  ctx.beginPath();ctx.arc(0,-12,10,0,Math.PI*2);ctx.fill();
-  ctx.fillStyle=fl?'#ffaaaa':'#0d0820';
-  ctx.beginPath();ctx.moveTo(-11,-12);ctx.lineTo(0,-30);ctx.lineTo(11,-12);ctx.closePath();ctx.fill();
-  ctx.fillStyle='rgba(0,0,0,0.4)';
-  ctx.beginPath();ctx.ellipse(0,-12,8,5,0,0,Math.PI);ctx.fill();
-  // Eyes
-  ctx.fillStyle=fl?'#ff4444':'#9DC4B0';ctx.shadowColor='#9DC4B0';ctx.shadowBlur=10;
-  ctx.beginPath();ctx.arc(-3.5,-13,2.2,0,Math.PI*2);ctx.fill();
-  ctx.beginPath();ctx.arc(3.5,-13,2.2,0,Math.PI*2);ctx.fill();
+    // Robe body
+    ctx.fillStyle=fl?'#ffaaaa':'#1a1235';
+    ctx.beginPath();ctx.ellipse(0,4,10,15,0,0,Math.PI*2);ctx.fill();
+    // Robe bottom (flowing)
+    ctx.fillStyle=fl?'#ffaaaa':'#110c28';
+    ctx.beginPath();ctx.moveTo(-10,7);ctx.bezierCurveTo(-14,17,-9,24,-4,23);ctx.bezierCurveTo(-1,28,1,28,4,23);ctx.bezierCurveTo(9,24,14,17,10,7);ctx.closePath();ctx.fill();
+    // Robe arcane trim
+    ctx.strokeStyle=fl?'#fff':`rgba(192,132,252,${0.3+glow*0.25})`;ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(-10,7);ctx.bezierCurveTo(-14,17,-9,24,-4,23);ctx.bezierCurveTo(-1,28,1,28,4,23);ctx.bezierCurveTo(9,24,14,17,10,7);ctx.stroke();
+    // Chest rune
+    ctx.fillStyle=fl?'#fff':'rgba(192,132,252,0.5)';ctx.shadowColor='#c084fc';ctx.shadowBlur=8;
+    ctx.beginPath();ctx.arc(0,1,3,0,Math.PI*2);ctx.fill();
+
+    // Left arm
+    const armSwing=Math.sin(p.walkCycle)*7;
+    ctx.strokeStyle=fl?'#ffaaaa':'#2d2060';ctx.lineWidth=5;ctx.lineCap='round';
+    ctx.beginPath();ctx.moveTo(-7,0);ctx.lineTo(-11-armSwing*0.6,10);ctx.stroke();
+    // Right arm + staff
+    ctx.beginPath();ctx.moveTo(7,0);ctx.lineTo(12+armSwing,11);ctx.stroke();
+    // Staff shaft
+    ctx.strokeStyle=fl?'#fff':'#9DC4B0';ctx.lineWidth=2;ctx.lineCap='square';
+    ctx.beginPath();ctx.moveTo(12+armSwing,11);ctx.lineTo(17+armSwing,-10);ctx.stroke();
+    // Staff head
+    ctx.strokeStyle=fl?'#fff':'#c084fc';ctx.lineWidth=2;ctx.lineCap='round';
+    ctx.beginPath();ctx.moveTo(14+armSwing,-10);ctx.lineTo(20+armSwing,-10);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(17+armSwing,-13);ctx.lineTo(17+armSwing,-7);ctx.stroke();
+    // Staff orb
+    const orbPulse=0.42+Math.sin(t/380)*0.18;
+    ctx.fillStyle='#c084fc';ctx.shadowColor='#c084fc';ctx.shadowBlur=16;
+    ctx.beginPath();ctx.arc(17+armSwing,-10,4.5,0,Math.PI*2);ctx.fill();
+    ctx.globalAlpha=orbPulse;ctx.fillStyle='#e9d5ff';
+    ctx.beginPath();ctx.arc(17+armSwing,-10,8,0,Math.PI*2);ctx.fill();
+    ctx.globalAlpha=1;
+
+    // Head/hood
+    ctx.shadowColor=fl?'#ff4444':'#c084fc';ctx.shadowBlur=10;
+    ctx.fillStyle=fl?'#ffaaaa':'#1a1235';
+    ctx.beginPath();ctx.arc(0,-12,10,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=fl?'#ffaaaa':'#0d0820';
+    ctx.beginPath();ctx.moveTo(-11,-12);ctx.lineTo(0,-30);ctx.lineTo(11,-12);ctx.closePath();ctx.fill();
+    ctx.fillStyle='rgba(0,0,0,0.4)';
+    ctx.beginPath();ctx.ellipse(0,-12,8,5,0,0,Math.PI);ctx.fill();
+    // Eyes
+    ctx.fillStyle=fl?'#ff4444':'#9DC4B0';ctx.shadowColor='#9DC4B0';ctx.shadowBlur=10;
+    ctx.beginPath();ctx.arc(-3.5,-13,2.2,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.arc(3.5,-13,2.2,0,Math.PI*2);ctx.fill();
+  }
 
   ctx.restore();
 
@@ -2679,6 +2689,143 @@ function drawPlayer(t){
   if(Math.abs(p.vx)+Math.abs(p.vy)>8&&Math.random()<0.1){
     particles.push({x:p.x+(Math.random()-0.5)*10,y:p.y+20,vx:(Math.random()-0.5)*25,vy:12+Math.random()*18,life:0.55,maxLife:0.55,color:'rgba(192,132,252,0.35)',size:2+Math.random()*2});
   }
+}
+
+// ═══════ PLAYER SPRITE SYSTEM ═══════════════════════════════════
+// Loads 8-directional character sprites (pixel art PNGs) and renders
+// based on player.facing angle. Falls back to Canvas drawing if sprites
+// aren't loaded yet or fail to load entirely.
+
+// Sprite catalog per class — maps class ID to the 8 direction files.
+// The paths try the subfolder version first (sprites/hollowcaller/north.png),
+// with a fallback to flat sprites/north.png if the subfolder doesn't exist.
+const PLAYER_SPRITE_CATALOG = {
+  hollowcaller: {
+    basePath: 'sprites/hollowcaller/',
+    fallbackPath: 'sprites/',
+    directions: ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'],
+    // Pixel dimensions of each sprite (68×68 from Pixellab)
+    pixelSize: 68,
+    // How big the sprite should appear in world units — tweak to match
+    // the old canvas character's size. Old canvas was ~40px tall visually.
+    displaySize: 56,
+    // Vertical offset from player center — the character's feet should sit
+    // near player.y so movement feels grounded. Positive = sprite shifted up.
+    yOffset: -4,
+  },
+  // Ironwake + others fall through to Canvas drawing (no sprites yet)
+};
+
+// Per-class sprite state. Each entry: {images: {dirName: Image}, loaded: bool, failed: bool}
+const _playerSpriteState = {};
+
+// Preload sprites for a class. Safe to call multiple times — idempotent.
+// Tries the subfolder path first. If a sprite fails there, retries the fallback
+// path (flat sprites/ folder).
+function preloadPlayerSprites(classId){
+  const catalog = PLAYER_SPRITE_CATALOG[classId];
+  if(!catalog) return;
+  if(_playerSpriteState[classId]) return; // already loading/loaded
+  const state = {images: {}, loaded: false, failed: false, loadedCount: 0};
+  _playerSpriteState[classId] = state;
+  const total = catalog.directions.length;
+  catalog.directions.forEach(dir => {
+    const img = new Image();
+    // Try subfolder path first
+    const primaryUrl = catalog.basePath + dir + '.png';
+    img.onload = () => {
+      state.loadedCount++;
+      state.images[dir] = img;
+      if(state.loadedCount >= total) state.loaded = true;
+    };
+    img.onerror = () => {
+      // Try fallback (flat sprites/ folder)
+      const fbImg = new Image();
+      const fbUrl = catalog.fallbackPath + dir + '.png';
+      fbImg.onload = () => {
+        state.loadedCount++;
+        state.images[dir] = fbImg;
+        if(state.loadedCount >= total) state.loaded = true;
+      };
+      fbImg.onerror = () => {
+        // Give up on this direction — will use Canvas fallback
+        state.loadedCount++;
+        state.failed = true;
+        console.warn('[sprite] missing:', primaryUrl, 'and', fbUrl);
+      };
+      fbImg.src = fbUrl;
+    };
+    img.src = primaryUrl;
+  });
+}
+
+// Convert player.facing angle (radians) to one of 8 compass directions.
+// Canvas angle convention: 0 rad = east (+x), π/2 = south (+y), π = west, -π/2 = north.
+// We slice the circle into 8 segments of 45° (π/4 rad) each.
+function facingToDirection(facing){
+  // Normalize to 0..2π
+  let a = facing;
+  while(a < 0) a += Math.PI * 2;
+  while(a >= Math.PI * 2) a -= Math.PI * 2;
+  // Each direction covers π/4 rad (45°), centered on its canonical angle.
+  // east = 0, south-east = π/4, south = π/2, south-west = 3π/4, etc.
+  // Offset by π/8 so each wedge is centered on the cardinal angle.
+  const idx = Math.floor((a + Math.PI / 8) / (Math.PI / 4)) % 8;
+  // idx: 0=east, 1=southeast, 2=south, 3=southwest, 4=west, 5=northwest, 6=north, 7=northeast
+  const dirs = ['east', 'south-east', 'south', 'south-west', 'west', 'north-west', 'north', 'north-east'];
+  return dirs[idx];
+}
+
+// Draw the sprite for the current class. Returns true if drawn, false if we
+// should fall back to Canvas drawing. Called inside drawPlayer's ctx.save()
+// transform so it operates in player-local coordinates.
+function drawPlayerSprite(p, t, fl, glow, spCount){
+  const catalog = PLAYER_SPRITE_CATALOG[p.classId];
+  if(!catalog) return false;
+  const state = _playerSpriteState[p.classId];
+  if(!state) return false;
+  // Even partial load is OK — we just need the CURRENT direction to be loaded.
+  // If the facing direction's sprite isn't loaded yet, fall back to canvas.
+  const dir = facingToDirection(p.facing);
+  const img = state.images[dir];
+  if(!img || !img.complete || img.naturalWidth === 0) return false;
+
+  // Compute display size scaled to match the old Canvas character visually
+  const size = catalog.displaySize;
+  const half = size / 2;
+  const drawY = catalog.yOffset || 0;
+
+  // Glow behind the sprite — class identity color
+  ctx.save();
+  ctx.shadowColor = fl ? '#ff4444' : '#9DC4B0';
+  ctx.shadowBlur = fl ? 18 : (10 + spCount * 2) * glow;
+  // Draw shadow-only pass first so the glow is visible without pixel artifacts
+  // on the sprite itself
+  ctx.globalAlpha = 0.35;
+  ctx.drawImage(img, -half, drawY - half, size, size);
+  ctx.restore();
+
+  // Main sprite — crisp, no blur
+  ctx.save();
+  // Pixel art should NOT be smoothed when scaled
+  const prevSmoothing = ctx.imageSmoothingEnabled;
+  ctx.imageSmoothingEnabled = false;
+  // Hit flash: tint sprite red by drawing it with a red overlay
+  if(fl){
+    // Draw normally first (so shape is preserved through tint)
+    ctx.drawImage(img, -half, drawY - half, size, size);
+    // Red multiply tint
+    ctx.globalCompositeOperation = 'source-atop';
+    ctx.fillStyle = 'rgba(255, 90, 90, 0.55)';
+    ctx.fillRect(-half, drawY - half, size, size);
+    ctx.globalCompositeOperation = 'source-over';
+  } else {
+    ctx.drawImage(img, -half, drawY - half, size, size);
+  }
+  ctx.imageSmoothingEnabled = prevSmoothing;
+  ctx.restore();
+
+  return true;
 }
 
 // ═══════ SPIRIT DRAW ════════════════════════════════════
@@ -5181,6 +5328,11 @@ function startGame(continueFromSave=false){
   // Stop any previous game cleanly before starting this one
   stopGame();
   getAC(); // unlock audio context on user gesture
+  // Start preloading player sprites for whichever class is active.
+  // If the class isn't known yet (first-time), chooseClass() will also call this.
+  if(typeof preloadPlayerSprites === 'function' && player.classId){
+    preloadPlayerSprites(player.classId);
+  }
   document.getElementById('titleScreen').style.display='none';
   ['hud','abilityBar','feedLog','spiritPanel','menuBar','zoneLabel','minimap'].forEach(id=>{
 
@@ -5192,6 +5344,10 @@ function startGame(continueFromSave=false){
     const save=readSave();
     if(save){applySave(save);}
     else {continueFromSave=false;} // save mysteriously gone — fall through to new game
+  }
+  // Preload sprites AFTER save is applied — player.classId is now correct
+  if(typeof preloadPlayerSprites === 'function' && player.classId){
+    preloadPlayerSprites(player.classId);
   }
   if(!continueFromSave){
     // Full reset to level 1 baseline
