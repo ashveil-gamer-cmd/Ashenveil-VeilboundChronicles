@@ -219,7 +219,10 @@ function computeMaxHp(lv){
   return base;
 }
 function computeAttack(lv){
-  const base = 12+lv*2.2+lv*lv*0.04;
+  // Tempered scaling — quadratic term reduced from 0.04 to 0.015 so damage
+  // doesn't balloon exponentially past level 50. Linear growth preserved
+  // so leveling always feels meaningful.
+  const base = 12+lv*2.2+lv*lv*0.015;
   if(typeof player!=='undefined' && player && player.classId && typeof CLASS_DEFS!=='undefined'){
     const cls = CLASS_DEFS[player.classId] || CLASS_DEFS.hollowcaller;
     return base * (cls.baseAtk/15);
@@ -668,14 +671,15 @@ const DUNGEONS=[
       counts:[8,12,6,18,10,14,12],
     },
     waves:[
-      {count:6,elites:0,types:['skeleton','crawler']},
-      {count:8,elites:1,types:['skeleton','wraith']},
-      {count:10,elites:1,types:['crawler','wraith','skeleton']},
+      {count:10,elites:1,types:['skeleton','crawler']},
+      {count:14,elites:2,types:['skeleton','wraith']},
+      {count:16,elites:3,types:['crawler','wraith','skeleton']},
+      {count:12,elites:3,types:['skeleton','wraith','crawler']},
     ],
     boss:{
       name:'Bone Revenant',
       baseType:'skeleton',
-      hpMult:20,
+      hpMult:40,
       atkMult:1.8,
       sizeMult:2.2,
       // Signature ability: summons skeleton thralls to swarm the player
@@ -684,7 +688,7 @@ const DUNGEONS=[
     reward:{
       minRarity:'rare',
       bonusGold:200,
-      bonusXP:100,
+      bonusXP:60,
     },
   },
   {
@@ -717,14 +721,15 @@ const DUNGEONS=[
       counts:[14,16,18,18,10,12],
     },
     waves:[
-      {count:7,elites:0,types:['wraith','shade']},
-      {count:9,elites:2,types:['wraith','shade','specter']},
-      {count:11,elites:2,types:['shade','specter']},
+      {count:10,elites:1,types:['wraith','shade']},
+      {count:14,elites:2,types:['wraith','shade','specter']},
+      {count:16,elites:3,types:['shade','specter']},
+      {count:12,elites:4,types:['shade','specter']},
     ],
     boss:{
       name:'Sorrowed Specter',
       baseType:'specter',
-      hpMult:26,
+      hpMult:50,
       atkMult:2.1,
       sizeMult:2.4,
       // Signature ability: phase shift — become invulnerable, teleport, leave a shade echo
@@ -733,7 +738,7 @@ const DUNGEONS=[
     reward:{
       minRarity:'epic',
       bonusGold:500,
-      bonusXP:250,
+      bonusXP:120,
     },
   },
   {
@@ -766,14 +771,15 @@ const DUNGEONS=[
       counts:[12,14,14,16,18,18,8],
     },
     waves:[
-      {count:6,elites:1,types:['golem','abomination']},
-      {count:8,elites:2,types:['golem','specter']},
-      {count:10,elites:3,types:['golem','abomination','specter']},
+      {count:10,elites:1,types:['golem','abomination']},
+      {count:14,elites:3,types:['golem','specter']},
+      {count:16,elites:4,types:['golem','abomination','specter']},
+      {count:12,elites:5,types:['golem','abomination','specter']},
     ],
     boss:{
       name:'Cathedral Warden',
       baseType:'golem',
-      hpMult:35,
+      hpMult:70,
       atkMult:2.5,
       sizeMult:2.8,
       // Signature ability: fire cross — 4 lines of fire shoot out in +-pattern
@@ -782,7 +788,7 @@ const DUNGEONS=[
     reward:{
       minRarity:'legendary',
       bonusGold:1200,
-      bonusXP:600,
+      bonusXP:200,
     },
   },
 ];
