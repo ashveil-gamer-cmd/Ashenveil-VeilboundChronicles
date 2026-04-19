@@ -6361,10 +6361,31 @@ function hitEnemy(e,dmg,isCrit=false,fromX,fromY){
   }
   const buffCrit = typeof getActiveBuffValue === 'function' ? getActiveBuffValue('crit') : 0;
   const critChance=0.12+_tb('critPct')/100 + buffCrit;
-  const critRoll=Math.random()<critChance;
+  let critRoll = Math.random() < critChance;
+  // ─── Reaver-Saint Bloodvow: force crit + extra lifesteal on empowered hits ───
+  let bloodvowBonus = 0;
+  if(typeof applyBloodvowBonusToHit === 'function'){
+    const bv = applyBloodvowBonusToHit(dmg);
+    if(bv.isCrit){
+      critRoll = true;
+      dmg = bv.dmg;
+      bloodvowBonus = bv.healPct; // bonus lifesteal % for this hit only
+    }
+  }
   const finalDmg = critRoll ? dmg * 2.2 : dmg;
   e.hp-=finalDmg;e.hitFlash=0.18;
   spawnDmgText(e.x,e.y-e.size,Math.round(finalDmg),critRoll?'#fde68a':'#fff',critRoll);
+  // ─── Reaver-Saint passive lifesteal: heal for % of damage dealt ───
+  if(typeof reaverSaintOnHit === 'function') reaverSaintOnHit(finalDmg);
+  // Bloodvow bonus lifesteal
+  if(bloodvowBonus > 0 && player && !player.isDead){
+    const heal = Math.floor(finalDmg * bloodvowBonus);
+    const actual = Math.min(heal, player.maxHp - player.hp);
+    if(actual > 0){
+      player.hp += actual;
+      spawnDmgText(player.x, player.y - 30, `+${actual}`, '#ef4444', false);
+    }
+  }
   // Directional impact sparks (if we know where the hit came from, sparks fly away from source)
   if(typeof fromX==='number'){
     emitImpactSparks(e.x,e.y,fromX,fromY,e.typeData?.color||'#ffd166',critRoll?14:7);
