@@ -7192,6 +7192,7 @@ function buildSave(){
     equipped:JSON.parse(JSON.stringify(equipped)),
     inventory:typeof inventory!=='undefined'?JSON.parse(JSON.stringify(inventory)):[],
     setStash:typeof setStash!=='undefined'?JSON.parse(JSON.stringify(setStash)):[],
+    setStashData:typeof setStashData!=='undefined'?JSON.parse(JSON.stringify(setStashData)):{},
     shopState:typeof shopState!=='undefined'?JSON.parse(JSON.stringify(shopState)):null,
     professions:JSON.parse(JSON.stringify(professions)),
     talents:typeof talentState!=='undefined'?JSON.parse(JSON.stringify(talentState)):null,
@@ -7409,6 +7410,17 @@ function applySave(data){
     if(Array.isArray(data.setStash)){
       data.setStash.forEach(item=>setStash.push(item));
     }
+  }
+  // New nested structure — preset tabs with chosen + spare split
+  if(typeof setStashData !== 'undefined'){
+    if(data.setStashData && typeof data.setStashData === 'object'){
+      // Wipe and reassign
+      Object.keys(setStashData).forEach(k => delete setStashData[k]);
+      Object.entries(data.setStashData).forEach(([k,v])=>{ setStashData[k] = v; });
+    }
+    if(typeof ensureSetStashDataInitialized === 'function') ensureSetStashDataInitialized();
+    // Migration: if an old save has stuff in legacy setStash[], move it over
+    if(typeof migrateLegacySetStash === 'function') migrateLegacySetStash();
   }
   // Testing flag: if a saved character has _testSetsGranted, preserve it.
   // Otherwise, it's a new character or a character from before this system.
