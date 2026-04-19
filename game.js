@@ -2525,7 +2525,9 @@ function generateTerrainFeatures(){
     });
   }
   // Paths: 2-3 winding paths cutting through the world.
-  // Each is a series of 8-12 connected points with variable width.
+  // Each is a series of connected points that flow smoothly — no jitter.
+  // The curves come from overlaid low-frequency sine waves (coherent motion),
+  // not random per-point wobble (which produced the old zigzag look).
   if(z.hasPaths!==false){  // default yes unless theme opts out
     const pathCount=2+Math.floor(rnd()*2);
     for(let p=0;p<pathCount;p++){
@@ -2537,16 +2539,32 @@ function generateTerrainFeatures(){
       else if(startEdge===1){sx=WORLD_W;sy=rnd()*WORLD_H;ex=0;ey=rnd()*WORLD_H;}
       else if(startEdge===2){sx=rnd()*WORLD_W;sy=WORLD_H;ex=rnd()*WORLD_W;ey=0;}
       else{sx=0;sy=rnd()*WORLD_H;ex=WORLD_W;ey=rnd()*WORLD_H;}
-      const steps=10+Math.floor(rnd()*4);
+      // Dense sample — more points = smoother curves
+      const steps=28+Math.floor(rnd()*10);
+      // Each path gets its own wave phase/frequency for variety
+      const phase=rnd()*Math.PI*2;
+      const freq1=0.8+rnd()*0.5;   // primary undulation
+      const freq2=2.1+rnd()*1.2;   // secondary small wiggle
+      const amp1=WORLD_W*(0.10+rnd()*0.08);
+      const amp2=WORLD_W*0.025;
+      // Perpendicular direction for offset (so sine moves perpendicular to path heading)
+      const dx=ex-sx,dy=ey-sy,len=Math.sqrt(dx*dx+dy*dy)||1;
+      const perpX=-dy/len,perpY=dx/len;
+      // Base width varies per path (narrow trail vs wide road)
+      const baseWidth=42+rnd()*54;
+      const widthVar=18+rnd()*20;
       for(let s=0;s<=steps;s++){
         const t=s/steps;
-        // Base interpolation + sinusoidal wander for a curving path
-        const wobble=(rnd()-0.5)*WORLD_W*0.18;
-        const wobble2=(rnd()-0.5)*WORLD_H*0.18;
+        // Smooth lateral offset from the direct line: sum of two sines
+        const offset=Math.sin(t*Math.PI*freq1+phase)*amp1
+                    +Math.sin(t*Math.PI*freq2+phase*1.7)*amp2;
+        // Width pulses gently along the path — wider in the middle, narrows at ends
+        const widthCurve=Math.sin(t*Math.PI); // 0 at ends, 1 at midpoint
+        const w=baseWidth+widthVar*widthCurve+Math.sin(t*Math.PI*3+phase)*6;
         points.push({
-          x:sx+(ex-sx)*t+Math.sin(t*Math.PI*1.3+p)*WORLD_W*0.09+wobble,
-          y:sy+(ey-sy)*t+Math.cos(t*Math.PI*1.1+p*2)*WORLD_H*0.09+wobble2,
-          width:50+rnd()*42,
+          x:sx+(ex-sx)*t+perpX*offset,
+          y:sy+(ey-sy)*t+perpY*offset,
+          width:Math.max(24,w),
         });
       }
       terrainFeatures.paths.push({points,color:z.pathColor||'rgba(140,110,80,0.18)'});
@@ -2592,23 +2610,64 @@ function drawWorld(now){
   });
 
   // ─── Paths ───
+  // Render with smooth quadratic curves passing through midpoints between
+  // consecutive points. This gives a naturally flowing appearance — no more
+  // visible corners between straight segments.
   terrainFeatures.paths.forEach(path=>{
-    // Draw as a single flowing stroke with variable width along the points
-    for(let i=0;i<path.points.length-1;i++){
-      const p1=path.points[i],p2=path.points[i+1];
-      // Cull offscreen path segments
-      const minX=Math.min(p1.x,p2.x),maxX=Math.max(p1.x,p2.x);
-      const minY=Math.min(p1.y,p2.y),maxY=Math.max(p1.y,p2.y);
-      if(maxX<vl||minX>vr||maxY<vt||minY>vb)continue;
-      ctx.strokeStyle=path.color;
-      ctx.lineWidth=(p1.width+p2.width)/2;
-      ctx.lineCap='round';
-      ctx.beginPath();ctx.moveTo(p1.x,p1.y);ctx.lineTo(p2.x,p2.y);ctx.stroke();
-      // Slightly brighter inner core
-      ctx.strokeStyle=path.color.replace(/[\d.]+\)$/,(m)=>((parseFloat(m)*1.8).toFixed(2)+')'));
-      ctx.lineWidth=((p1.width+p2.width)/2)*0.35;
-      ctx.beginPath();ctx.moveTo(p1.x,p1.y);ctx.lineTo(p2.x,p2.y);ctx.stroke();
+    if(path.points.length < 3) return;
+    // Cull the whole path if its bounding box is fully offscreen
+    let bbMinX=Infinity,bbMaxX=-Infinity,bbMinY=Infinity,bbMaxY=-Infinity;
+    path.points.forEach(pt=>{
+      if(pt.x<bbMinX)bbMinX=pt.x; if(pt.x>bbMaxX)bbMaxX=pt.x;
+      if(pt.y<bbMinY)bbMinY=pt.y; if(pt.y>bbMaxY)bbMaxY=pt.y;
+    });
+    if(bbMaxX<vl||bbMinX>vr||bbMaxY<vt||bbMinY>vb)return;
+    // Average width for the stroke thickness (variable width isn't supported by stroke directly,
+    // so we approximate — the width variation per point is used for edge prop scattering elsewhere)
+    let avgWidth=0;
+    path.points.forEach(pt=>{avgWidth+=pt.width;});
+    avgWidth/=path.points.length;
+    // Layer 1: subtle darker outline for depth (wider, slightly darker)
+    const outlineColor = path.color.replace(/[\d.]+\)$/,(m)=>((parseFloat(m)*0.5).toFixed(2)+')'));
+    ctx.strokeStyle=outlineColor;
+    ctx.lineWidth=avgWidth*1.15;
+    ctx.lineCap='round';
+    ctx.lineJoin='round';
+    ctx.beginPath();
+    ctx.moveTo(path.points[0].x,path.points[0].y);
+    for(let i=1;i<path.points.length-1;i++){
+      const p0=path.points[i], p1=path.points[i+1];
+      const midX=(p0.x+p1.x)/2, midY=(p0.y+p1.y)/2;
+      ctx.quadraticCurveTo(p0.x,p0.y,midX,midY);
     }
+    const last=path.points[path.points.length-1];
+    ctx.lineTo(last.x,last.y);
+    ctx.stroke();
+    // Layer 2: main path surface (normal width, base color)
+    ctx.strokeStyle=path.color;
+    ctx.lineWidth=avgWidth;
+    ctx.beginPath();
+    ctx.moveTo(path.points[0].x,path.points[0].y);
+    for(let i=1;i<path.points.length-1;i++){
+      const p0=path.points[i], p1=path.points[i+1];
+      const midX=(p0.x+p1.x)/2, midY=(p0.y+p1.y)/2;
+      ctx.quadraticCurveTo(p0.x,p0.y,midX,midY);
+    }
+    ctx.lineTo(last.x,last.y);
+    ctx.stroke();
+    // Layer 3: brighter inner core (narrower, bright — suggests worn trodden earth)
+    const innerColor = path.color.replace(/[\d.]+\)$/,(m)=>((parseFloat(m)*1.8).toFixed(2)+')'));
+    ctx.strokeStyle=innerColor;
+    ctx.lineWidth=avgWidth*0.35;
+    ctx.beginPath();
+    ctx.moveTo(path.points[0].x,path.points[0].y);
+    for(let i=1;i<path.points.length-1;i++){
+      const p0=path.points[i], p1=path.points[i+1];
+      const midX=(p0.x+p1.x)/2, midY=(p0.y+p1.y)/2;
+      ctx.quadraticCurveTo(p0.x,p0.y,midX,midY);
+    }
+    ctx.lineTo(last.x,last.y);
+    ctx.stroke();
   });
 
   // ─── Layer 2: medium patches (smaller ground variance) ───
