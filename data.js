@@ -236,8 +236,10 @@ function computeAttack(lv){
 //   Levels 50-100: long haul (~100 hours)
 // Total time to level 50 at ~5s per kill: ~20 hours.
 // Total time to level 100: ~125 hours.
-// Shape: xp_for_level(lv) = 60 * lv^1.6
-function xpForLevel(lv){return Math.floor(60*Math.pow(lv,1.6));}
+// Shape: xp_for_level(lv) = 85 * lv^1.75
+// Steepened from 60*lv^1.6 based on player feedback — leveling was too fast
+// (reaching lv15 in minutes). New curve is ~2.4x slower at mid-game.
+function xpForLevel(lv){return Math.floor(85*Math.pow(lv,1.75));}
 // ═══════ ENEMY SCALING (player-relative) ═══════════════════════════
 // Design philosophy: This is an AFK-friendly idle ARPG, not classic WoW.
 // Enemies should always feel appropriate to the player's level — not
@@ -257,9 +259,11 @@ function enemyHpScale(lv){
 }
 
 // Enemy damage scale — grows with player level.
-// Slightly slower growth than HP so fights don't get progressively deadlier.
+// INCREASED from (0.85 + 0.035*lv) based on player feedback that combat felt
+// too passive — enemies barely dented the player. Now enemies are a real
+// threat that the player must actively manage (especially in AFK).
 function enemyDmgScale(lv){
-  return 0.85 + 0.035 * lv - 0.0001 * lv * lv;
+  return 1.3 + 0.055 * lv - 0.0002 * lv * lv;
 }
 
 // ═══════ PLAYER PASSIVE LEVEL BONUSES ══════════════════════════════
@@ -679,8 +683,8 @@ const DUNGEONS=[
     boss:{
       name:'Bone Revenant',
       baseType:'skeleton',
-      hpMult:40,
-      atkMult:1.8,
+      hpMult:120,
+      atkMult:2.4,
       sizeMult:2.2,
       // Signature ability: summons skeleton thralls to swarm the player
       ability:{type:'summonThralls',cooldown:8000,warmup:1500,count:2},
@@ -729,8 +733,8 @@ const DUNGEONS=[
     boss:{
       name:'Sorrowed Specter',
       baseType:'specter',
-      hpMult:50,
-      atkMult:2.1,
+      hpMult:150,
+      atkMult:2.7,
       sizeMult:2.4,
       // Signature ability: phase shift — become invulnerable, teleport, leave a shade echo
       ability:{type:'phaseShift',cooldown:6000,warmup:800,invulnMs:1500,teleportDist:320},
@@ -779,8 +783,8 @@ const DUNGEONS=[
     boss:{
       name:'Cathedral Warden',
       baseType:'golem',
-      hpMult:70,
-      atkMult:2.5,
+      hpMult:220,
+      atkMult:3.0,
       sizeMult:2.8,
       // Signature ability: fire cross — 4 lines of fire shoot out in +-pattern
       ability:{type:'fireCross',cooldown:10000,warmup:1800,lineLength:520,lineWidth:80,damageMult:1.6,lingerMs:2000},
