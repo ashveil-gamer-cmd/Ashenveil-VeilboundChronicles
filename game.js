@@ -1600,6 +1600,15 @@ let envProps=[];
 // Separate from envProps because they have mutable state (opened/closed) and
 // animated glow effects. Structure: {x, y, tier, opened, openTime, seed}.
 let worldChests=[];
+// Offering altars — grant a temporary buff when touched. One-time use per visit.
+// Structure: {x, y, consumed, consumedTime, seed, buffType}
+let worldAltars=[];
+// Bone caches — small reward nodes that give gold + crafting scrap when touched.
+// Destroyed on pickup. Structure: {x, y, looted, lootedTime, seed}
+let worldCaches=[];
+// Active temporary buffs from altars. Each: {type, expires, value}
+// type: 'damage', 'speed', 'regen', 'crit'. value is the magnitude.
+let activeBuffs=[];
 
 
 // ═══════ ENVIRONMENT GENERATION ══════════════════════════
@@ -1772,6 +1781,9 @@ function generateEnvironment(){
 
   // Generate world chests for this zone (skip in camp)
   generateWorldChests(seedBase);
+  // Generate world altars (buff shrines) and caches (gold nodes)
+  generateWorldAltars(seedBase);
+  generateWorldCaches(seedBase);
 }
 
 // ═══════ WORLD CHESTS ════════════════════════════════════
@@ -2057,6 +2069,392 @@ function drawChest(chest, now){
   ctx.restore();
 }
 
+// ═══════ OFFERING ALTARS ═══════════════════════════════════
+// Small stone altars with glowing runes. Walking near consumes the altar
+// and grants a random temporary buff for 90 seconds. One-time use per
+// zone visit. Clear visual telegraph so player can decide whether to
+// engage or save for later.
+
+const ALTAR_BUFF_TYPES = [
+  {type:'damage', value:0.25, color:'#ff6b2c', label:'+25% Damage'},
+  {type:'speed',  value:0.30, color:'#60a5fa', label:'+30% Speed'},
+  {type:'regen',  value:0.02, color:'#22c55e', label:'HP Regen'},    // 2% max HP per sec
+  {type:'crit',   value:0.15, color:'#c084fc', label:'+15% Crit'},
+];
+const ALTAR_BUFF_DURATION_MS = 90000;
+
+function generateWorldAltars(seedBase){
+  worldAltars = [];
+  if(!curZone || curZone.isCamp) return;
+  const rnd = srand(seedBase + 333444);
+  const count = 2 + Math.floor(rnd()*2); // 2-3 per zone
+  for(let i=0; i<count; i++){
+    const px = (0.1 + rnd()*0.8) * WORLD_W;
+    const py = (0.1 + rnd()*0.8) * WORLD_H;
+    const buffIdx = Math.floor(rnd() * ALTAR_BUFF_TYPES.length);
+    worldAltars.push({
+      x: px, y: py,
+      consumed: false, consumedTime: 0,
+      seed: Math.floor(rnd()*99991)+1,
+      buffIdx: buffIdx,
+    });
+  }
+}
+
+function updateWorldAltars(now){
+  if(!worldAltars || worldAltars.length === 0) return;
+  for(let i=0; i<worldAltars.length; i++){
+    const a = worldAltars[i];
+    if(a.consumed) continue;
+    const dx = player.x - a.x, dy = player.y - a.y;
+    if(dx*dx + dy*dy < 70*70){
+      consumeAltar(a, now);
+    }
+  }
+}
+
+function consumeAltar(altar, now){
+  altar.consumed = true;
+  altar.consumedTime = now;
+  const buff = ALTAR_BUFF_TYPES[altar.buffIdx];
+  // Remove existing buff of same type (replace with new)
+  activeBuffs = activeBuffs.filter(b => b.type !== buff.type);
+  activeBuffs.push({
+    type: buff.type,
+    value: buff.value,
+    expires: now + ALTAR_BUFF_DURATION_MS,
+  });
+  addFeed(`✦ ALTAR BLESSING — ${buff.label} for 90s`, buff.color);
+  // Big visual effect
+  if(typeof pushGroundFX === 'function'){
+    pushGroundFX({type:'bloom', x:altar.x, y:altar.y, r:180, maxR:180, color:buff.color, life:1.2, maxLife:1.2});
+    pushGroundFX({type:'beam', x:altar.x, y:altar.y, r:80, maxR:80, color:buff.color, life:2.0, maxLife:2.0});
+  }
+  if(typeof screenShake === 'function') screenShake(5, 250);
+  if(typeof SFX !== 'undefined' && SFX.portalOpen) SFX.portalOpen();
+}
+
+function drawWorldAltars(now, vl, vr, vt, vb){
+  if(!worldAltars || worldAltars.length === 0) return;
+  for(let i=0; i<worldAltars.length; i++){
+    const a = worldAltars[i];
+    if(a.x < vl || a.x > vr || a.y < vt || a.y > vb) continue;
+    drawAltar(a, now);
+  }
+}
+
+function drawAltar(altar, now){
+  const S = 44;
+  const buff = ALTAR_BUFF_TYPES[altar.buffIdx];
+  const stone = '#1f1a14';
+  const stoneDark = '#0a0805';
+  const stoneMid = '#161210';
+  const stoneLight = '#3a2e22';
+  ctx.save();
+  ctx.translate(altar.x, altar.y);
+  if(!altar.consumed){
+    // ═══ ACTIVE ALTAR — pulsing rune, ember wisps, inviting glow ═══
+    const pulse = 0.65 + Math.sin(now/600 + altar.seed) * 0.35;
+    // Ground halo in buff color
+    const haloGrad = ctx.createRadialGradient(0, S*0.25, 0, 0, S*0.25, S*1.6);
+    haloGrad.addColorStop(0, buff.color + '40');
+    haloGrad.addColorStop(1, buff.color + '00');
+    ctx.fillStyle = haloGrad;
+    ctx.beginPath();ctx.ellipse(0, S*0.25, S*1.6, S*0.6, 0, 0, Math.PI*2);ctx.fill();
+    // Base shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.beginPath();ctx.ellipse(S*0.04, S*0.35, S*0.65, S*0.16, 0, 0, Math.PI*2);ctx.fill();
+    // ─── STEPPED STONE BASE (2 steps) ───
+    ctx.fillStyle = stoneDark;
+    ctx.fillRect(-S*0.52, S*0.18, S*1.04, S*0.18);
+    ctx.fillStyle = stone;
+    ctx.fillRect(-S*0.48, S*0.14, S*0.96, S*0.16);
+    // Lit front edge
+    ctx.fillStyle = stoneLight;
+    ctx.fillRect(-S*0.48, S*0.14, S*0.96, S*0.02);
+    // Upper step
+    ctx.fillStyle = stoneDark;
+    ctx.fillRect(-S*0.42, S*0.02, S*0.84, S*0.14);
+    ctx.fillStyle = stone;
+    ctx.fillRect(-S*0.38, -S*0.02, S*0.76, S*0.14);
+    ctx.fillStyle = stoneLight;
+    ctx.fillRect(-S*0.38, -S*0.02, S*0.76, S*0.02);
+    // ─── ALTAR SLAB TOP ───
+    ctx.fillStyle = stoneMid;
+    ctx.fillRect(-S*0.42, -S*0.12, S*0.84, S*0.12);
+    ctx.fillStyle = stone;
+    ctx.fillRect(-S*0.4, -S*0.14, S*0.8, S*0.04);
+    // Top lit edge
+    ctx.fillStyle = stoneLight;
+    ctx.fillRect(-S*0.4, -S*0.14, S*0.8, S*0.015);
+    // ─── CENTRAL RUNE — big pulsing symbol on top face ───
+    ctx.shadowColor = buff.color;
+    ctx.shadowBlur = 22 * pulse;
+    ctx.strokeStyle = buff.color;
+    ctx.fillStyle = buff.color;
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.5 + pulse * 0.4;
+    // Circle
+    ctx.beginPath();
+    ctx.ellipse(0, -S*0.06, S*0.14, S*0.04, 0, 0, Math.PI*2);
+    ctx.stroke();
+    // Inner triangle
+    ctx.beginPath();
+    ctx.moveTo(-S*0.08, -S*0.05);
+    ctx.lineTo(S*0.08, -S*0.05);
+    ctx.lineTo(0, -S*0.09);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+    // ─── EMBER WISPS rising — animated particles ───
+    for(let w=0; w<4; w++){
+      const wt = ((now/40 + altar.seed + w*73) % 100) / 100;
+      const wx = Math.sin(now/500 + w*1.57 + altar.seed)*S*0.12;
+      const wy = -S*0.15 - wt*S*0.9;
+      const wa = (1-wt)*0.9;
+      ctx.globalAlpha = wa;
+      ctx.shadowColor = buff.color;
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = buff.color;
+      ctx.beginPath();ctx.arc(wx, wy, S*0.035*(1-wt*0.4), 0, Math.PI*2);ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+    // Peak shimmer above
+    ctx.shadowColor = buff.color;
+    ctx.shadowBlur = 15 * pulse;
+    ctx.fillStyle = buff.color;
+    ctx.globalAlpha = 0.7 * pulse;
+    ctx.beginPath();ctx.arc(0, -S*1.0, S*0.08, 0, Math.PI*2);ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+  } else {
+    // ═══ CONSUMED ALTAR — dim, dormant, no glow ═══
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.beginPath();ctx.ellipse(S*0.04, S*0.35, S*0.6, S*0.14, 0, 0, Math.PI*2);ctx.fill();
+    // Base (no highlights, darker)
+    ctx.fillStyle = stoneDark;
+    ctx.fillRect(-S*0.52, S*0.18, S*1.04, S*0.18);
+    ctx.fillStyle = stoneMid;
+    ctx.fillRect(-S*0.48, S*0.14, S*0.96, S*0.16);
+    ctx.fillStyle = stoneDark;
+    ctx.fillRect(-S*0.42, S*0.02, S*0.84, S*0.14);
+    ctx.fillStyle = stoneMid;
+    ctx.fillRect(-S*0.38, -S*0.02, S*0.76, S*0.14);
+    ctx.fillStyle = stoneMid;
+    ctx.fillRect(-S*0.42, -S*0.12, S*0.84, S*0.12);
+    ctx.fillStyle = stoneDark;
+    ctx.fillRect(-S*0.4, -S*0.14, S*0.8, S*0.04);
+    // Faded dormant rune
+    ctx.strokeStyle = 'rgba(80,70,60,0.4)';
+    ctx.lineWidth = 1.3;
+    ctx.beginPath();
+    ctx.ellipse(0, -S*0.06, S*0.14, S*0.04, 0, 0, Math.PI*2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ═══════ BONE CACHES ═══════════════════════════════════════
+// Small pile of bones with gold coins glinting through. Walking near
+// grants gold and a small chance at crafting scrap. Destroyed on pickup.
+
+function generateWorldCaches(seedBase){
+  worldCaches = [];
+  if(!curZone || curZone.isCamp) return;
+  const rnd = srand(seedBase + 555777);
+  // More caches in crypts + ashen (lore-appropriate), fewer in mire/spire
+  let count = 3 + Math.floor(rnd()*3);
+  if(curZone.id === 'crypts' || curZone.id === 'ashen') count += 2;
+  for(let i=0; i<count; i++){
+    const px = (0.08 + rnd()*0.84) * WORLD_W;
+    const py = (0.08 + rnd()*0.84) * WORLD_H;
+    worldCaches.push({
+      x: px, y: py,
+      looted: false, lootedTime: 0,
+      seed: Math.floor(rnd()*99991)+1,
+    });
+  }
+}
+
+function updateWorldCaches(now){
+  if(!worldCaches || worldCaches.length === 0) return;
+  for(let i=0; i<worldCaches.length; i++){
+    const c = worldCaches[i];
+    if(c.looted) continue;
+    const dx = player.x - c.x, dy = player.y - c.y;
+    if(dx*dx + dy*dy < 60*60){
+      lootCache(c, now);
+    }
+  }
+}
+
+function lootCache(cache, now){
+  cache.looted = true;
+  cache.lootedTime = now;
+  // Gold reward scaled by level — 15-40 gold base, +5% per level
+  const base = 15 + Math.floor(Math.random()*26);
+  const gold = Math.floor(base * (1 + player.level * 0.05));
+  player.gold += gold;
+  addFeed(`+${gold} gold (cache)`, '#f59e0b');
+  // Visual + sound
+  if(typeof pushGroundFX === 'function'){
+    pushGroundFX({type:'bloom', x:cache.x, y:cache.y, r:80, maxR:80, color:'#f59e0b', life:0.6, maxLife:0.6});
+  }
+  if(typeof SFX !== 'undefined' && SFX.goldPickup) SFX.goldPickup();
+}
+
+function drawWorldCaches(now, vl, vr, vt, vb){
+  if(!worldCaches || worldCaches.length === 0) return;
+  for(let i=0; i<worldCaches.length; i++){
+    const c = worldCaches[i];
+    if(c.x < vl || c.x > vr || c.y < vt || c.y > vb) continue;
+    if(c.looted){
+      // Show only briefly after looting (fading afterglow)
+      const age = now - c.lootedTime;
+      if(age < 600) drawCacheAfterglow(c, age);
+      continue;
+    }
+    drawCache(c, now);
+  }
+}
+
+function drawCache(cache, now){
+  const S = 34;
+  const bone = '#c8bca0';
+  const boneDark = '#6a5c40';
+  const boneShadow = '#2a2218';
+  const gold = '#f59e0b';
+  ctx.save();
+  ctx.translate(cache.x, cache.y);
+  const pulse = 0.7 + Math.sin(now/450 + cache.seed)*0.3;
+  // Gold halo
+  ctx.shadowColor = gold;
+  ctx.shadowBlur = 14 * pulse;
+  const haloGrad = ctx.createRadialGradient(0, S*0.1, 0, 0, S*0.1, S*0.9);
+  haloGrad.addColorStop(0, 'rgba(255,200,100,0.3)');
+  haloGrad.addColorStop(1, 'rgba(255,180,80,0)');
+  ctx.fillStyle = haloGrad;
+  ctx.beginPath();ctx.ellipse(0, S*0.1, S*0.9, S*0.4, 0, 0, Math.PI*2);ctx.fill();
+  ctx.shadowBlur = 0;
+  // Ground shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.beginPath();ctx.ellipse(S*0.04, S*0.2, S*0.45, S*0.1, 0, 0, Math.PI*2);ctx.fill();
+  // ─── BONE PILE ─── scattered bones forming a low mound
+  for(let i=0; i<4; i++){
+    const angle = ((i*2.137)%1) * Math.PI*2;
+    const dist = ((i*1.713)%1) * S*0.3;
+    const bx = Math.cos(angle)*dist;
+    const by = Math.sin(angle)*dist*0.5;
+    const blen = S*(0.15 + ((i*3.61)%1)*0.12);
+    const brot = ((i*1.91)%1) * Math.PI*2;
+    ctx.save();
+    ctx.translate(bx, by);
+    ctx.rotate(brot);
+    // Bone shadow
+    ctx.strokeStyle = boneShadow;
+    ctx.lineWidth = S*0.12;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(-blen/2 + 1, 1);
+    ctx.lineTo(blen/2 + 1, 1);
+    ctx.stroke();
+    // Bone main
+    ctx.strokeStyle = bone;
+    ctx.lineWidth = S*0.09;
+    ctx.beginPath();
+    ctx.moveTo(-blen/2, 0);
+    ctx.lineTo(blen/2, 0);
+    ctx.stroke();
+    // Bone knob ends
+    ctx.fillStyle = bone;
+    ctx.beginPath();ctx.arc(-blen/2, 0, S*0.055, 0, Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.arc(blen/2, 0, S*0.055, 0, Math.PI*2);ctx.fill();
+    ctx.restore();
+  }
+  // A small skull sitting in the middle
+  ctx.fillStyle = boneShadow;
+  ctx.beginPath();ctx.ellipse(S*0.02, S*0.02, S*0.16, S*0.14, 0, 0, Math.PI*2);ctx.fill();
+  ctx.fillStyle = bone;
+  ctx.beginPath();ctx.ellipse(0, 0, S*0.15, S*0.13, 0, 0, Math.PI*2);ctx.fill();
+  // Skull eye sockets
+  ctx.fillStyle = '#0a0604';
+  ctx.beginPath();ctx.arc(-S*0.05, -S*0.02, S*0.03, 0, Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(S*0.05, -S*0.02, S*0.03, 0, Math.PI*2);ctx.fill();
+  // ─── GOLD COINS glinting in the pile ───
+  ctx.shadowColor = gold;
+  ctx.shadowBlur = 10 * pulse;
+  for(let c=0; c<3; c++){
+    const cx = ((c*3.13)%1 - 0.5) * S*0.35;
+    const cy = S*0.1 + ((c*1.79)%1 - 0.5)*S*0.1;
+    ctx.fillStyle = '#ffc850';
+    ctx.beginPath();ctx.ellipse(cx, cy, S*0.07, S*0.025, 0, 0, Math.PI*2);ctx.fill();
+    // Coin shine
+    ctx.fillStyle = '#fff5c0';
+    ctx.globalAlpha = 0.7 + pulse*0.3;
+    ctx.beginPath();ctx.ellipse(cx - S*0.02, cy - S*0.005, S*0.025, S*0.01, 0, 0, Math.PI*2);ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  ctx.shadowBlur = 0;
+  // Shimmer sparkles
+  for(let s=0; s<2; s++){
+    const st = ((now/60 + s*167 + cache.seed) % 100)/100;
+    const sx = Math.sin(st*Math.PI*2 + s)*S*0.25;
+    const sy = -S*0.3 + st*S*0.2;
+    ctx.globalAlpha = (1-st)*0.8;
+    ctx.fillStyle = '#ffee90';
+    ctx.beginPath();ctx.arc(sx, sy, S*0.03, 0, Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+function drawCacheAfterglow(cache, age){
+  const fade = 1 - (age/600);
+  ctx.save();
+  ctx.translate(cache.x, cache.y);
+  ctx.shadowColor = '#f59e0b';
+  ctx.shadowBlur = 30*fade;
+  ctx.fillStyle = `rgba(255,200,80,${0.5*fade})`;
+  ctx.beginPath();ctx.arc(0, 0, 30*fade + 10, 0, Math.PI*2);ctx.fill();
+  ctx.restore();
+}
+
+// ═══════ ACTIVE BUFF MANAGEMENT ════════════════════════════
+// Called each frame to expire old buffs. Buff values are read by combat
+// code via getActiveBuffValue().
+
+function updateActiveBuffs(now){
+  if(!activeBuffs || activeBuffs.length === 0) return;
+  const remaining = [];
+  for(let i=0; i<activeBuffs.length; i++){
+    if(activeBuffs[i].expires > now){
+      remaining.push(activeBuffs[i]);
+    } else {
+      // Buff just expired — notify player
+      addFeed(`− ${activeBuffs[i].type.toUpperCase()} blessing faded`, '#8a7a6a');
+    }
+  }
+  activeBuffs = remaining;
+  // Apply per-tick effects (regen)
+  const regenBuff = activeBuffs.find(b => b.type === 'regen');
+  if(regenBuff && player.hp < player.maxHp){
+    // 2% max HP per sec → per frame at ~60fps = 0.033% per frame
+    player.hp = Math.min(player.maxHp, player.hp + player.maxHp * regenBuff.value / 60);
+  }
+}
+
+// Returns the current multiplier for a given buff type.
+// Used by combat/movement code to apply buffs.
+function getActiveBuffValue(type){
+  if(!activeBuffs) return 0;
+  for(let i=0; i<activeBuffs.length; i++){
+    if(activeBuffs[i].type === type) return activeBuffs[i].value;
+  }
+  return 0;
+}
+
 // ═══════ PROP COLLISION SYSTEM ═══════════════════════════
 // Spatial grid for fast "which props are near this point" queries.
 // Bucket size chosen so 2-4 big props fit per cell typically.
@@ -2165,8 +2563,10 @@ function drawEnvironment(now){
   // (the landmark is meant to be a distant anchor, not foreground clutter)
   drawActiveLandmark(now, vl, vr, vt, vb);
   envProps.forEach(p=>{if(p.x>vl&&p.x<vr&&p.y>vt&&p.y<vb)drawProp(p,now);});
-  // Chests render AFTER props so they're always visible/on top for clarity
+  // Interactables render AFTER props so they're always visible
   drawWorldChests(now, vl, vr, vt, vb);
+  drawWorldAltars(now, vl, vr, vt, vb);
+  drawWorldCaches(now, vl, vr, vt, vb);
 }
 
 // Looks up the landmark for the current zone/dungeon and draws it.
@@ -5723,6 +6123,10 @@ function damageMult(){
     const alive=spirits.filter(s=>!s.dead&&!s.isTemp).length;
     mult+=(alive*perSpiritPct)/100;
   }
+  // Altar damage buff — adds flat multiplier when active
+  if(typeof getActiveBuffValue === 'function'){
+    mult += getActiveBuffValue('damage');
+  }
   return mult;
 }
 
@@ -5934,7 +6338,8 @@ function hitEnemy(e,dmg,isCrit=false,fromX,fromY){
     spawnDmgText(e.x,e.y-e.size,'IMMUNE','#60a5fa',false);
     return;
   }
-  const critChance=0.12+_tb('critPct')/100;
+  const buffCrit = typeof getActiveBuffValue === 'function' ? getActiveBuffValue('crit') : 0;
+  const critChance=0.12+_tb('critPct')/100 + buffCrit;
   const critRoll=Math.random()<critChance;
   const finalDmg = critRoll ? dmg * 2.2 : dmg;
   e.hp-=finalDmg;e.hitFlash=0.18;
@@ -5956,12 +6361,20 @@ function hitEnemy(e,dmg,isCrit=false,fromX,fromY){
 function killEnemy(e){
   e.dead=true;kills++;
   document.getElementById('killCount').textContent=`☠ ${kills}`;
-  // XP and gold rewards — tuned for ~3-4 min to reach level 5 and ~20 hours
-  // total to level 50 at observed kill rate (~48 kills/min). Previous values
-  // (30/120) leveled too fast because kill rate turned out to be faster than
-  // the original 5s/kill estimate.
-  const xpG = e.isElite ? 32 : 8;
-  const goldG = e.isElite ? 40 : 8;
+  // XP and gold rewards — Tier-1 balance rebalance (see user feedback):
+  // - Elite XP reduced from 32 → 20 (4x common → 2.5x common) to stop
+  //   dungeons gaining multiple levels in 30 seconds.
+  // - Boss XP capped at 50% of xpToNext so a boss can't single-handedly
+  //   level the player more than half a bar.
+  // - Common XP stays at 8 so early-game pacing is preserved.
+  let xpG;
+  if(e.isBoss){
+    // Boss — capped at half a level's worth of XP
+    xpG = Math.min(80 + player.level * 6, Math.floor(player.xpToNext * 0.5));
+  } else {
+    xpG = e.isElite ? 20 : 8;
+  }
+  const goldG = e.isBoss ? (60 + player.level*2) : (e.isElite ? 40 : 8);
   addXP(xpG);player.gold+=goldG;
   SFX[e.isElite?'eliteDeath':'enemyDeath']();
   spawnDmgText(e.x,e.y-40,`+${xpG}XP`,'#8b5cf6',false);
@@ -5982,8 +6395,9 @@ function killEnemy(e){
   if(e.isElite&&Math.random()<0.18){creditMaterial('etherDust',1);}
   if(Math.random()<0.05){creditMaterial('scrap',1);}
   if(e.veilmarkStacks>0&&Math.random()<0.14){creditMaterial('etherDust',1);}
-  // Loot
-  if(Math.random()<(e.isElite?0.38:0.07)){
+  // Loot drop — elite drop rate reduced from 38% → 22%, common stays at 7%.
+  // This keeps common drops reliable but stops elites from flooding the bag.
+  if(Math.random()<(e.isElite?0.22:0.07)){
     const item=rollLoot(player.level);tryEquip(item);
     // Rarity-tiered pickup sound
     const rarityToSFX={common:'pickupCommon',uncommon:'pickupUncommon',rare:'pickupRare',epic:'pickupEpic',legendary:'pickupLegendary',mythic:'pickupMythic'};
@@ -6244,8 +6658,11 @@ function respawn(){player.hp=player.maxHp;player.isDead=false;player.iframes=300
 // ═══════ UPDATE ═════════════════════════════════════════
 function update(dt,now){
   if(player.isDead)return;
-  // Check for chest auto-loot (works in AFK and manual play)
+  // Check for chest/altar/cache auto-loot (works in AFK and manual play)
   if(typeof updateWorldChests === 'function') updateWorldChests(now);
+  if(typeof updateWorldAltars === 'function') updateWorldAltars(now);
+  if(typeof updateWorldCaches === 'function') updateWorldCaches(now);
+  if(typeof updateActiveBuffs === 'function') updateActiveBuffs(now);
   let ix=0,iy=0;
   if(keys['ArrowLeft']||keys['a']||keys['A'])ix=-1;
   if(keys['ArrowRight']||keys['d']||keys['D'])ix=1;
@@ -6271,7 +6688,8 @@ function update(dt,now){
 
   if(ix!==0||iy!==0){
     const m=Math.sqrt(ix*ix+iy*iy)||1;
-    const spdMult=(1+_tb('moveSpdPct')/100) * classSpdMult * levelSpdBonus;
+    const buffSpd = typeof getActiveBuffValue === 'function' ? getActiveBuffValue('speed') : 0;
+    const spdMult=(1+_tb('moveSpdPct')/100) * classSpdMult * levelSpdBonus * (1 + buffSpd);
     player.vx=(ix/m)*PLAYER_SPEED*spdMult;player.vy=(iy/m)*PLAYER_SPEED*spdMult;
     player.facing=Math.atan2(iy,ix);
   } else if(isAfk){
@@ -6337,7 +6755,8 @@ function update(dt,now){
       }
     }
     if(d<80||player.afkTimer>player.afkCommit){player.visitedSectors[player.sector]=true;setAfkWaypoint();}
-    const spdMult=(1+_tb('moveSpdPct')/100) * classSpdMult * levelSpdBonus;
+    const buffSpdAfk = typeof getActiveBuffValue === 'function' ? getActiveBuffValue('speed') : 0;
+    const spdMult=(1+_tb('moveSpdPct')/100) * classSpdMult * levelSpdBonus * (1 + buffSpdAfk);
     // Kite mode moves at full speed to escape crowds; otherwise slower so
     // abilities have time to cycle.
     const spdBase = inCrowd ? PLAYER_SPEED*1.0 : (ne && md<classAttackRangeAfk+120 ? PLAYER_SPEED*0.9 : PLAYER_SPEED*0.72);
