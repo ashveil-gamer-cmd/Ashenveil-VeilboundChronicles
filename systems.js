@@ -2846,3 +2846,373 @@ function renderPresetSelector(){
     container.appendChild(card);
   });
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// PRESET ABILITY OVERRIDES
+// ═══════════════════════════════════════════════════════════════════════
+// When a player wears enough pieces of a preset's set, their class abilities
+// transform to match the preset's identity. This is what makes builds feel
+// genuinely different — not just stat stacking, but different SPELLS.
+//
+// Activation rule: 4+ set pieces equipped → preset abilities active
+// Scaling rule:    8/8 set pieces equipped → maximum potency
+
+// Returns how many pieces of a given set the player is wearing.
+function getEquippedSetPieceCount(setName){
+  if(!setName) return 0;
+  let count = 0;
+  Object.values(equipped).forEach(item=>{
+    if(item && item.setName === setName) count++;
+  });
+  return count;
+}
+
+// Returns the active preset ID based on what the player is wearing.
+// Null if no preset has enough pieces to activate (need 4+).
+function getActivePresetId(){
+  for(const preset of Object.values(BUILD_PRESETS)){
+    if(getEquippedSetPieceCount(preset.setName) >= 4){
+      return preset.id;
+    }
+  }
+  return null;
+}
+
+// Main dispatcher for Hollowcaller preset ability overrides.
+// Returns true if handled (skip default), false to fall through.
+function castHollowcallerPresetOverride(idx, now){
+  const activePreset = getActivePresetId();
+  if(!activePreset) return false;
+  const preset = BUILD_PRESETS[activePreset];
+  if(!preset || preset.classId !== 'hollowcaller') return false;
+  // Route to the preset-specific handler
+  if(activePreset === 'necrolord'){
+    return castNecrolord(idx, now);
+  }
+  // voidweaver, reaverSaint handlers will be added in next sessions
+  return false;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// NECROLORD ABILITIES — Commander of the Dead
+// ═══════════════════════════════════════════════════════════════════════
+// Theme: green-white skull aura. Spirits are your weapon. You conduct.
+//
+// Q — Raise Dead: Summons 2 spirits at once (always), guaranteed (ignores cap)
+// W — Commander's Banner: Plants a banner that buffs nearby spirits
+// E — Soul Leech: Drains HP from target, heals self + all spirits
+// R — Wail of the Grave: Fear pulse, spirits get +50% speed burst
+// Ult (idx=4): Unleash the Legion — all spirits explode in damage wave
+
+function castNecrolord(idx, now){
+  const setCount = getEquippedSetPieceCount('Bonemarshal\'s Regalia');
+  const is8pc = setCount >= 8;
+
+  if(idx === 0){
+    // ═══ RAISE DEAD — summon 2 spirits, always ═══
+    // Base class already has Echoing Call talent for this but Necrolord
+    // does it regardless + adds visual flourish + can exceed bond cap by 1
+    let summoned = 0;
+    const first = spawnSpirit();
+    if(first) summoned++;
+    const second = spawnSpirit();
+    if(second) summoned++;
+    // 8-piece bonus: summon a THIRD spirit
+    if(is8pc){
+      const third = spawnSpirit();
+      if(third) summoned++;
+    }
+    if(summoned > 0){
+      abilityCDs[0] = now + effectiveCD(0);
+      if(typeof SFX !== 'undefined' && SFX.spiritSummon) SFX.spiritSummon();
+      addFeed(`✦✦${is8pc?'✦':''} RAISE DEAD — ${summoned} spirits`, '#9DC4B0');
+      emitSpiritBurst(player.x, player.y);
+      // Necrolord FX — bigger ring, double-layered
+      pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:160, r:10, color:'#c8ffdc', life:0.7, maxLife:0.7, expand:true});
+      pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:110, r:10, color:'#9DC4B0', life:0.55, maxLife:0.55, expand:true});
+      pushGroundFX({type:'scorch', x:player.x, y:player.y, r:120, maxR:120, color:'#9DC4B0', life:1.2, maxLife:1.2});
+      // Green skull-mist particles rising
+      for(let i = 0; i < 18; i++){
+        const a = (i/18)*Math.PI*2;
+        const r = 40 + Math.random()*30;
+        if(typeof particles !== 'undefined'){
+          particles.push({
+            x: player.x + Math.cos(a)*r, y: player.y + Math.sin(a)*r,
+            vx: Math.cos(a)*30, vy: Math.sin(a)*30 - 80,
+            life: 1.2, maxLife: 1.2,
+            color: '#9DC4B0', size: 3 + Math.random()*3, soul: true,
+          });
+        }
+      }
+    }
+    return true;
+  }
+
+  if(idx === 1){
+    // ═══ COMMANDER'S BANNER — plants a buff aura ═══
+    // Marks a point near player. All spirits within aura get +40% damage
+    // and +20% attack speed for 8 seconds. Enemies entering aura take minor
+    // damage. The banner is a world entity that persists.
+    if(!window.__necroBanners) window.__necroBanners = [];
+    // Place the banner just ahead of the player in facing direction
+    const bx = player.x + Math.cos(player.facing) * 80;
+    const by = player.y + Math.sin(player.facing) * 80;
+    window.__necroBanners.push({
+      x: bx, y: by,
+      expires: now + 8000,
+      radius: 260,
+      plantedAt: now,
+    });
+    abilityCDs[1] = now + effectiveCD(1);
+    if(typeof SFX !== 'undefined' && SFX.veilmark) SFX.veilmark();
+    pushGroundFX({type:'bloom', x:bx, y:by, r:160, maxR:160, color:'#c8ffdc', life:0.6, maxLife:0.6});
+    pushGroundFX({type:'ring', x:bx, y:by, maxR:260, r:20, color:'#9DC4B0', life:1.0, maxLife:1.0, expand:true});
+    addFeed('◆ COMMANDER\'S BANNER — spirits empowered', '#c8ffdc');
+    return true;
+  }
+
+  if(idx === 2){
+    // ═══ SOUL LEECH — drains HP from target, heals self + spirits ═══
+    // Targets the nearest enemy. Deals damage, heals player for 30% of damage
+    // dealt, heals all living spirits for 15% of damage dealt.
+    const t = getNearestEnemy(850);
+    if(!t) return true; // handled but no target — still consume the press
+    const dmgMult = is8pc ? 4.0 : 3.0; // 8pc bonus: stronger leech
+    const dmg = player.attack * dmgMult * damageMult();
+    hitEnemy(t, dmg, false, player.x, player.y);
+    // Heal player
+    const playerHeal = Math.floor(dmg * 0.30);
+    const actualPlayerHeal = Math.min(playerHeal, player.maxHp - player.hp);
+    if(actualPlayerHeal > 0){
+      player.hp += actualPlayerHeal;
+      spawnDmgText(player.x, player.y - 30, `+${actualPlayerHeal}`, '#9DC4B0', false);
+    }
+    // Heal all spirits
+    let spiritsHealed = 0;
+    const spiritHeal = Math.floor(dmg * 0.15);
+    if(typeof spirits !== 'undefined'){
+      spirits.forEach(s=>{
+        if(!s.dead && s.hp < s.maxHp){
+          const actual = Math.min(spiritHeal, s.maxHp - s.hp);
+          if(actual > 0){
+            s.hp += actual;
+            spiritsHealed++;
+          }
+        }
+      });
+    }
+    abilityCDs[2] = now + effectiveCD(2);
+    if(typeof SFX !== 'undefined' && SFX.detonate) SFX.detonate();
+    // Visual: green lifesteal beam from target to player
+    pushGroundFX({type:'bloom', x:t.x, y:t.y, r:120, maxR:120, color:'#9DC4B0', life:0.5, maxLife:0.5});
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:100, maxR:100, color:'#c8ffdc', life:0.4, maxLife:0.4});
+    // Lifesteal particles streaming from target to player
+    for(let i = 0; i < 14; i++){
+      const t_ = i/14;
+      const px = t.x + (player.x - t.x) * t_;
+      const py = t.y + (player.y - t.y) * t_;
+      if(typeof particles !== 'undefined'){
+        particles.push({
+          x: px + (Math.random()-0.5)*20,
+          y: py + (Math.random()-0.5)*20,
+          vx: (player.x - t.x) * 0.5,
+          vy: (player.y - t.y) * 0.5,
+          life: 0.5, maxLife: 0.5,
+          color: '#9DC4B0', size: 3, soul: true,
+        });
+      }
+    }
+    screenShake(6, 200);
+    addFeed(`✦ SOUL LEECH — ${Math.round(dmg)} · +${actualPlayerHeal} HP · ${spiritsHealed} spirits healed`, '#9DC4B0');
+    return true;
+  }
+
+  if(idx === 3){
+    // ═══ WAIL OF THE GRAVE — fear pulse + spirit speed burst ═══
+    // AOE around player. Enemies within are slowed/feared briefly.
+    // All living spirits get a 50% speed boost for 5 seconds.
+    const radius = 380;
+    const dmg = player.attack * 1.2 * damageMult();
+    let enemiesHit = 0;
+    enemies.forEach(e=>{
+      if(!e.dead && dist2(player.x, player.y, e.x, e.y) < radius){
+        hitEnemy(e, dmg, false, player.x, player.y);
+        // "Fear" effect — push them back from the player
+        const angle = Math.atan2(e.y - player.y, e.x - player.x);
+        e.vx += Math.cos(angle) * 400;
+        e.vy += Math.sin(angle) * 400;
+        enemiesHit++;
+      }
+    });
+    // Speed burst for all spirits
+    let spiritBoosts = 0;
+    if(typeof spirits !== 'undefined'){
+      spirits.forEach(s=>{
+        if(!s.dead){
+          s._necroSpeedUntil = now + 5000;
+          spiritBoosts++;
+        }
+      });
+    }
+    abilityCDs[3] = now + effectiveCD(3);
+    if(typeof SFX !== 'undefined' && SFX.wrathTide) SFX.wrathTide();
+    // Big green fear ring
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:radius, r:30, color:'#9DC4B0', life:0.8, maxLife:0.8, expand:true});
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:radius*0.7, r:20, color:'#c8ffdc', life:0.6, maxLife:0.6, expand:true});
+    pushGroundFX({type:'scorch', x:player.x, y:player.y, r:radius-40, maxR:radius-40, color:'#9DC4B0', life:1.8, maxLife:1.8});
+    screenShake(10, 300);
+    addFeed(`☠ WAIL OF THE GRAVE — ${enemiesHit} feared · ${spiritBoosts} spirits hastened`, '#9DC4B0');
+    return true;
+  }
+
+  if(idx === 4){
+    // ═══ UNLEASH THE LEGION (Ult) — all spirits explode in damage wave ═══
+    // Massive AOE from player. Damage scales with spirit count — more
+    // spirits alive = more damage. After the blast, spirits are knocked back
+    // but not destroyed (they'll regroup).
+    let aliveCount = 0;
+    if(typeof spirits !== 'undefined'){
+      spirits.forEach(s=>{ if(!s.dead) aliveCount++; });
+    }
+    const aliveMult = 1 + aliveCount * 0.25; // +25% damage per living spirit
+    const dmg = player.attack * 3.5 * aliveMult * damageMult();
+    const radius = 500;
+    let hits = 0;
+    enemies.forEach(e=>{
+      if(!e.dead && dist2(player.x, player.y, e.x, e.y) < radius){
+        hitEnemy(e, dmg, false, player.x, player.y);
+        hits++;
+      }
+    });
+    abilityCDs[4] = now + effectiveCD(4);
+    if(typeof SFX !== 'undefined' && SFX.eliteDeath) SFX.eliteDeath();
+    // EPIC visual — triple ring, green+white bloom, massive shake
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:340, maxR:340, color:'#c8ffdc', life:0.6, maxLife:0.6});
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:500, r:40, color:'#c8ffdc', life:0.9, maxLife:0.9, expand:true});
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:400, r:30, color:'#9DC4B0', life:0.7, maxLife:0.7, expand:true});
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:300, r:20, color:'#ffffff', life:0.5, maxLife:0.5, expand:true});
+    pushGroundFX({type:'scorch', x:player.x, y:player.y, r:480, maxR:480, color:'#9DC4B0', life:2.5, maxLife:2.5});
+    screenShake(28, 700);
+    // Green bone particles everywhere
+    for(let i = 0; i < 40; i++){
+      const a = Math.random() * Math.PI * 2;
+      if(typeof particles !== 'undefined'){
+        particles.push({
+          x: player.x, y: player.y,
+          vx: Math.cos(a) * (200 + Math.random() * 150),
+          vy: Math.sin(a) * (200 + Math.random() * 150) - 80,
+          life: 1.5, maxLife: 1.5,
+          color: Math.random() < 0.3 ? '#ffffff' : '#9DC4B0',
+          size: 3 + Math.random() * 4,
+          soul: true,
+        });
+      }
+    }
+    addFeed(`★ UNLEASH THE LEGION — ${hits} struck · ${aliveCount} spirits amplifying (×${aliveMult.toFixed(2)})`, '#c8ffdc');
+    return true;
+  }
+
+  return false;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// NECROLORD BANNER — persistent world entity
+// ═══════════════════════════════════════════════════════════════════════
+// Drawn and ticked each frame. Expires after 8s. Enemies within take small
+// per-tick damage, spirits within gain damage/speed buffs.
+
+function updateNecroBanners(now){
+  if(!window.__necroBanners || window.__necroBanners.length === 0) return;
+  // Remove expired banners
+  window.__necroBanners = window.__necroBanners.filter(b => b.expires > now);
+  // Tick damage on enemies within, buff spirits within
+  window.__necroBanners.forEach(banner=>{
+    if(typeof enemies !== 'undefined'){
+      enemies.forEach(e=>{
+        if(!e.dead && dist2(banner.x, banner.y, e.x, e.y) < banner.radius * banner.radius){
+          // Small tick damage — call once per ~300ms per banner
+          if(!banner._lastTick) banner._lastTick = 0;
+        }
+      });
+    }
+    // Tick once per 300ms
+    if(!banner._lastTick || now - banner._lastTick > 300){
+      banner._lastTick = now;
+      if(typeof enemies !== 'undefined'){
+        enemies.forEach(e=>{
+          if(!e.dead){
+            const dx = e.x - banner.x, dy = e.y - banner.y;
+            if(dx*dx + dy*dy < banner.radius * banner.radius){
+              const tick = player.attack * 0.3 * damageMult();
+              hitEnemy(e, tick, false, banner.x, banner.y);
+            }
+          }
+        });
+      }
+    }
+  });
+}
+
+function drawNecroBanners(now){
+  if(!window.__necroBanners || window.__necroBanners.length === 0) return;
+  window.__necroBanners.forEach(banner=>{
+    const timeLeft = banner.expires - now;
+    if(timeLeft <= 0) return;
+    const life = timeLeft / 8000;
+    const pulse = 0.6 + Math.sin(now * 0.004) * 0.4;
+    // Ground aura
+    ctx.save();
+    const grad = ctx.createRadialGradient(banner.x, banner.y, 0, banner.x, banner.y, banner.radius);
+    grad.addColorStop(0, `rgba(200,255,220,${0.35 * life * pulse})`);
+    grad.addColorStop(0.7, `rgba(157,196,176,${0.18 * life})`);
+    grad.addColorStop(1, 'rgba(157,196,176,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(banner.x, banner.y, banner.radius, 0, Math.PI*2); ctx.fill();
+    // Banner pole (vertical line)
+    ctx.strokeStyle = `rgba(157,196,176,${0.9 * life})`;
+    ctx.lineWidth = 3;
+    ctx.shadowColor = '#c8ffdc';
+    ctx.shadowBlur = 20 * pulse;
+    ctx.beginPath();
+    ctx.moveTo(banner.x, banner.y);
+    ctx.lineTo(banner.x, banner.y - 80);
+    ctx.stroke();
+    // Flag top (triangle)
+    ctx.fillStyle = `rgba(200,255,220,${0.85 * life})`;
+    ctx.beginPath();
+    ctx.moveTo(banner.x, banner.y - 80);
+    ctx.lineTo(banner.x + 40, banner.y - 65);
+    ctx.lineTo(banner.x, banner.y - 50);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = `rgba(255,255,255,${life})`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    // Skull symbol on flag
+    ctx.fillStyle = `rgba(30,40,35,${life})`;
+    ctx.beginPath();
+    ctx.arc(banner.x + 15, banner.y - 68, 5, 0, Math.PI*2);
+    ctx.fill();
+    // Two eye dots
+    ctx.fillStyle = `rgba(200,255,220,${life})`;
+    ctx.beginPath();
+    ctx.arc(banner.x + 13, banner.y - 69, 1, 0, Math.PI*2);
+    ctx.arc(banner.x + 17, banner.y - 69, 1, 0, Math.PI*2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.restore();
+  });
+}
+
+// Check whether a spirit is inside any active banner — called by spirit
+// damage/speed calculations.
+function isSpiritInBanner(spirit){
+  if(!window.__necroBanners || window.__necroBanners.length === 0) return false;
+  const now = performance.now();
+  for(const banner of window.__necroBanners){
+    if(banner.expires <= now) continue;
+    const dx = spirit.x - banner.x, dy = spirit.y - banner.y;
+    if(dx*dx + dy*dy < banner.radius * banner.radius) return true;
+  }
+  return false;
+}
