@@ -5453,11 +5453,17 @@ function spawnDungeonWave(waveIndex){
       const hs=enemyHpScale(player.level),ds=enemyDmgScale(player.level);
       const base = 200 + player.level * 5;
       const baseAtk = 20 + player.level * 0.7;
+      // DUNGEON HP MULTIPLIER: all dungeon mobs get +120% HP over open world
+      // (elites get even more). This makes dungeons feel tough and meaningful
+      // instead of a speed-run clear. Damage not increased to avoid murdering
+      // the player on every wave.
+      const DUNGEON_MOB_HP_MULT = isElite ? 3.0 : 2.2;
+      const DUNGEON_MOB_DMG_MULT = 1.25; // modest damage bump — threatening but fair
       enemies.push({
         id:enemyId++,x,y,vx:0,vy:0,
-        hp:base*hs*typeData.hp*(isElite?2.4:1),
-        maxHp:base*hs*typeData.hp*(isElite?2.4:1),
-        attack:baseAtk*ds*typeData.dmg*(isElite?1.6:1),
+        hp:base*hs*typeData.hp*(isElite?2.4:1)*DUNGEON_MOB_HP_MULT,
+        maxHp:base*hs*typeData.hp*(isElite?2.4:1)*DUNGEON_MOB_HP_MULT,
+        attack:baseAtk*ds*typeData.dmg*(isElite?1.6:1)*DUNGEON_MOB_DMG_MULT,
         speed:typeData.spd*(isElite?1.12:1),
         dead:false,isElite,typeData,
         lastAttack:0,hitFlash:0,
@@ -6395,9 +6401,15 @@ function killEnemy(e){
   if(e.isElite&&Math.random()<0.18){creditMaterial('etherDust',1);}
   if(Math.random()<0.05){creditMaterial('scrap',1);}
   if(e.veilmarkStacks>0&&Math.random()<0.14){creditMaterial('etherDust',1);}
-  // Loot drop — elite drop rate reduced from 38% → 22%, common stays at 7%.
-  // This keeps common drops reliable but stops elites from flooding the bag.
-  if(Math.random()<(e.isElite?0.22:0.07)){
+  // Loot drop — common 5%, elite 16% (reduced from 7%/22%). Combined with
+  // the tightened rarity curve, this gives the player ~3 uncommons per minute
+  // instead of 6, and rares feel like real events.
+  // In dungeons, drop rates are cut 40% because the dungeon gives a guaranteed
+  // clear reward + heavy material drops. Prevents bag-flooding from 52 mobs.
+  const inDungeon = (typeof dungeonState !== 'undefined' && dungeonState.active);
+  const baseDropRate = e.isElite ? 0.16 : 0.05;
+  const dropRate = inDungeon ? baseDropRate * 0.6 : baseDropRate;
+  if(Math.random()<dropRate){
     const item=rollLoot(player.level);tryEquip(item);
     // Rarity-tiered pickup sound
     const rarityToSFX={common:'pickupCommon',uncommon:'pickupUncommon',rare:'pickupRare',epic:'pickupEpic',legendary:'pickupLegendary',mythic:'pickupMythic'};
@@ -7616,6 +7628,30 @@ function startGame(continueFromSave=false){
     addFeed(_isTouch ? 'Walk to an NPC and tap them' : 'Walk to an NPC and press E','#c4b8dd');
     // New characters — write their initial save immediately so they persist
     if(typeof writeSave==='function') writeSave();
+  }
+  // ═══ Backward-compat: clean out commons that accumulated in the bag
+  // before the auto-salvage system was added. Runs once per game start.
+  if(typeof inventory !== 'undefined' && inventory.length > 0){
+    const before = inventory.length;
+    let scrapGained = 0;
+    for(let i = inventory.length - 1; i >= 0; i--){
+      if(inventory[i] && inventory[i].rarity === 'common'){
+        const yields = (typeof salvageYieldFor === 'function') ? salvageYieldFor(inventory[i]) : {scrap:1};
+        if(typeof creditMaterial === 'function'){
+          Object.entries(yields).forEach(([mat, qty])=>{
+            creditMaterial(mat, qty);
+            if(mat === 'scrap') scrapGained += qty;
+          });
+        }
+        inventory.splice(i, 1);
+      }
+    }
+    const cleared = before - inventory.length;
+    if(cleared > 0){
+      addFeed(`⚒ Auto-salvaged ${cleared} common items → +${scrapGained} Scrap`, '#a78bfa');
+      if(typeof updateInventoryBadge === 'function') updateInventoryBadge();
+      if(typeof writeSave === 'function') writeSave();
+    }
   }
   lastSaveTime=performance.now(); // prevent immediate auto-save on load
 }
