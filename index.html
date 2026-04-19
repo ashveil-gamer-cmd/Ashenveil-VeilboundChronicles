@@ -131,6 +131,7 @@
   <div class="menu-btn" data-menu="shop" onclick="openShop()">⚖ SHOP</div>
   <div class="menu-btn" data-menu="talents" onclick="openTalents()">✦ TALENTS</div>
   <div class="menu-btn" onclick="openProf()">♆ PROF</div>
+  <div class="menu-btn" onclick="openSettings()">⚙ SETTINGS</div>
   <div class="menu-btn menu-btn-camp" onclick="returnToCamp()">⌂ CAMP</div>
   <div class="menu-btn menu-btn-exit" onclick="exitToCharacterSelect()">⎌ EXIT</div>
 </div>
@@ -237,6 +238,61 @@
     <button class="panel-close" onclick="closeProf()">← BACK</button>
   </div>
   <div id="profCards" style="padding-top:10px"></div>
+</div>
+
+<!-- SETTINGS PANEL -->
+<div id="settingsPanel">
+  <div class="panel-header">
+    <h2>⚙ SETTINGS</h2>
+    <button class="panel-close" onclick="closeSettings()">← BACK</button>
+  </div>
+  <div id="settingsContent">
+    <!-- ═══ AUDIO SECTION ═══ -->
+    <div class="settings-section">
+      <div class="settings-section-title">AUDIO</div>
+
+      <div class="settings-row">
+        <label class="settings-label">
+          <span>Music Volume</span>
+          <span id="musicVolumeLabel" class="settings-value">50%</span>
+        </label>
+        <div class="settings-controls">
+          <button class="settings-mute-btn" id="musicMuteBtn" onclick="toggleMusicMute()">🔊</button>
+          <input type="range" id="musicVolumeSlider" min="0" max="100" value="50" class="settings-slider" oninput="onMusicVolumeChange(this.value)">
+        </div>
+      </div>
+
+      <div class="settings-row">
+        <label class="settings-label">
+          <span>Sound Effects Volume</span>
+          <span id="sfxVolumeLabel" class="settings-value">60%</span>
+        </label>
+        <div class="settings-controls">
+          <button class="settings-mute-btn" id="sfxMuteBtn" onclick="toggleSfxMute()">🔊</button>
+          <input type="range" id="sfxVolumeSlider" min="0" max="100" value="60" class="settings-slider" oninput="onSfxVolumeChange(this.value)">
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ MUSIC PLAYLIST SECTION ═══ -->
+    <div class="settings-section">
+      <div class="settings-section-title">MUSIC PLAYLIST</div>
+      <div id="nowPlayingRow" class="settings-now-playing">
+        <span class="settings-now-label">Now Playing:</span>
+        <span id="nowPlayingTrack">—</span>
+        <button class="settings-skip-btn" onclick="skipMusicTrack()" title="Skip to next track">⏭</button>
+      </div>
+      <div class="settings-row settings-row-compact">
+        <label class="settings-checkbox-label">
+          <input type="checkbox" id="shuffleToggle" onchange="onShuffleToggle(this.checked)">
+          <span>Shuffle tracks</span>
+        </label>
+      </div>
+      <div class="settings-playlist-label">Tracks in your playlist:</div>
+      <div id="settingsPlaylist" class="settings-playlist"></div>
+      <div class="settings-playlist-hint" id="playlistHint"></div>
+    </div>
+  </div>
 </div>
 
 <div id="tooltip"></div>
