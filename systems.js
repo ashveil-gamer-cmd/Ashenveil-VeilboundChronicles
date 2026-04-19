@@ -835,6 +835,160 @@ function reforgeItem(item, onSuccess){
 
 function openProf(){renderProfPanel();document.getElementById('profPanel').style.display='flex';}
 function closeProf(){document.getElementById('profPanel').style.display='none';}
+
+// ═══════ SETTINGS PANEL ═══════════════════════════════════
+function openSettings(){
+  const panel = document.getElementById('settingsPanel');
+  if(!panel) return;
+  panel.style.display = 'flex';
+  renderSettingsPanel();
+}
+function closeSettings(){
+  const panel = document.getElementById('settingsPanel');
+  if(panel) panel.style.display = 'none';
+}
+
+// Build the settings panel UI from current state each time it opens
+function renderSettingsPanel(){
+  // ─── Volume sliders ───
+  const mv = typeof getMusicVolume === 'function' ? getMusicVolume() : 0.5;
+  const sv = typeof getSfxVolume === 'function' ? getSfxVolume() : 0.6;
+  const mSlider = document.getElementById('musicVolumeSlider');
+  const sSlider = document.getElementById('sfxVolumeSlider');
+  const mLabel = document.getElementById('musicVolumeLabel');
+  const sLabel = document.getElementById('sfxVolumeLabel');
+  if(mSlider){ mSlider.value = Math.round(mv * 100); }
+  if(sSlider){ sSlider.value = Math.round(sv * 100); }
+  if(mLabel){ mLabel.textContent = Math.round(mv * 100) + '%'; }
+  if(sLabel){ sLabel.textContent = Math.round(sv * 100) + '%'; }
+  // ─── Mute buttons ───
+  const mMuteBtn = document.getElementById('musicMuteBtn');
+  const sMuteBtn = document.getElementById('sfxMuteBtn');
+  if(mMuteBtn){
+    mMuteBtn.textContent = musicSettings.muted ? '🔇' : '🔊';
+    mMuteBtn.classList.toggle('muted', !!musicSettings.muted);
+  }
+  if(sMuteBtn){
+    sMuteBtn.textContent = musicSettings.sfxMuted ? '🔇' : '🔊';
+    sMuteBtn.classList.toggle('muted', !!musicSettings.sfxMuted);
+  }
+  // ─── Shuffle toggle ───
+  const shuffleEl = document.getElementById('shuffleToggle');
+  if(shuffleEl) shuffleEl.checked = !!musicSettings.shuffle;
+  // ─── Track playlist ───
+  renderSettingsPlaylist();
+  // ─── Now playing ───
+  updateSettingsNowPlaying();
+}
+
+function renderSettingsPlaylist(){
+  const container = document.getElementById('settingsPlaylist');
+  const hint = document.getElementById('playlistHint');
+  if(!container) return;
+  container.innerHTML = '';
+  const tracks = (typeof musicPlayer !== 'undefined' && musicPlayer.tracks) ? musicPlayer.tracks : [];
+  if(!tracks.length){
+    hint.textContent = 'No music tracks added yet. Upload MP3 files to the music/ folder in your repo and add them to the MUSIC_TRACKS list in audio.js. Procedural ambient music will play in the meantime.';
+    return;
+  }
+  hint.textContent = 'Uncheck a track to skip it. Changes take effect on the next track.';
+  const currentFile = musicPlayer.currentIdx >= 0 ? tracks[musicPlayer.currentIdx]?.file : null;
+  tracks.forEach(track => {
+    const row = document.createElement('div');
+    row.className = 'settings-track-row';
+    if(track.file === currentFile) row.classList.add('playing');
+    if(track.loadError) row.classList.add('error');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = musicSettings.enabled[track.file] !== false;
+    cb.onchange = () => {
+      musicSettings.enabled[track.file] = cb.checked;
+      if(typeof onPlaylistChanged === 'function') onPlaylistChanged();
+      // Re-render so the "now playing" row updates if we skipped
+      setTimeout(renderSettingsPlaylist, 200);
+    };
+    const label = document.createElement('span');
+    label.className = 'settings-track-name';
+    label.textContent = track.name + (track.loadError ? ' (failed to load)' : '');
+    row.appendChild(cb);
+    row.appendChild(label);
+    container.appendChild(row);
+  });
+}
+
+// Called whenever the currently-playing track changes, to update the "Now Playing" label
+function updateSettingsNowPlaying(){
+  const el = document.getElementById('nowPlayingTrack');
+  if(!el) return;
+  if(typeof musicPlayer === 'undefined' || musicPlayer.currentIdx < 0){
+    // Procedural ambient or nothing
+    if(typeof ambientState !== 'undefined' && ambientState.running){
+      el.textContent = 'Procedural ambient (' + (ambientState.currentZoneId || 'zone') + ')';
+    } else {
+      el.textContent = '—';
+    }
+    return;
+  }
+  const track = musicPlayer.tracks[musicPlayer.currentIdx];
+  el.textContent = track ? track.name : '—';
+}
+
+// ─── Event handlers for settings controls ───
+function onMusicVolumeChange(val){
+  const v = Math.max(0, Math.min(100, parseInt(val, 10))) / 100;
+  if(typeof setMusicVolume === 'function') setMusicVolume(v);
+  const label = document.getElementById('musicVolumeLabel');
+  if(label) label.textContent = Math.round(v * 100) + '%';
+  // If the user was muted, bumping the slider implicitly unmutes
+  if(v > 0 && musicSettings.muted){
+    musicSettings.muted = false;
+    if(typeof setMusicMuted === 'function') setMusicMuted(false);
+    const btn = document.getElementById('musicMuteBtn');
+    if(btn){ btn.textContent = '🔊'; btn.classList.remove('muted'); }
+  }
+}
+function onSfxVolumeChange(val){
+  const v = Math.max(0, Math.min(100, parseInt(val, 10))) / 100;
+  if(typeof setSfxVolume === 'function') setSfxVolume(v);
+  const label = document.getElementById('sfxVolumeLabel');
+  if(label) label.textContent = Math.round(v * 100) + '%';
+  if(v > 0 && musicSettings.sfxMuted){
+    musicSettings.sfxMuted = false;
+    if(typeof setSfxMuted === 'function') setSfxMuted(false);
+    const btn = document.getElementById('sfxMuteBtn');
+    if(btn){ btn.textContent = '🔊'; btn.classList.remove('muted'); }
+  }
+}
+function toggleMusicMute(){
+  const newMuted = !musicSettings.muted;
+  if(typeof setMusicMuted === 'function') setMusicMuted(newMuted);
+  const btn = document.getElementById('musicMuteBtn');
+  if(btn){
+    btn.textContent = newMuted ? '🔇' : '🔊';
+    btn.classList.toggle('muted', newMuted);
+  }
+}
+function toggleSfxMute(){
+  const newMuted = !musicSettings.sfxMuted;
+  if(typeof setSfxMuted === 'function') setSfxMuted(newMuted);
+  const btn = document.getElementById('sfxMuteBtn');
+  if(btn){
+    btn.textContent = newMuted ? '🔇' : '🔊';
+    btn.classList.toggle('muted', newMuted);
+  }
+}
+function onShuffleToggle(checked){
+  musicSettings.shuffle = !!checked;
+  if(typeof persistMusicSettings === 'function') persistMusicSettings();
+}
+function skipMusicTrack(){
+  if(typeof skipToNextMp3 === 'function') skipToNextMp3();
+  // Re-render to show updated "now playing"
+  setTimeout(() => {
+    updateSettingsNowPlaying();
+    renderSettingsPlaylist();
+  }, 500);
+}
 function renderProfPanel(){
   const cards=document.getElementById('profCards');
   if(!cards)return;
@@ -869,10 +1023,12 @@ function renderProfPanel(){
       const rarityCol = RARITY_COLORS[r.rarity] || '#9ca3af';
       const rarityLabel = RARITY_LABELS[r.rarity] || '?';
       const icon = SLOT_ICONS[r.slot] || '✦';
-      // Stats preview — just keys and base numbers so player knows personality
+      // Stats preview — show baseline numbers with "~" prefix to indicate
+      // these are rough values (actual rolls vary by ~±15% per craft due to
+      // the reforge RNG). "~" is clearer and more polished than "-ish".
       const statsPreview = Object.entries(r.baseStats).map(([k,v])=>{
         const lbl = (typeof STAT_LABELS!=='undefined'?STAT_LABELS[k]:null) || k;
-        return `+${v}-ish ${lbl}`;
+        return `~${v} ${lbl}`;
       }).join(' · ');
       // Cost with material labels + color
       const costHtml = Object.entries(r.cost).map(([k,v])=>{
