@@ -17,17 +17,21 @@ const MAX_ENEMIES=20;
 // `spriteKey` must match a key in SPRITE_MANIFEST. If the sprite fails to load
 // a labeled placeholder renders in its place.
 // Collision radius keeps the player from walking through the landmark.
+// ═══════ ZONE LANDMARKS ═══════════════════════════════════
+// Each zone has ONE massive focal structure that anchors the space visually.
+// Drawn at deterministic world positions (visible from a distance, memorable).
+// drawId refers to a case in the drawZoneLandmark() switch in game.js.
+// collRadius: the visible footprint radius — player can't walk through.
+// scale: size multiplier on top of the base draw size (base ~300 world units).
 const LANDMARKS={
-  // Scale values reduced so painted sprites are prominent but don't overwhelm
-  // the procedural zone. Collision radii kept large to match visible footprint.
-  ashen:       {spriteKey:'obelisk_ashen',      x:1800,y:1800,scale:0.9, collRadius:110},
-  crypts:      {spriteKey:'sarcophagus_crypts', x:3100,y:1900,scale:1.0, collRadius:120},
-  mire:        {spriteKey:'shrine_mire',        x:2100,y:3200,scale:1.05,collRadius:130},
-  spire:       {spriteKey:'shrine_spire',       x:3300,y:3100,scale:1.0, collRadius:120},
-  // Dungeons
-  hollow_crypt:    {spriteKey:'sarcophagus_crypts', x:2100,y:1900,scale:0.9, collRadius:110},
-  wraith_sanctum:  {spriteKey:'candelabra_sanctum', x:2900,y:1900,scale:0.9, collRadius:85},
-  ashen_cathedral: {spriteKey:'pew_cathedral',      x:2500,y:1800,scale:1.0, collRadius:115},
+  ashen:  {drawId:'shatteredTower',  x:2200, y:2000, scale:1.0, collRadius:140},
+  crypts: {drawId:'giantSkull',      x:2900, y:2100, scale:1.0, collRadius:160},
+  mire:   {drawId:'sunkenAltar',     x:2300, y:3000, scale:1.0, collRadius:130},
+  spire:  {drawId:'obsidianMonolith',x:3100, y:2400, scale:1.0, collRadius:130},
+  // Dungeon-specific landmarks (reuse zone landmarks for now)
+  hollow_crypt:    {drawId:'giantSkull',      x:2100,y:1900, scale:0.8, collRadius:130},
+  wraith_sanctum:  {drawId:'obsidianMonolith',x:2500,y:2000, scale:0.8, collRadius:110},
+  ashen_cathedral: {drawId:'shatteredTower',  x:2500,y:1800, scale:0.9, collRadius:125},
 };
 
 
@@ -133,8 +137,9 @@ const ZONES=[
    gridC:'rgba(160,100,255,0.038)',fogC:'rgba(90,85,105,',lightC:'rgba(200,190,210,',
    hasPillars:true,edgeC:'rgba(40,30,55,0.5)',
    // Dense forest-ish mix: dead trees, boulders, rock clusters, grass, stone ruins, fallen logs
-   props:['deadTree','boulder','rockCluster','stoneRuin','grassTuft','fallenLog','boneHeap','bonePile','ashStone'],
-   counts:[45,22,38,18,70,14,18,22,28],
+   // NEW types: tallDeadTree (towering withered pines), standingStone (rune monoliths), brokenStatue (ruined angels)
+   props:['deadTree','tallDeadTree','boulder','rockCluster','stoneRuin','grassTuft','fallenLog','boneHeap','bonePile','ashStone','standingStone','brokenStatue'],
+   counts:[120,40,70,110,60,200,40,55,60,85,25,20],
    bias:['wraith','skeleton','shade'],ashFx:true},
 
   // ── BONE CRYPTS ── warm amber-lit ruins, tan sandstone, buried bones
@@ -153,8 +158,9 @@ const ZONES=[
    gridC:'rgba(180,140,70,0.036)',fogC:'rgba(160,110,50,',lightC:'rgba(255,210,120,',
    hasPillars:false,edgeC:'rgba(30,20,5,0.45)',
    // Ruins-heavy zone: stone walls, tombs, bone piles, the odd tree
-   props:['stoneRuin','boulder','boneHeap','sarcophagus','cryptTomb','skullPile','deadTree','rockCluster','cryptTorch','grassTuft'],
-   counts:[30,20,38,16,22,35,20,28,24,32],
+   // NEW: brokenStatue (angel ruins), fireBrazier (torch pyre), standingStone
+   props:['stoneRuin','boulder','boneHeap','sarcophagus','cryptTomb','skullPile','deadTree','rockCluster','cryptTorch','grassTuft','brokenStatue','fireBrazier','standingStone','cryptPillar','ruinWall'],
+   counts:[90,50,110,45,55,95,55,75,60,90,28,20,22,35,45],
    bias:['skeleton','golem','abomination'],boneDust:true},
 
   // ── ABYSSAL MIRE ── lush green swamp, mossy rocks, actual live trees, water ponds
@@ -173,8 +179,9 @@ const ZONES=[
    gridC:'rgba(40,180,80,0.036)',fogC:'rgba(40,140,70,',lightC:'rgba(100,230,130,',
    hasPillars:true,edgeC:'rgba(5,35,15,0.48)',
    // Heavy forest zone: lots of live trees, mushrooms, water, grass everywhere
-   props:['realTree','realTree','rockCluster','grassTuft','mushroom','stoneRuin','waterPond','fallenLog','boulder','mireRoot'],
-   counts:[60,40,30,80,48,14,22,18,20,30],
+   // NEW: tallDeadTree for vertical variety, fireBrazier for light sources
+   props:['realTree','realTree','tallDeadTree','rockCluster','grassTuft','mushroom','stoneRuin','waterPond','fallenLog','boulder','mireRoot','swampRock','mireVine','toxicPool','fireBrazier'],
+   counts:[180,120,50,85,230,140,45,60,50,60,90,60,55,24,16],
    bias:['crawler','abomination','specter'],toxicFx:true},
 
   // ── VEIL'S SPIRE ── volcanic red wasteland, black obsidian, lava cracks
@@ -193,8 +200,9 @@ const ZONES=[
    gridC:'rgba(240,50,50,0.038)',fogC:'rgba(180,40,10,',lightC:'rgba(255,140,60,',
    hasPillars:true,edgeC:'rgba(90,8,0,0.55)',
    // Volcanic: boulders, obsidian pillars, lava pools, charred dead trees, cracks
-   props:['boulder','rockCluster','obsidianPillar','lavaPool','crackGround','hellTorch','deadTree','ashObelisk','veilCrystal','stoneRuin'],
-   counts:[32,40,22,28,40,22,22,14,18,14],
+   // NEW: fireBrazier, brokenStatue (corrupted by volcanic heat), standingStone
+   props:['boulder','rockCluster','obsidianPillar','lavaPool','crackGround','hellTorch','deadTree','ashObelisk','veilCrystal','stoneRuin','tallDeadTree','fireBrazier','brokenStatue','standingStone'],
+   counts:[95,125,65,80,130,65,60,45,55,45,40,25,22,25],
    bias:['specter','shade','wraith'],lavaFx:true,riftFx:true},
 ];
 let curZone=ZONES[0],zoneTransiting=false;
