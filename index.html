@@ -164,9 +164,17 @@
     <h2>⚕ BAG <span id="bagCountText" class="bag-count">0 / 24</span></h2>
     <button class="panel-close" onclick="closeInventory()">← BACK</button>
   </div>
+  <div class="bag-tabs">
+    <button id="bagTabMain" class="bag-tab active" onclick="switchBagTab('main')">BAG</button>
+    <button id="bagTabStash" class="bag-tab" onclick="switchBagTab('stash')">◆ SET STASH <span id="setStashCountText" class="bag-count-small">0</span></button>
+  </div>
   <div id="bagLayout">
     <div id="bagGrid"></div>
     <div id="bagTooltip" style="display:none"></div>
+  </div>
+  <div id="setStashLayout" style="display:none">
+    <div id="setStashGrid"></div>
+    <div id="setStashTooltip" style="display:none"></div>
   </div>
 </div>
 
@@ -175,6 +183,11 @@
   <div class="panel-header">
     <h2>✦ TALENTS</h2>
     <button class="panel-close" onclick="closeTalents()">← BACK</button>
+  </div>
+  <div id="presetSelectorWrap">
+    <div class="preset-section-label">◆ BUILD PRESETS</div>
+    <div class="preset-section-hint">One-click apply a complete build (talents + set gear)</div>
+    <div id="presetSelector"></div>
   </div>
   <div id="talentTree"></div>
 </div>
