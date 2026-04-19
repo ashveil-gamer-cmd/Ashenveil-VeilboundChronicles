@@ -2887,9 +2887,12 @@ function castHollowcallerPresetOverride(idx, now){
   if(!preset || preset.classId !== 'hollowcaller') return false;
   // Route to the preset-specific handler
   if(activePreset === 'necrolord'){
-    return castNecrolord(idx, now);
+    return (typeof castNecrolord === 'function') ? castNecrolord(idx, now) : false;
   }
-  // voidweaver, reaverSaint handlers will be added in next sessions
+  if(activePreset === 'voidweaver'){
+    return (typeof castVoidweaver === 'function') ? castVoidweaver(idx, now) : false;
+  }
+  // reaverSaint handler will be added next session
   return false;
 }
 
@@ -3216,3 +3219,567 @@ function isSpiritInBanner(spirit){
   }
   return false;
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// PROJECTILE SYSTEM
+// ═══════════════════════════════════════════════════════════════════════
+// Shared system used by any ability that needs flying projectiles.
+// Voidweaver's Void Bolt is the first consumer. Supports:
+//   - homing: projectile steers toward a target enemy
+//   - piercing: passes through multiple enemies (tracked via hitSet)
+//   - chains: after piercing out of range, finds a new target to curve to
+//   - trails: short tail for visual flair
+// Each projectile is a plain object; array lives in game.js as `projectiles`.
+
+function spawnProjectile(opts){
+  if(typeof projectiles === 'undefined') return;
+  projectiles.push({
+    x: opts.x,
+    y: opts.y,
+    vx: opts.vx || 0,
+    vy: opts.vy || 0,
+    speed: opts.speed || 800,
+    life: opts.life || 2.0,
+    maxLife: opts.life || 2.0,
+    dmg: opts.dmg || 0,
+    pierces: opts.pierces || 0,        // how many more enemies we can pass through
+    chains: opts.chains || 0,          // how many more times we can re-target
+    homing: opts.homing || false,      // whether to track nearest enemy
+    target: opts.target || null,       // current homing target enemy
+    hitSet: new Set(),                 // enemy ids we already damaged
+    type: opts.type || 'voidBolt',
+    color: opts.color || '#c084fc',
+    size: opts.size || 8,
+    trail: [],                         // [{x, y, age}] — recent positions
+    maxTrail: opts.maxTrail || 10,
+    turnRate: opts.turnRate || 8.0,    // how aggressively to steer toward target
+    onHit: opts.onHit || null,         // optional callback(enemy, projectile)
+  });
+}
+
+function updateProjectiles(dt, now){
+  if(typeof projectiles === 'undefined' || projectiles.length === 0) return;
+  // Filter out expired projectiles
+  projectiles = projectiles.filter(p => {
+    p.life -= dt;
+    if(p.life <= 0) return false;
+
+    // ─── Homing: steer toward current target ───
+    if(p.homing){
+      // If current target is dead or lost, try to acquire a new one
+      if(!p.target || p.target.dead){
+        let best = null, bestDist = 900;
+        if(typeof enemies !== 'undefined'){
+          enemies.forEach(e=>{
+            if(e.dead || p.hitSet.has(e.id)) return;
+            const d = Math.sqrt((e.x-p.x)**2 + (e.y-p.y)**2);
+            if(d < bestDist){ bestDist = d; best = e; }
+          });
+        }
+        p.target = best;
+      }
+      // Steer toward target
+      if(p.target){
+        const dx = p.target.x - p.x;
+        const dy = p.target.y - p.y;
+        const tAngle = Math.atan2(dy, dx);
+        const cAngle = Math.atan2(p.vy, p.vx);
+        // Interpolate angle smoothly
+        let diff = tAngle - cAngle;
+        while(diff > Math.PI) diff -= Math.PI*2;
+        while(diff < -Math.PI) diff += Math.PI*2;
+        const steerAmt = Math.min(1, p.turnRate * dt);
+        const newAngle = cAngle + diff * steerAmt;
+        p.vx = Math.cos(newAngle) * p.speed;
+        p.vy = Math.sin(newAngle) * p.speed;
+      }
+    }
+
+    // Advance position
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+
+    // Record trail point every frame
+    p.trail.push({x: p.x, y: p.y, age: 0});
+    if(p.trail.length > p.maxTrail) p.trail.shift();
+    p.trail.forEach(t => t.age += dt);
+
+    // ─── Collision with enemies ───
+    if(typeof enemies !== 'undefined'){
+      for(const e of enemies){
+        if(e.dead || p.hitSet.has(e.id)) continue;
+        const dx = e.x - p.x, dy = e.y - p.y;
+        const rSum = (e.size || 20) + p.size;
+        if(dx*dx + dy*dy < rSum * rSum){
+          // Hit!
+          if(typeof hitEnemy === 'function') hitEnemy(e, p.dmg, false, p.x, p.y);
+          p.hitSet.add(e.id);
+          if(p.onHit) p.onHit(e, p);
+          // Spark on impact
+          if(typeof particles !== 'undefined'){
+            for(let i = 0; i < 6; i++){
+              const a = Math.random() * Math.PI * 2;
+              particles.push({
+                x: e.x, y: e.y,
+                vx: Math.cos(a) * 120, vy: Math.sin(a) * 120 - 40,
+                life: 0.35, maxLife: 0.35,
+                color: p.color, size: 2.5,
+              });
+            }
+          }
+          // Piercing: keep going but counter down
+          if(p.pierces > 0){
+            p.pierces--;
+            // Don't consume the hit, just keep moving
+          } else if(p.chains > 0){
+            // Chain: re-target to a nearby enemy we haven't hit yet
+            p.chains--;
+            let best = null, bestDist = 400;
+            for(const e2 of enemies){
+              if(e2.dead || p.hitSet.has(e2.id)) continue;
+              const d = Math.sqrt((e2.x-p.x)**2 + (e2.y-p.y)**2);
+              if(d < bestDist){ bestDist = d; best = e2; }
+            }
+            if(best){
+              p.target = best;
+              // Reset velocity toward the new target
+              const dx2 = best.x - p.x, dy2 = best.y - p.y;
+              const mag = Math.sqrt(dx2*dx2 + dy2*dy2) || 1;
+              p.vx = (dx2/mag) * p.speed;
+              p.vy = (dy2/mag) * p.speed;
+              // Extend life a little so chain can actually connect
+              p.life = Math.min(p.maxLife, p.life + 0.4);
+            } else {
+              return false; // no chain target, projectile dies
+            }
+          } else {
+            return false; // no more pierces/chains, projectile dies
+          }
+          break; // one collision per frame
+        }
+      }
+    }
+    return true;
+  });
+}
+
+function drawProjectiles(now){
+  if(typeof projectiles === 'undefined' || projectiles.length === 0) return;
+  projectiles.forEach(p=>{
+    ctx.save();
+    // Trail — fading behind
+    if(p.trail.length > 1){
+      ctx.strokeStyle = p.color;
+      ctx.lineWidth = p.size * 0.7;
+      ctx.lineCap = 'round';
+      ctx.shadowColor = p.color;
+      ctx.shadowBlur = 14;
+      for(let i = 1; i < p.trail.length; i++){
+        const t = p.trail[i];
+        const prev = p.trail[i-1];
+        const alpha = i / p.trail.length * 0.7;
+        ctx.globalAlpha = alpha;
+        ctx.beginPath();
+        ctx.moveTo(prev.x, prev.y);
+        ctx.lineTo(t.x, t.y);
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+    // Body — bright core
+    ctx.shadowColor = p.color;
+    ctx.shadowBlur = 22;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+    ctx.fill();
+    // White-hot center
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#ffffff';
+    ctx.globalAlpha = 0.9;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * 0.5, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  });
+  ctx.globalAlpha = 1;
+  ctx.shadowBlur = 0;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// VOIDWEAVER ABILITIES — The storm itself
+// ═══════════════════════════════════════════════════════════════════════
+// Replaces summoning entirely with projectile spellcasting.
+//
+// Q — Void Bolt: homing piercing missile, chains to 3 extra targets (5 at 8pc)
+// W — Annihilation Seal: expanding void rune that detonates for massive AOE
+// E — Void Nova: bigger, more powerful version of base Soul Nova
+// R — Singularity: black hole that pulls enemies for 4s + ticks damage
+// Ult — Rift: permanent damage zone for 10s
+
+function castVoidweaver(idx, now){
+  const setCount = getEquippedSetPieceCount('Voidshard Vestments');
+  const is8pc = setCount >= 8;
+
+  if(idx === 0){
+    // ═══ VOID BOLT — homing chain projectile ═══
+    // Finds nearest enemy, fires a homing bolt that pierces 2 and chains to 3
+    // (or 5 at 8-piece) additional targets.
+    const nearest = getNearestEnemy(1100);
+    if(!nearest){
+      // Fire straight ahead if no target
+      const angle = player.facing || 0;
+      spawnProjectile({
+        x: player.x, y: player.y,
+        vx: Math.cos(angle) * 800, vy: Math.sin(angle) * 800,
+        speed: 800,
+        life: 1.8,
+        dmg: player.attack * 1.8 * damageMult(),
+        pierces: 2,
+        chains: is8pc ? 5 : 3,
+        homing: true,
+        type: 'voidBolt', color: '#c084fc', size: 9,
+        turnRate: 6.0,
+      });
+    } else {
+      // Fire toward nearest enemy with strong homing
+      const dx = nearest.x - player.x, dy = nearest.y - player.y;
+      const mag = Math.sqrt(dx*dx + dy*dy) || 1;
+      spawnProjectile({
+        x: player.x, y: player.y,
+        vx: (dx/mag) * 800, vy: (dy/mag) * 800,
+        speed: 800,
+        life: 2.0,
+        dmg: player.attack * 1.8 * damageMult(),
+        pierces: 2,
+        chains: is8pc ? 5 : 3,
+        homing: true,
+        target: nearest,
+        type: 'voidBolt', color: '#c084fc', size: 9,
+        turnRate: 7.0,
+      });
+    }
+    abilityCDs[0] = now + effectiveCD(0);
+    if(typeof SFX !== 'undefined' && SFX.veilmark) SFX.veilmark();
+    // Cast flash
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:80, maxR:80, color:'#c084fc', life:0.3, maxLife:0.3});
+    addFeed(`⚡ VOID BOLT${is8pc?' [AMPLIFIED]':''}`, '#c084fc');
+    return true;
+  }
+
+  if(idx === 1){
+    // ═══ ANNIHILATION SEAL — expanding void rune ═══
+    // Targets a location near the nearest enemy. Rune warms up for 1.2s,
+    // then detonates for massive AOE. Damage + radius scale with 8pc.
+    const t = getNearestEnemy(700) || {x: player.x + Math.cos(player.facing)*240, y: player.y + Math.sin(player.facing)*240};
+    if(!window.__voidSeals) window.__voidSeals = [];
+    const radius = is8pc ? 320 : 240;
+    const dmg = player.attack * (is8pc ? 5.5 : 4.0) * damageMult();
+    const warmup = 1200; // ms before detonation
+    window.__voidSeals.push({
+      x: t.x, y: t.y,
+      radius: radius,
+      dmg: dmg,
+      plantedAt: now,
+      detonatesAt: now + warmup,
+      detonated: false,
+    });
+    abilityCDs[1] = now + effectiveCD(1);
+    if(typeof SFX !== 'undefined' && SFX.veilmark) SFX.veilmark();
+    pushGroundFX({type:'bloom', x:t.x, y:t.y, r:60, maxR:60, color:'#c084fc', life:0.4, maxLife:0.4});
+    addFeed(`◉ ANNIHILATION SEAL — ${Math.round(warmup/1000*10)/10}s warmup`, '#c084fc');
+    return true;
+  }
+
+  if(idx === 2){
+    // ═══ VOID NOVA — enhanced Soul Nova ═══
+    // Base class Soul Nova does radius 300 at atk*3.5. Voidweaver version
+    // is 400 radius at atk*5.0 (bigger + harder hitting).
+    const radius = is8pc ? 450 : 400;
+    const dmg = player.attack * (is8pc ? 6.0 : 5.0) * damageMult();
+    let hits = 0;
+    enemies.forEach(e=>{
+      if(!e.dead && dist2(player.x, player.y, e.x, e.y) < radius){
+        hitEnemy(e, dmg, false, player.x, player.y);
+        hits++;
+      }
+    });
+    abilityCDs[2] = now + effectiveCD(2);
+    if(typeof SFX !== 'undefined' && SFX.detonate) SFX.detonate();
+    screenShake(20, 450);
+    // Purple triple-ring visual
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:300, maxR:300, color:'#c084fc', life:0.5, maxLife:0.5});
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:radius, r:30, color:'#c084fc', life:0.7, maxLife:0.7, expand:true});
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:radius*0.7, r:20, color:'#e9d5ff', life:0.5, maxLife:0.5, expand:true});
+    pushGroundFX({type:'scorch', x:player.x, y:player.y, r:radius-40, maxR:radius-40, color:'#c084fc', life:2.0, maxLife:2.0});
+    addFeed(`✹ VOID NOVA — ${hits} struck · ${Math.round(dmg)}`, '#e9d5ff');
+    return true;
+  }
+
+  if(idx === 3){
+    // ═══ SINGULARITY — black hole ═══
+    // Creates a persistent pulling entity that lasts 4 seconds.
+    // Every tick: pulls nearby enemies toward center + ticks damage.
+    const t = getNearestEnemy(500) || {x: player.x, y: player.y};
+    if(!window.__singularities) window.__singularities = [];
+    const duration = is8pc ? 5000 : 4000;
+    window.__singularities.push({
+      x: t.x, y: t.y,
+      radius: 340,
+      pullStrength: 380,
+      expires: now + duration,
+      plantedAt: now,
+      dmgPerTick: player.attack * 0.5 * damageMult(),
+      lastTick: 0,
+    });
+    abilityCDs[3] = now + effectiveCD(3);
+    if(typeof SFX !== 'undefined' && SFX.wrathTide) SFX.wrathTide();
+    pushGroundFX({type:'bloom', x:t.x, y:t.y, r:180, maxR:180, color:'#c084fc', life:0.5, maxLife:0.5});
+    pushGroundFX({type:'ring', x:t.x, y:t.y, maxR:340, r:20, color:'#c084fc', life:0.8, maxLife:0.8, expand:true});
+    addFeed(`○ SINGULARITY — enemies drawn in`, '#c084fc');
+    return true;
+  }
+
+  if(idx === 4){
+    // ═══ RIFT (Ult) — persistent damage zone ═══
+    // Creates a rift at target location. Lasts 10 seconds. Any enemy inside
+    // takes heavy damage every 500ms. Big area + intimidating visuals.
+    const t = getNearestEnemy(600) || {x: player.x + Math.cos(player.facing)*200, y: player.y + Math.sin(player.facing)*200};
+    if(!window.__voidRifts) window.__voidRifts = [];
+    const duration = is8pc ? 12000 : 10000;
+    const radius = is8pc ? 380 : 320;
+    window.__voidRifts.push({
+      x: t.x, y: t.y,
+      radius: radius,
+      expires: now + duration,
+      plantedAt: now,
+      dmgPerTick: player.attack * 1.5 * damageMult(),
+      lastTick: 0,
+    });
+    abilityCDs[4] = now + effectiveCD(4);
+    if(typeof SFX !== 'undefined' && SFX.eliteDeath) SFX.eliteDeath();
+    screenShake(24, 500);
+    pushGroundFX({type:'bloom', x:t.x, y:t.y, r:300, maxR:300, color:'#c084fc', life:0.8, maxLife:0.8});
+    pushGroundFX({type:'ring', x:t.x, y:t.y, maxR:radius, r:40, color:'#e9d5ff', life:1.0, maxLife:1.0, expand:true});
+    pushGroundFX({type:'ring', x:t.x, y:t.y, maxR:radius*0.7, r:30, color:'#c084fc', life:0.8, maxLife:0.8, expand:true});
+    pushGroundFX({type:'scorch', x:t.x, y:t.y, r:radius, maxR:radius, color:'#7e22ce', life:duration/1000, maxLife:duration/1000});
+    addFeed(`★ RIFT — ${duration/1000}s void zone opened`, '#e9d5ff');
+    return true;
+  }
+
+  return false;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// VOIDWEAVER WORLD ENTITIES (seals, singularities, rifts)
+// ═══════════════════════════════════════════════════════════════════════
+
+function updateVoidweaverEntities(now){
+  const dt = 1/60; // approximate tick
+
+  // ─── ANNIHILATION SEALS ───
+  if(window.__voidSeals && window.__voidSeals.length){
+    window.__voidSeals = window.__voidSeals.filter(seal=>{
+      if(!seal.detonated && now >= seal.detonatesAt){
+        // DETONATE
+        seal.detonated = true;
+        let hits = 0;
+        if(typeof enemies !== 'undefined'){
+          enemies.forEach(e=>{
+            if(!e.dead && dist2(seal.x, seal.y, e.x, e.y) < seal.radius*seal.radius){
+              hitEnemy(e, seal.dmg, false, seal.x, seal.y);
+              hits++;
+            }
+          });
+        }
+        if(typeof SFX !== 'undefined' && SFX.detonate) SFX.detonate();
+        screenShake(18, 400);
+        pushGroundFX({type:'bloom', x:seal.x, y:seal.y, r:seal.radius-40, maxR:seal.radius-40, color:'#ffffff', life:0.3, maxLife:0.3});
+        pushGroundFX({type:'ring', x:seal.x, y:seal.y, maxR:seal.radius, r:30, color:'#c084fc', life:0.7, maxLife:0.7, expand:true});
+        pushGroundFX({type:'scorch', x:seal.x, y:seal.y, r:seal.radius-40, maxR:seal.radius-40, color:'#7e22ce', life:2.5, maxLife:2.5});
+        if(hits > 0) addFeed(`  ↳ SEAL DETONATION · ${hits} struck`, '#e9d5ff');
+        // Remove seal 0.3s after detonation so visuals can fade
+        seal.expires = now + 300;
+      }
+      if(seal.detonated && now > seal.expires) return false;
+      return true;
+    });
+  }
+
+  // ─── SINGULARITIES ───
+  if(window.__singularities && window.__singularities.length){
+    window.__singularities = window.__singularities.filter(sing=>{
+      if(now >= sing.expires) return false;
+      // Pull enemies + damage tick
+      if(now - sing.lastTick > 250){
+        sing.lastTick = now;
+        if(typeof enemies !== 'undefined'){
+          enemies.forEach(e=>{
+            if(e.dead) return;
+            const dx = sing.x - e.x, dy = sing.y - e.y;
+            const distSq = dx*dx + dy*dy;
+            if(distSq < sing.radius * sing.radius){
+              const d = Math.sqrt(distSq) || 1;
+              // Pull velocity
+              e.vx += (dx/d) * sing.pullStrength * 0.05;
+              e.vy += (dy/d) * sing.pullStrength * 0.05;
+              // Damage tick
+              hitEnemy(e, sing.dmgPerTick, false, sing.x, sing.y);
+            }
+          });
+        }
+      }
+      return true;
+    });
+  }
+
+  // ─── VOID RIFTS ───
+  if(window.__voidRifts && window.__voidRifts.length){
+    window.__voidRifts = window.__voidRifts.filter(rift=>{
+      if(now >= rift.expires) return false;
+      if(now - rift.lastTick > 500){
+        rift.lastTick = now;
+        if(typeof enemies !== 'undefined'){
+          enemies.forEach(e=>{
+            if(e.dead) return;
+            const dx = rift.x - e.x, dy = rift.y - e.y;
+            if(dx*dx + dy*dy < rift.radius * rift.radius){
+              hitEnemy(e, rift.dmgPerTick, false, rift.x, rift.y);
+            }
+          });
+        }
+      }
+      return true;
+    });
+  }
+}
+
+function drawVoidweaverEntities(now){
+  // ─── SEALS — expanding rune that pulses while charging, then detonates ───
+  if(window.__voidSeals && window.__voidSeals.length){
+    window.__voidSeals.forEach(seal=>{
+      if(seal.detonated) return;
+      const elapsed = now - seal.plantedAt;
+      const warmupDuration = seal.detonatesAt - seal.plantedAt;
+      const progress = Math.min(1, elapsed / warmupDuration);
+      const pulse = 0.6 + Math.sin(now * 0.012) * 0.4;
+      ctx.save();
+      // Growing ring
+      const r = seal.radius * (0.3 + progress * 0.7);
+      ctx.strokeStyle = '#c084fc';
+      ctx.lineWidth = 3;
+      ctx.shadowColor = '#c084fc';
+      ctx.shadowBlur = 18 * pulse;
+      ctx.globalAlpha = 0.7 + progress * 0.3;
+      ctx.beginPath(); ctx.arc(seal.x, seal.y, r, 0, Math.PI*2); ctx.stroke();
+      // Inner rune symbol — rotating star
+      ctx.save();
+      ctx.translate(seal.x, seal.y);
+      ctx.rotate(now * 0.003);
+      ctx.strokeStyle = '#e9d5ff';
+      ctx.lineWidth = 2;
+      ctx.shadowBlur = 14;
+      const starR = r * 0.35;
+      ctx.beginPath();
+      for(let i = 0; i < 6; i++){
+        const a = (i/6) * Math.PI * 2;
+        const x = Math.cos(a) * starR;
+        const y = Math.sin(a) * starR;
+        if(i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+      // Center glow that intensifies
+      ctx.fillStyle = `rgba(192,132,252,${0.2 + progress * 0.6})`;
+      ctx.beginPath(); ctx.arc(seal.x, seal.y, r * 0.15, 0, Math.PI*2); ctx.fill();
+      ctx.restore();
+    });
+  }
+
+  // ─── SINGULARITIES — swirling black hole ───
+  if(window.__singularities && window.__singularities.length){
+    window.__singularities.forEach(sing=>{
+      const timeLeft = sing.expires - now;
+      if(timeLeft <= 0) return;
+      const life = timeLeft / (sing.expires - sing.plantedAt);
+      const pulse = 0.6 + Math.sin(now * 0.008) * 0.4;
+      ctx.save();
+      // Outer swirl ring
+      ctx.strokeStyle = `rgba(192,132,252,${0.5 * life})`;
+      ctx.lineWidth = 2;
+      ctx.shadowColor = '#c084fc';
+      ctx.shadowBlur = 20;
+      ctx.beginPath(); ctx.arc(sing.x, sing.y, sing.radius, 0, Math.PI*2); ctx.stroke();
+      // Swirling arcs — 3 rotating segments
+      for(let i = 0; i < 3; i++){
+        const startA = (i/3)*Math.PI*2 + now * 0.005;
+        const arcR = sing.radius * (0.3 + i * 0.2);
+        ctx.strokeStyle = `rgba(${192+i*10},${132-i*20},${252},${0.6 * life})`;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(sing.x, sing.y, arcR, startA, startA + Math.PI * 0.8);
+        ctx.stroke();
+      }
+      // Center — jet black with purple ring
+      ctx.shadowBlur = 40 * pulse;
+      ctx.fillStyle = '#000000';
+      ctx.beginPath(); ctx.arc(sing.x, sing.y, 24 * pulse, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = `rgba(233,213,255,${life})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.restore();
+    });
+  }
+
+  // ─── VOID RIFTS — jagged purple tear in reality ───
+  if(window.__voidRifts && window.__voidRifts.length){
+    window.__voidRifts.forEach(rift=>{
+      const timeLeft = rift.expires - now;
+      if(timeLeft <= 0) return;
+      const total = rift.expires - rift.plantedAt;
+      const life = timeLeft / total;
+      const pulse = 0.7 + Math.sin(now * 0.006) * 0.3;
+      ctx.save();
+      // Base aura on ground
+      const grad = ctx.createRadialGradient(rift.x, rift.y, 0, rift.x, rift.y, rift.radius);
+      grad.addColorStop(0, `rgba(192,132,252,${0.35 * life * pulse})`);
+      grad.addColorStop(0.6, `rgba(126,34,206,${0.25 * life})`);
+      grad.addColorStop(1, 'rgba(126,34,206,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(rift.x, rift.y, rift.radius, 0, Math.PI*2); ctx.fill();
+      // Jagged crack lines emanating from center
+      ctx.strokeStyle = `rgba(233,213,255,${0.7 * life})`;
+      ctx.lineWidth = 2;
+      ctx.shadowColor = '#c084fc';
+      ctx.shadowBlur = 14;
+      for(let i = 0; i < 6; i++){
+        const angle = (i/6) * Math.PI * 2 + now * 0.0008;
+        const r1 = rift.radius * 0.2;
+        const r2 = rift.radius * (0.6 + Math.sin(now*0.004 + i)*0.15);
+        ctx.beginPath();
+        ctx.moveTo(rift.x + Math.cos(angle)*r1, rift.y + Math.sin(angle)*r1);
+        // Jagged segmented line
+        const steps = 4;
+        for(let s = 1; s <= steps; s++){
+          const t = s / steps;
+          const r = r1 + (r2-r1) * t;
+          const a = angle + (Math.random()-0.5) * 0.2;
+          ctx.lineTo(rift.x + Math.cos(a)*r, rift.y + Math.sin(a)*r);
+        }
+        ctx.stroke();
+      }
+      // Center — void-black with purple rim
+      ctx.shadowBlur = 30 * pulse;
+      ctx.fillStyle = `rgba(30,15,50,${0.9 * life})`;
+      ctx.beginPath(); ctx.arc(rift.x, rift.y, rift.radius * 0.15 * pulse, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = `rgba(192,132,252,${life})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.restore();
+    });
+  }
+}
+
+// Voidweaver dispatcher is routed through castHollowcallerPresetOverride
+// which was defined earlier with voidweaver support.
