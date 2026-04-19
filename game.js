@@ -1588,6 +1588,10 @@ let player={
 };
 
 let spirits=[],enemies=[],particles=[],dmgTexts=[],groundFX=[];
+// Projectiles — used by Voidweaver Void Bolt and other future projectile abilities.
+// Each: {x, y, vx, vy, life, maxLife, dmg, hitSet:Set, pierces, chains, homing:enemy|null,
+//        type:'voidBolt'|..., color, size, trail:[]}
+let projectiles=[];
 let spiritId=0,enemyId=0;
 let abilityCDs=[0,0,0,0,0];
 let spawnTimer=0;
@@ -2569,6 +2573,8 @@ function drawEnvironment(now){
   drawWorldCaches(now, vl, vr, vt, vb);
   // Necrolord banners — drawn last so they sit on top of everything
   if(typeof drawNecroBanners === 'function') drawNecroBanners(now);
+  // Voidweaver entities — seals, singularities, rifts
+  if(typeof drawVoidweaverEntities === 'function') drawVoidweaverEntities(now);
 }
 
 // Looks up the landmark for the current zone/dungeon and draws it.
@@ -6686,6 +6692,8 @@ function update(dt,now){
   if(typeof updateActiveBuffs === 'function') updateActiveBuffs(now);
   // Necrolord preset — tick active banners (damage enemies in radius, expire)
   if(typeof updateNecroBanners === 'function') updateNecroBanners(now);
+  // Voidweaver preset — tick seals, singularities, rifts
+  if(typeof updateVoidweaverEntities === 'function') updateVoidweaverEntities(now);
   let ix=0,iy=0;
   if(keys['ArrowLeft']||keys['a']||keys['A'])ix=-1;
   if(keys['ArrowRight']||keys['d']||keys['D'])ix=1;
@@ -6973,6 +6981,8 @@ function update(dt,now){
   particles=particles.filter(p=>{p.life-=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;if(p.soul)p.vy-=dt*38;p.vx*=0.92;p.vy*=0.92;return p.life>0;});
   dmgTexts=dmgTexts.filter(d=>{d.life-=dt;d.wy+=d.vy*dt;d.wx+=d.vx*dt;d.vy*=0.9;return d.life>0;});
   updateGroundFX(dt,now);
+  // Voidweaver projectiles — homing, piercing, chain logic
+  if(typeof updateProjectiles === 'function') updateProjectiles(dt, now);
   if(shakeTimer>0)shakeTimer-=dt*1000;else shakeAmt*=0.75;
 
   camX+=(player.x-camX)*Math.min(1,dt*5.5);
@@ -7027,6 +7037,9 @@ function render(now){
     ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.fill();
   });
   ctx.globalAlpha=1;ctx.shadowBlur=0;
+
+  // Projectiles (Voidweaver void bolts, future abilities)
+  if(typeof drawProjectiles === 'function') drawProjectiles(now);
 
   // Spirits
   spirits.forEach(s=>drawSpirit(s,now));
