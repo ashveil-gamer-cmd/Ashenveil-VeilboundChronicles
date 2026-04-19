@@ -1,50 +1,138 @@
 // ═══════ AUDIO ═══════════════════════════════════════════
-// Shared AudioContext for SFX + ambient music. Volume controlled by masterVolume,
-// persisted in localStorage. Ambient uses zone-specific oscillator layers that
-// cross-fade cleanly on zone transitions without leaking Web Audio nodes.
+// Architecture:
+//   masterGainNode (single exit to speakers)
+//     ├── sfxBus (one-shot sound effects)
+//     └── musicBus (procedural ambient + MP3 playlist)
+//          ├── ambMasterGain (procedural ambient — fallback when no MP3 playing)
+//          └── fileMusicGain (MP3 tracks via MusicPlayer)
+//
+// Volumes for SFX and music are independently controlled and persisted.
 
 let audioCtx = null;
-// Master volume gain — all audio routes through this so one slider controls everything.
 let masterGainNode = null;
-// Persisted volume: 0 = muted, 1 = full. Defaults to 0.6.
-let masterVolume = 0.6;
+let sfxBus = null;
+let musicBus = null;
+let fileMusicGain = null;
+
+// Persisted settings: both default to sensible audible levels.
+let sfxVolume = 0.6;
+let musicVolume = 0.5;
+// Playlist settings — which tracks are enabled, whether shuffle is on.
+// The actual track file list comes from MUSIC_TRACKS (defined at bottom of file).
+let musicSettings = {
+  enabled: {},      // { 'filename.mp3': true/false } — user's track whitelist
+  shuffle: true,    // random order vs sequential
+  muted: false,
+  sfxMuted: false,
+};
+
+// Load persisted settings from localStorage on startup
 try{
-  const saved = localStorage.getItem('ashenveil_volume');
-  if(saved !== null){
-    const n = parseFloat(saved);
-    if(!Number.isNaN(n)) masterVolume = Math.max(0, Math.min(1, n));
+  const sv = localStorage.getItem('ashenveil_sfx_volume');
+  if(sv !== null){ const n = parseFloat(sv); if(!Number.isNaN(n)) sfxVolume = Math.max(0, Math.min(1, n)); }
+  const mv = localStorage.getItem('ashenveil_music_volume');
+  if(mv !== null){ const n = parseFloat(mv); if(!Number.isNaN(n)) musicVolume = Math.max(0, Math.min(1, n)); }
+  const ms = localStorage.getItem('ashenveil_music_settings');
+  if(ms){
+    const parsed = JSON.parse(ms);
+    if(parsed && typeof parsed === 'object') Object.assign(musicSettings, parsed);
+  }
+  // Back-compat: old single 'ashenveil_volume' key (pre-split) migrates to both
+  const oldV = localStorage.getItem('ashenveil_volume');
+  if(oldV !== null && sv === null){
+    const n = parseFloat(oldV);
+    if(!Number.isNaN(n)){
+      sfxVolume = Math.max(0, Math.min(1, n));
+      musicVolume = Math.max(0, Math.min(1, n * 0.85));
+    }
   }
 }catch(e){}
 
 function getAC(){
   if(!audioCtx){
     audioCtx = new (window.AudioContext||window.webkitAudioContext)();
-    // Route every sound through a single master gain for volume control
     masterGainNode = audioCtx.createGain();
-    masterGainNode.gain.value = masterVolume;
+    masterGainNode.gain.value = 1.0;
     masterGainNode.connect(audioCtx.destination);
+    // Two buses under master
+    sfxBus = audioCtx.createGain();
+    sfxBus.gain.value = musicSettings.sfxMuted ? 0 : sfxVolume;
+    sfxBus.connect(masterGainNode);
+    musicBus = audioCtx.createGain();
+    musicBus.gain.value = musicSettings.muted ? 0 : musicVolume;
+    musicBus.connect(masterGainNode);
+    // fileMusicGain is the node MP3s route through
+    fileMusicGain = audioCtx.createGain();
+    fileMusicGain.gain.value = 1.0;
+    fileMusicGain.connect(musicBus);
   }
   if(audioCtx.state==='suspended') audioCtx.resume();
   return audioCtx;
 }
-// Return the destination that all audio should connect to (master gain, not ctx.destination)
-function audioDest(){
-  if(!audioCtx) getAC();
-  return masterGainNode;
-}
+// SFX destination (for one-shot effects — hits, abilities, UI)
+function audioDest(){ if(!audioCtx) getAC(); return sfxBus; }
+// Music destination (for the procedural ambient music)
+function musicDest(){ if(!audioCtx) getAC(); return musicBus; }
 
-// Public setter for volume — persists to localStorage and applies live
-function setMasterVolume(v){
-  masterVolume = Math.max(0, Math.min(1, v));
-  if(masterGainNode){
+// ═══ Volume controls — separate SFX and music ═══
+
+function setSfxVolume(v){
+  sfxVolume = Math.max(0, Math.min(1, v));
+  if(sfxBus){
     try{
-      masterGainNode.gain.cancelScheduledValues(audioCtx.currentTime);
-      masterGainNode.gain.setValueAtTime(masterVolume, audioCtx.currentTime);
+      const target = musicSettings.sfxMuted ? 0 : sfxVolume;
+      sfxBus.gain.cancelScheduledValues(audioCtx.currentTime);
+      sfxBus.gain.setValueAtTime(target, audioCtx.currentTime);
     }catch(e){}
   }
-  try{ localStorage.setItem('ashenveil_volume', String(masterVolume)); }catch(e){}
+  try{ localStorage.setItem('ashenveil_sfx_volume', String(sfxVolume)); }catch(e){}
 }
-function getMasterVolume(){ return masterVolume; }
+function getSfxVolume(){ return sfxVolume; }
+
+function setMusicVolume(v){
+  musicVolume = Math.max(0, Math.min(1, v));
+  if(musicBus){
+    try{
+      const target = musicSettings.muted ? 0 : musicVolume;
+      musicBus.gain.cancelScheduledValues(audioCtx.currentTime);
+      musicBus.gain.setValueAtTime(target, audioCtx.currentTime);
+    }catch(e){}
+  }
+  try{ localStorage.setItem('ashenveil_music_volume', String(musicVolume)); }catch(e){}
+}
+function getMusicVolume(){ return musicVolume; }
+
+function setSfxMuted(m){
+  musicSettings.sfxMuted = !!m;
+  if(sfxBus){
+    try{
+      const target = musicSettings.sfxMuted ? 0 : sfxVolume;
+      sfxBus.gain.cancelScheduledValues(audioCtx.currentTime);
+      sfxBus.gain.linearRampToValueAtTime(target, audioCtx.currentTime + 0.15);
+    }catch(e){}
+  }
+  persistMusicSettings();
+}
+function setMusicMuted(m){
+  musicSettings.muted = !!m;
+  if(musicBus){
+    try{
+      const target = musicSettings.muted ? 0 : musicVolume;
+      musicBus.gain.cancelScheduledValues(audioCtx.currentTime);
+      musicBus.gain.linearRampToValueAtTime(target, audioCtx.currentTime + 0.15);
+    }catch(e){}
+  }
+  persistMusicSettings();
+}
+
+function persistMusicSettings(){
+  try{ localStorage.setItem('ashenveil_music_settings', JSON.stringify(musicSettings)); }catch(e){}
+}
+
+// Back-compat wrapper — lots of existing code calls setMasterVolume.
+// Route it to SFX since that's what the old slider mostly affected.
+function setMasterVolume(v){ setSfxVolume(v); }
+function getMasterVolume(){ return sfxVolume; }
 
 function playTone(freq,endFreq,dur,gain,type='sine',delay=0){
   try{
@@ -125,7 +213,8 @@ function startMusic(){
   const ac = getAC();
   ambientState.ambMasterGain = ac.createGain();
   ambientState.ambMasterGain.gain.value = 0;
-  ambientState.ambMasterGain.connect(audioDest());
+  // Route ambient through MUSIC bus (not SFX) so it's controlled by the music volume
+  ambientState.ambMasterGain.connect(musicDest());
   ambientState.ambMasterGain.gain.linearRampToValueAtTime(1.0, ac.currentTime + 3);
   ambientState.running = true;
   switchAmbientZone(currentZoneId());
@@ -299,3 +388,203 @@ function scheduleNextAmbientNote(profile, generation){
     }
   }, jitter);
 }
+
+// ═══════ MP3 MUSIC PLAYER ══════════════════════════════════════
+// Plays pre-recorded MP3 tracks from the /music folder with crossfading
+// between tracks and a user-curated playlist. Falls back gracefully when
+// no tracks are configured or files are missing.
+//
+// HOW TO ADD TRACKS:
+// 1. Upload MP3 files to a `music/` folder in the repo
+// 2. Add an entry to the MUSIC_TRACKS array below with {file, name}
+// 3. Done — settings panel will show it automatically
+//
+// When MUSIC_TRACKS is empty (no files added yet), the procedural ambient
+// music plays instead. When tracks are added, procedural ambient fades out
+// and MP3s take over.
+
+const MUSIC_TRACKS = [
+  // Example entries — REPLACE these with your actual uploaded files:
+  // {file: 'music/dirge_of_hollows.mp3', name: 'Dirge of Hollows'},
+  // {file: 'music/veiled_wanderer.mp3',  name: 'Veiled Wanderer'},
+  // {file: 'music/ashen_requiem.mp3',    name: 'Ashen Requiem'},
+];
+
+// Music player state — tracks what's loaded and playing
+const musicPlayer = {
+  tracks: [],         // [{file, name, audio, loaded}] populated on init
+  currentIdx: -1,     // index of currently playing track in tracks[]
+  currentSource: null, // HTMLAudioElement currently playing
+  nextSource: null,   // preloaded next track for fast transitions
+  playing: false,
+  fadeTimer: null,
+  endTimer: null,
+  onTrackEndBound: null,
+  // How many seconds of crossfade between tracks
+  crossfadeSec: 2,
+};
+
+function initMusicPlayer(){
+  // Read tracks list — user can modify MUSIC_TRACKS directly in code,
+  // OR admin tool could push entries via musicPlayer.tracks
+  musicPlayer.tracks = MUSIC_TRACKS.map(t => ({
+    file: t.file,
+    name: t.name,
+    loaded: false,
+    loadError: false,
+  }));
+  // Apply defaults to musicSettings.enabled for any new tracks
+  let changed = false;
+  musicPlayer.tracks.forEach(t => {
+    if(musicSettings.enabled[t.file] === undefined){
+      musicSettings.enabled[t.file] = true; // opt-in by default
+      changed = true;
+    }
+  });
+  if(changed) persistMusicSettings();
+}
+
+// Returns the tracks the user has currently enabled in settings
+function getEnabledTracks(){
+  return musicPlayer.tracks.filter(t => musicSettings.enabled[t.file] !== false);
+}
+
+// Pick the next track to play — respects shuffle setting, avoids repeating the current one if possible
+function pickNextTrack(){
+  const enabled = getEnabledTracks();
+  if(enabled.length === 0) return null;
+  if(enabled.length === 1) return 0;
+  const currentFile = musicPlayer.currentIdx >= 0 ? musicPlayer.tracks[musicPlayer.currentIdx].file : null;
+  if(musicSettings.shuffle){
+    // Random but avoid immediate repeat
+    const candidates = enabled.filter(t => t.file !== currentFile);
+    const pick = candidates[Math.floor(Math.random() * candidates.length)];
+    return musicPlayer.tracks.indexOf(pick);
+  } else {
+    // Sequential: find current in enabled list, go to next; wrap around
+    const idx = enabled.findIndex(t => t.file === currentFile);
+    const next = enabled[(idx + 1) % enabled.length];
+    return musicPlayer.tracks.indexOf(next);
+  }
+}
+
+// Load an audio element for a given track, returns a Promise<HTMLAudioElement>
+function loadTrack(track){
+  return new Promise((resolve, reject) => {
+    const a = new Audio();
+    a.preload = 'auto';
+    a.src = track.file;
+    a.onloadeddata = () => { track.loaded = true; resolve(a); };
+    a.onerror = () => { track.loadError = true; reject(new Error(`Failed to load ${track.file}`)); };
+    // Stop loading if it takes too long — don't block forever
+    setTimeout(() => {
+      if(!track.loaded && !track.loadError){
+        track.loadError = true;
+        reject(new Error(`Timeout loading ${track.file}`));
+      }
+    }, 20000);
+  });
+}
+
+// Start the music system. Call this once when the game is ready to play.
+// If no tracks are configured, this is a no-op and procedural ambient continues.
+function startMp3Music(){
+  if(!musicPlayer.tracks.length){
+    // No user-uploaded tracks — procedural ambient stays as the music layer
+    return;
+  }
+  getAC(); // ensure audio context exists
+  playNextMp3();
+}
+
+async function playNextMp3(){
+  const nextIdx = pickNextTrack();
+  if(nextIdx === -1 || nextIdx === null){
+    musicPlayer.playing = false;
+    return;
+  }
+  const track = musicPlayer.tracks[nextIdx];
+  try{
+    const audio = await loadTrack(track);
+    audio.volume = 1.0; // scaled by musicBus — don't double-attenuate here
+    await audio.play();
+    // Fade out procedural ambient if this is our first real track
+    if(ambientState.running && ambientState.ambMasterGain){
+      try{
+        const ac = audioCtx;
+        ambientState.ambMasterGain.gain.cancelScheduledValues(ac.currentTime);
+        ambientState.ambMasterGain.gain.setValueAtTime(ambientState.ambMasterGain.gain.value, ac.currentTime);
+        ambientState.ambMasterGain.gain.linearRampToValueAtTime(0, ac.currentTime + 2);
+      }catch(e){}
+    }
+    // Start crossfade-out if there was a previous track
+    if(musicPlayer.currentSource){
+      const old = musicPlayer.currentSource;
+      const fadeMs = musicPlayer.crossfadeSec * 1000;
+      const steps = 30;
+      const stepMs = fadeMs / steps;
+      const startVol = old.volume;
+      let i = 0;
+      const fadeOut = setInterval(() => {
+        i++;
+        try{ old.volume = startVol * (1 - i/steps); }catch(e){}
+        if(i >= steps){
+          clearInterval(fadeOut);
+          try{ old.pause(); old.src = ''; }catch(e){}
+        }
+      }, stepMs);
+    }
+    // Fade in the new track
+    audio.volume = 0;
+    const fadeInMs = musicPlayer.crossfadeSec * 1000;
+    const steps = 30;
+    const stepMs = fadeInMs / steps;
+    let i = 0;
+    const fadeIn = setInterval(() => {
+      i++;
+      try{ audio.volume = Math.min(1.0, i/steps); }catch(e){}
+      if(i >= steps) clearInterval(fadeIn);
+    }, stepMs);
+    // Set up end-of-track handler
+    audio.onended = () => {
+      try{ audio.src = ''; }catch(e){}
+      musicPlayer.currentSource = null;
+      // Auto-play next after a tiny gap
+      setTimeout(() => playNextMp3(), 200);
+    };
+    musicPlayer.currentSource = audio;
+    musicPlayer.currentIdx = nextIdx;
+    musicPlayer.playing = true;
+    // Notify UI if settings panel is open
+    if(typeof updateSettingsNowPlaying === 'function') updateSettingsNowPlaying();
+  }catch(err){
+    console.warn('Music load failed:', err.message);
+    // Try the next track after a small delay
+    setTimeout(() => playNextMp3(), 1000);
+  }
+}
+
+// Manually skip to next track (used by settings skip button)
+function skipToNextMp3(){
+  if(musicPlayer.currentSource){
+    try{ musicPlayer.currentSource.pause(); }catch(e){}
+  }
+  setTimeout(() => playNextMp3(), 100);
+}
+
+// Call when settings playlist changes — if current track was disabled, skip it
+function onPlaylistChanged(){
+  persistMusicSettings();
+  if(musicPlayer.currentIdx >= 0){
+    const cur = musicPlayer.tracks[musicPlayer.currentIdx];
+    if(cur && musicSettings.enabled[cur.file] === false){
+      skipToNextMp3();
+    }
+  } else if(getEnabledTracks().length > 0){
+    // No track currently playing but playlist now has enabled tracks — start
+    startMp3Music();
+  }
+}
+
+// Initialize tracks list on script load
+initMusicPlayer();
