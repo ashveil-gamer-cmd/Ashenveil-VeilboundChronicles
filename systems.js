@@ -2169,10 +2169,76 @@ function renderShop(){
 // In testing mode, new characters receive all 6 sets in their setStash so
 // they can test any build instantly.
 
-// ─── Set stash storage ───
-// Separate inventory for set pieces. Doesn't clutter main bag.
-// Persisted through save/load.
-let setStash = []; // array of full item objects, same shape as inventory items
+// ─── Set stash storage (v2 structure) ───
+// Previously was a flat array. Now nested by preset with chosen+spares split.
+// setStashData: {
+//   necrolord: { chosen: {Weapon: item, Helmet: null, ...}, spares: [item, item, ...] },
+//   voidweaver: { ... },
+//   ...
+// }
+// Each preset is its own tab in the UI. "chosen" pieces are what get
+// auto-equipped when you APPLY PRESET. "spares" hold extras (duplicates,
+// upgrades-in-waiting). Tap a spare to promote to chosen; tap a chosen
+// to demote to spares.
+let setStashData = {}; // populated by ensureSetStashDataInitialized()
+let setStash = []; // DEPRECATED — kept only for migration from old saves
+
+// Ensures setStashData has all 6 presets with empty chosen/spare slots.
+// Safe to call repeatedly — won't clobber existing data.
+function ensureSetStashDataInitialized(){
+  if(!setStashData) setStashData = {};
+  Object.keys(BUILD_PRESETS).forEach(presetId=>{
+    if(!setStashData[presetId]){
+      setStashData[presetId] = {chosen: {}, spares: []};
+    }
+    // Ensure every gear slot key exists (as null if empty)
+    GEAR_SLOTS.forEach(slot=>{
+      if(setStashData[presetId].chosen[slot] === undefined){
+        setStashData[presetId].chosen[slot] = null;
+      }
+    });
+    if(!Array.isArray(setStashData[presetId].spares)){
+      setStashData[presetId].spares = [];
+    }
+  });
+}
+
+// Migration: if an old save has `setStash` as a flat array, move everything
+// into the new nested structure. Items are routed to their preset's spares
+// (not chosen) so the player can pick which pieces they want active.
+function migrateLegacySetStash(){
+  if(!Array.isArray(setStash) || setStash.length === 0) return;
+  ensureSetStashDataInitialized();
+  // For each item in the flat array, find its preset by setName
+  const setNameToPresetId = {};
+  Object.values(BUILD_PRESETS).forEach(p => { setNameToPresetId[p.setName] = p.id; });
+  setStash.forEach(item=>{
+    const presetId = setNameToPresetId[item.setName];
+    if(!presetId) return; // unknown set — skip
+    setStashData[presetId].spares.push(item);
+  });
+  setStash = []; // clear legacy array — migration complete
+}
+
+// Lookup helper: find which preset a given setName belongs to.
+// Returns preset id or null.
+function findPresetIdForSet(setName){
+  for(const p of Object.values(BUILD_PRESETS)){
+    if(p.setName === setName) return p.id;
+  }
+  return null;
+}
+
+// Routes an item into the correct preset's spares pile. Used when set gear
+// comes back from equipped or from old inventory.
+function addSetPieceToStash(item){
+  if(!item || !item.setName) return false;
+  const presetId = findPresetIdForSet(item.setName);
+  if(!presetId) return false;
+  ensureSetStashDataInitialized();
+  setStashData[presetId].spares.push(item);
+  return true;
+}
 
 // ═══════ PRESET DEFINITIONS ═══════════════════════════════════════
 const BUILD_PRESETS = {
@@ -2367,59 +2433,104 @@ function buildPresetSetItems(){
 }
 
 // ═══════ GRANT TEST SETS TO NEW CHARACTERS ═══════════════════════
-// Called once on character init. Puts all 6 sets into setStash so player
-// can test any preset immediately. Set a flag on player so we don't
-// double-grant on reload.
+// Called once on character init. Puts all 6 sets into setStashData so player
+// can test any preset immediately. Each set piece goes into its preset's
+// "chosen" slot (not spares) so APPLY PRESET works instantly.
+// Self-heals: if flag is true but stashData is empty, re-grants (handles
+// cases where save migrated from old structure without data).
 function grantAllPresetSetsForTesting(){
-  if(player._testSetsGranted) return;
+  ensureSetStashDataInitialized();
+  // Check if stashData is genuinely empty (no items anywhere across all presets)
+  let totalItems = 0;
+  Object.values(setStashData).forEach(d=>{
+    Object.values(d.chosen).forEach(x => { if(x) totalItems++; });
+    totalItems += d.spares.length;
+  });
+  console.log('[SET STASH] Grant check: flag=', player._testSetsGranted, 'totalItems=', totalItems);
+  // If the flag says granted AND stash has items — nothing to do
+  if(player._testSetsGranted && totalItems > 0){
+    console.log('[SET STASH] Already granted with items, skipping');
+    return;
+  }
+  // Otherwise: grant (either first time, or self-heal)
   const items = buildPresetSetItems();
-  // Deep copy each item and scale its stats to player's current level (so
-  // test gear doesn't feel weaker than level-scaled drops)
   const levelScale = 1 + Math.max(0, player.level - 1) * 0.03;
+  const setNameToPresetId = {};
+  Object.values(BUILD_PRESETS).forEach(p => { setNameToPresetId[p.setName] = p.id; });
+  let placed = 0;
   items.forEach(tpl=>{
     const copy = {
       ...tpl,
       stats: scaleItemStats(tpl.stats, (RARITY_STAT_MULT[tpl.rarity]||1.0) * levelScale),
     };
-    setStash.push(copy);
+    const presetId = setNameToPresetId[copy.setName];
+    if(!presetId) return;
+    const presetData = setStashData[presetId];
+    if(presetData.chosen[copy.slot] === null){
+      presetData.chosen[copy.slot] = copy;
+    } else {
+      presetData.spares.push(copy);
+    }
+    placed++;
   });
   player._testSetsGranted = true;
-  addFeed(`⚒ TEST MODE: ${items.length} set pieces added to Set Stash`, '#f59e0b');
-  addFeed(`  └ Open Talents panel to apply a preset`, '#9ca3af');
+  addFeed(`⚒ TEST MODE: ${placed} set pieces added to Set Stash`, '#f59e0b');
+  addFeed(`  └ Open Talents panel → APPLY PRESET to test a build`, '#9ca3af');
+  console.log('[SET STASH] Test grant complete:', placed, 'pieces placed');
   if(typeof writeSave === 'function') writeSave();
 }
 
+// Debug helper: reset the test grant flag and re-run it. Exposed via a
+// button in the Set Stash panel when _testSetsGranted is true.
+function resetAndRegrantTestSets(){
+  player._testSetsGranted = false;
+  // Clear existing test gear from stashData (keep player-earned gear? for
+  // now just wipe — test mode is dev-only)
+  ensureSetStashDataInitialized();
+  Object.keys(setStashData).forEach(presetId=>{
+    GEAR_SLOTS.forEach(slot=>{
+      setStashData[presetId].chosen[slot] = null;
+    });
+    setStashData[presetId].spares = [];
+  });
+  addFeed('⟲ Test Set Stash wiped', '#f59e0b');
+  grantAllPresetSetsForTesting();
+  if(typeof renderSetStash === 'function') renderSetStash();
+}
+
 // ═══════ PRESET APPLICATION ═══════════════════════════════════════
-// Main entry point: wipe current talents, respec into preset's distribution,
-// and auto-equip best-matching set gear from stash.
+// Main entry point: respec talents + auto-equip CHOSEN pieces from this
+// preset's stash tab. Logic for handling currently-equipped gear:
+//   - Set piece: goes back to its own preset's chosen slot (if empty)
+//     or spares (if chosen slot filled)
+//   - Non-set piece: goes to main bag
+//
+// NOTE: chosen slots PERSIST. When you APPLY PRESET, the piece in chosen
+// gets equipped but STAYS in the chosen config (as a reference to the same
+// item). This lets you switch presets freely without losing your picks.
+// When you swap AWAY, the piece returns to its original home.
 function applyPreset(presetId){
   const preset = BUILD_PRESETS[presetId];
   if(!preset){ addFeed(`Unknown preset: ${presetId}`, '#ef4444'); return; }
-  // Guard: preset must match current class
   if(preset.classId !== player.classId){
     addFeed(`${preset.name} is for ${preset.classId.toUpperCase()}, not your class`, '#ef4444');
     return;
   }
+  ensureSetStashDataInitialized();
+
   // ─── STEP 1: RESPEC TALENTS ───
-  // Refund all current talent points
   const refundedPoints = talentState.pointsEarned || 0;
   talentState.points = refundedPoints;
   talentState.learned = {};
-  // Apply preset talent distribution. Skip any talents that don't exist
-  // in the current TALENT_TREE (for cross-class or future expansion safety).
   let applied = 0;
   let skipped = 0;
   Object.entries(preset.talentPoints).forEach(([talentId, rank])=>{
-    // Find the talent in any branch
     let found = null;
     Object.values(TALENT_TREE).forEach(branch=>{
       if(found) return;
       found = branch.talents.find(t=>t.id === talentId);
     });
-    if(!found){
-      skipped++;
-      return;
-    }
+    if(!found){ skipped++; return; }
     const actualRank = Math.min(rank, found.maxRank);
     if(talentState.points >= actualRank){
       talentState.learned[talentId] = actualRank;
@@ -2428,50 +2539,58 @@ function applyPreset(presetId){
     }
   });
   if(typeof computeTalentBonuses === 'function') computeTalentBonuses();
-  // ─── STEP 2: AUTO-EQUIP SET GEAR ───
-  // For each gear slot: find the best piece from setStash matching this
-  // preset's setName. Move currently equipped item to bag if any.
-  let equippedCount = 0;
+
+  // ─── STEP 2: HANDLE CURRENTLY-EQUIPPED GEAR ───
+  // Before we overwrite equipped[], collect all current set pieces and
+  // route them back to their home preset's chosen (if empty) or spares.
+  // Non-set pieces that would be displaced go to main bag.
+  const presetData = setStashData[presetId];
+
   GEAR_SLOTS.forEach(slot=>{
-    // Find all stash pieces for this preset's set AND this slot
-    const candidates = setStash
-      .map((item, idx)=>({item, idx}))
-      .filter(c => c.item.setName === preset.setName && c.item.slot === slot);
-    if(candidates.length === 0) return;
-    // Pick the best (highest upgrade level, then highest rarity tier)
-    candidates.sort((a,b)=>{
-      const aUp = a.item.upgradeLevel || 0;
-      const bUp = b.item.upgradeLevel || 0;
-      if(aUp !== bUp) return bUp - aUp;
-      const rarityOrder = {common:0, uncommon:1, rare:2, epic:3, legendary:4, mythic:5};
-      return (rarityOrder[b.item.rarity]||0) - (rarityOrder[a.item.rarity]||0);
-    });
-    const chosen = candidates[0];
-    // Move currently equipped to bag (if any)
+    const chosenPiece = presetData.chosen[slot];
+    if(!chosenPiece) return; // no chosen piece for this slot — skip, keep current equipped
+
     const currentlyEquipped = equipped[slot];
-    if(currentlyEquipped){
-      if(inventory.length < INVENTORY_MAX){
-        inventory.push(currentlyEquipped);
+    if(currentlyEquipped && currentlyEquipped !== chosenPiece){
+      // Displace the currently-equipped item
+      if(currentlyEquipped.setName){
+        // Set piece — find its preset and put it home
+        const homePresetId = findPresetIdForSet(currentlyEquipped.setName);
+        if(homePresetId){
+          const homeData = setStashData[homePresetId];
+          if(!homeData.chosen[slot]){
+            homeData.chosen[slot] = currentlyEquipped;
+          } else {
+            homeData.spares.push(currentlyEquipped);
+          }
+        }
       } else {
-        // Bag full — move current equipped to setStash as fallback
-        setStash.push(currentlyEquipped);
+        // Non-set gear — goes to main bag
+        if(inventory.length < INVENTORY_MAX){
+          inventory.push(currentlyEquipped);
+        } else {
+          addFeed(`⚠ Bag full, lost ${currentlyEquipped.name}`, '#ef4444');
+        }
       }
     }
-    // Equip the set piece and remove from setStash
-    equipped[slot] = chosen.item;
-    setStash.splice(chosen.idx, 1);
-    equippedCount++;
+    // Equip the chosen piece (by reference — stays in chosen too)
+    equipped[slot] = chosenPiece;
   });
-  // Refresh everything
+
   if(typeof recalcStats === 'function') recalcStats();
   if(typeof checkSetBonuses === 'function') checkSetBonuses();
-  // Feed messages
+
+  // Count how many slots actually got set gear after all this
+  const equippedCount = GEAR_SLOTS.filter(slot => {
+    return equipped[slot] && equipped[slot].setName === preset.setName;
+  }).length;
+
   addFeed(`◆ Applied ${preset.name.toUpperCase()} preset`, preset.color);
-  addFeed(`  └ ${applied} talent points spent, ${equippedCount} set pieces equipped`, '#9ca3af');
+  addFeed(`  └ ${applied} talent points spent, ${equippedCount}/8 set pieces equipped`, '#9ca3af');
   if(skipped > 0){
     addFeed(`  └ (${skipped} talents skipped — not in ${player.classId} tree yet)`, '#6b7280');
   }
-  // Save + refresh UI
+
   if(typeof writeSave === 'function') writeSave();
   if(typeof renderTalents === 'function') renderTalents();
   if(typeof renderGearPanel === 'function') renderGearPanel();
@@ -2480,136 +2599,207 @@ function applyPreset(presetId){
   return {applied, equippedCount};
 }
 
-// ═══════ SET STASH UI ═══════════════════════════════════════════════
-// Renders the stash as a grid inside a dedicated tab in the bag panel.
-// Players can click to equip-in-place or move to bag.
+// ═══════ SET STASH UI (v2 — tabs + chosen/spare split) ═══════════
+// Each preset has its own tab. Within a tab:
+//   - 8 "Chosen" slots — one per gear slot. These are auto-equipped on APPLY.
+//   - Spare pieces — any extra pieces for this set, sorted best-first.
+// Tap a spare to promote it to chosen (swapping with whatever is already
+// chosen for that slot). Tap a chosen piece to demote it back to spares.
 
-let _stashSelectedIndex = null;
+let _stashActivePresetId = null; // which preset tab is currently shown
+let _stashSelectedIndex = null;  // (legacy) — retained for safety
 
 function renderSetStash(){
+  ensureSetStashDataInitialized();
   const grid = document.getElementById('setStashGrid');
-  const tooltip = document.getElementById('setStashTooltip');
   const countEl = document.getElementById('setStashCountText');
   if(!grid) return;
-  if(countEl) countEl.textContent = `${setStash.length} pieces`;
+
+  // Pick a default active preset if none set yet (prefer current class's first preset)
+  if(!_stashActivePresetId || !BUILD_PRESETS[_stashActivePresetId]){
+    const firstForClass = Object.values(BUILD_PRESETS).find(p => p.classId === player.classId);
+    _stashActivePresetId = (firstForClass || Object.values(BUILD_PRESETS)[0]).id;
+  }
+
+  // Total piece count across all presets (for the tab badge)
+  if(countEl){
+    let total = 0;
+    Object.values(setStashData).forEach(d=>{
+      Object.values(d.chosen).forEach(x => { if(x) total++; });
+      total += d.spares.length;
+    });
+    countEl.textContent = `${total} pieces`;
+  }
+
   grid.innerHTML = '';
-  // Group by set for nicer display — show one row/section per set
-  const bySet = {};
-  setStash.forEach((item, idx)=>{
-    const setName = item.setName || 'Unknown';
-    if(!bySet[setName]) bySet[setName] = [];
-    bySet[setName].push({item, idx});
+
+  // ─── TAB BAR ───
+  const tabBar = document.createElement('div');
+  tabBar.className = 'preset-tab-bar';
+  Object.values(BUILD_PRESETS).forEach(preset=>{
+    const data = setStashData[preset.id];
+    const chosenCount = Object.values(data.chosen).filter(x => x).length;
+    const tab = document.createElement('button');
+    tab.className = 'preset-tab';
+    if(preset.id === _stashActivePresetId) tab.classList.add('active');
+    // Dim tabs for the other class
+    if(preset.classId !== player.classId) tab.classList.add('other-class');
+    tab.style.borderBottomColor = preset.color;
+    tab.innerHTML = `
+      <span class="preset-tab-name" style="color:${preset.color}">${preset.name}</span>
+      <span class="preset-tab-count">${chosenCount}/8</span>
+    `;
+    tab.addEventListener('click', ()=>{
+      _stashActivePresetId = preset.id;
+      renderSetStash();
+    });
+    tabBar.appendChild(tab);
   });
-  Object.entries(bySet).forEach(([setName, members])=>{
-    const setSection = document.createElement('div');
-    setSection.className = 'stash-set-section';
-    const header = document.createElement('div');
-    header.className = 'stash-set-header';
-    header.textContent = `◆ ${setName}  (${members.length} pieces)`;
-    setSection.appendChild(header);
-    const pieceGrid = document.createElement('div');
-    pieceGrid.className = 'stash-piece-grid';
-    members.forEach(({item, idx})=>{
-      const slot = document.createElement('div');
-      slot.className = 'bag-slot filled';
+  grid.appendChild(tabBar);
+
+  const activePreset = BUILD_PRESETS[_stashActivePresetId];
+  const data = setStashData[_stashActivePresetId];
+
+  // ─── PRESET HEADER + TAGLINE ───
+  const headerWrap = document.createElement('div');
+  headerWrap.className = 'preset-tab-content-header';
+  headerWrap.innerHTML = `
+    <div class="preset-tab-title" style="color:${activePreset.color}">
+      ◆ ${activePreset.setName}
+    </div>
+    <div class="preset-tab-tagline">${activePreset.tagline}</div>
+  `;
+  grid.appendChild(headerWrap);
+
+  // ─── CHOSEN GRID ───
+  const chosenSection = document.createElement('div');
+  chosenSection.className = 'stash-chosen-section';
+  chosenSection.innerHTML = `
+    <div class="stash-subsection-label">
+      CHOSEN <span class="stash-subsection-hint">— auto-equipped on APPLY PRESET</span>
+    </div>
+  `;
+  const chosenGrid = document.createElement('div');
+  chosenGrid.className = 'stash-chosen-grid';
+  GEAR_SLOTS.forEach(slot=>{
+    const item = data.chosen[slot];
+    const cell = document.createElement('div');
+    cell.className = 'bag-slot stash-chosen-cell';
+    if(item){
+      // Filled slot — show the chosen piece with a highlight
       const col = RARITY_COLORS[item.rarity] || '#9ca3af';
-      slot.style.borderColor = col;
-      slot.innerHTML = `
+      cell.classList.add('filled', 'chosen-highlight');
+      cell.style.borderColor = col;
+      cell.innerHTML = `
+        <span class="chosen-star" title="Chosen for this preset">★</span>
         <canvas class="bag-slot-icon-canvas" width="52" height="52"></canvas>
-        <span class="bag-slot-rarity" style="background:${col}22;color:${col}">${item.slot}</span>
+        <span class="bag-slot-rarity" style="background:${col}22;color:${col}">${slot.substring(0,4)}</span>
       `;
-      const iconCanvas = slot.querySelector('.bag-slot-icon-canvas');
+      const iconCanvas = cell.querySelector('.bag-slot-icon-canvas');
       if(iconCanvas && typeof drawGearIcon === 'function'){
         drawGearIcon(iconCanvas, item.slot, item.rarity);
       }
-      if(idx === _stashSelectedIndex) slot.classList.add('selected');
-      slot.addEventListener('click', ()=>{
-        _stashSelectedIndex = (_stashSelectedIndex === idx) ? null : idx;
+      // Tap to demote: move chosen piece back to spares
+      cell.addEventListener('click', ()=>{
+        data.spares.push(item);
+        data.chosen[slot] = null;
+        sortSparesByQuality(data.spares);
+        if(typeof writeSave === 'function') writeSave();
         renderSetStash();
       });
-      pieceGrid.appendChild(slot);
-    });
-    setSection.appendChild(pieceGrid);
-    grid.appendChild(setSection);
-  });
-  // Tooltip for selected item
-  if(tooltip){
-    if(_stashSelectedIndex === null || !setStash[_stashSelectedIndex]){
-      tooltip.style.display = 'none';
+      cell.title = `${itemDisplayName(item)} — tap to remove from chosen`;
     } else {
-      const item = setStash[_stashSelectedIndex];
-      const col = RARITY_COLORS[item.rarity] || '#9ca3af';
-      const statLines = computeStatLines(item);
-      const statsHtml = statLines.length
-        ? statLines.map(l=>`<div class="bag-stat-line" style="color:${l.color}">${l.text}</div>`).join('')
-        : '<div class="bag-stat-line" style="color:#6b4d8a">— no stats —</div>';
-      tooltip.innerHTML = `
-        <div class="bag-tooltip-header" style="border-color:${col}88">
-          <span class="bag-tt-name" style="color:${col}">${itemDisplayName(item)}</span>
-          <span class="bag-tt-rarity" style="background:${col}22;color:${col}">${RARITY_LABELS[item.rarity]||'?'}</span>
-        </div>
-        <div class="bag-tt-slot">${SLOT_ICONS[item.slot]||'✦'} ${item.slot.toUpperCase()}</div>
-        <div class="bag-tt-set" style="color:#f59e0b">◆ ${item.setName}</div>
-        <div class="bag-tt-section">
-          <div class="bag-tt-section-label">Item Stats</div>
-          ${statsHtml}
-        </div>
-        <div class="bag-tt-actions">
-          <button class="bag-btn bag-btn-equip">⚔ EQUIP NOW</button>
-          <button class="bag-btn bag-btn-tobag">◇ MOVE TO BAG</button>
-        </div>
+      // Empty slot — show ghost indicator with slot name
+      cell.classList.add('empty', 'stash-ghost-slot');
+      cell.innerHTML = `
+        <span class="ghost-slot-icon">${SLOT_ICONS[slot]||'◇'}</span>
+        <span class="ghost-slot-label">${slot}</span>
       `;
-      tooltip.style.display = 'flex';
-      tooltip.style.borderColor = col + '55';
-      tooltip.querySelector('.bag-btn-equip').addEventListener('click', ()=>{
-        equipFromStash(_stashSelectedIndex);
-      });
-      tooltip.querySelector('.bag-btn-tobag').addEventListener('click', ()=>{
-        moveStashToBag(_stashSelectedIndex);
-      });
+      cell.title = `${slot} — empty, pick one from spares below`;
     }
+    chosenGrid.appendChild(cell);
+  });
+  chosenSection.appendChild(chosenGrid);
+  grid.appendChild(chosenSection);
+
+  // ─── SPARES SECTION ───
+  sortSparesByQuality(data.spares);
+  const sparesSection = document.createElement('div');
+  sparesSection.className = 'stash-spares-section';
+  sparesSection.innerHTML = `
+    <div class="stash-subsection-label">
+      SPARES <span class="stash-subsection-count">${data.spares.length}</span>
+      <span class="stash-subsection-hint">— tap to promote to chosen</span>
+    </div>
+  `;
+  if(data.spares.length === 0){
+    sparesSection.innerHTML += `
+      <div class="stash-empty-spares">No spare pieces for this set yet.</div>
+    `;
+  } else {
+    const sparesGrid = document.createElement('div');
+    sparesGrid.className = 'stash-spares-grid';
+    data.spares.forEach((item, idx)=>{
+      const col = RARITY_COLORS[item.rarity] || '#9ca3af';
+      const cell = document.createElement('div');
+      cell.className = 'bag-slot filled';
+      cell.style.borderColor = col;
+      cell.innerHTML = `
+        <canvas class="bag-slot-icon-canvas" width="52" height="52"></canvas>
+        <span class="bag-slot-rarity" style="background:${col}22;color:${col}">${item.slot.substring(0,4)}</span>
+        ${(item.upgradeLevel||0)>0 ? `<span class="spare-upgrade-tag">+${item.upgradeLevel}</span>` : ''}
+      `;
+      const iconCanvas = cell.querySelector('.bag-slot-icon-canvas');
+      if(iconCanvas && typeof drawGearIcon === 'function'){
+        drawGearIcon(iconCanvas, item.slot, item.rarity);
+      }
+      cell.title = `${itemDisplayName(item)} — tap to promote to chosen`;
+      cell.addEventListener('click', ()=>{
+        // Promote: put this item into chosen[slot]. Any existing piece in
+        // that chosen slot gets demoted to spares.
+        const currentChosen = data.chosen[item.slot];
+        if(currentChosen) data.spares.push(currentChosen);
+        data.chosen[item.slot] = item;
+        data.spares.splice(idx, 1);
+        sortSparesByQuality(data.spares);
+        if(typeof writeSave === 'function') writeSave();
+        renderSetStash();
+      });
+      sparesGrid.appendChild(cell);
+    });
+    sparesSection.appendChild(sparesGrid);
+  }
+  grid.appendChild(sparesSection);
+
+  // ─── DEBUG: RESET TEST SETS BUTTON ───
+  // Only shown if _testSetsGranted is true, so it disappears in production.
+  if(player._testSetsGranted){
+    const debugWrap = document.createElement('div');
+    debugWrap.className = 'stash-debug-wrap';
+    debugWrap.innerHTML = `
+      <button class="stash-debug-btn" title="Wipes test stash and re-grants all 6 sets">
+        ⟲ Reset Test Sets
+      </button>
+    `;
+    debugWrap.querySelector('.stash-debug-btn').addEventListener('click', ()=>{
+      if(confirm('Wipe current Set Stash and re-grant all 6 test sets?\n\nYour equipped set gear will remain equipped.')){
+        resetAndRegrantTestSets();
+      }
+    });
+    grid.appendChild(debugWrap);
   }
 }
 
-function equipFromStash(stashIdx){
-  const item = setStash[stashIdx];
-  if(!item) return;
-  // Move currently-equipped to inventory (if any)
-  const current = equipped[item.slot];
-  if(current){
-    if(inventory.length < INVENTORY_MAX){
-      inventory.push(current);
-    } else {
-      setStash.push(current); // fallback — bag full, goes to stash
-    }
-  }
-  // Equip the stash item + remove from stash
-  equipped[item.slot] = item;
-  setStash.splice(stashIdx, 1);
-  _stashSelectedIndex = null;
-  if(typeof recalcStats === 'function') recalcStats();
-  if(typeof checkSetBonuses === 'function') checkSetBonuses();
-  addFeed(`✦ Equipped ${item.name}`, RARITY_COLORS[item.rarity] || '#9ca3af');
-  if(typeof writeSave === 'function') writeSave();
-  renderSetStash();
-  if(typeof renderGearPanel === 'function') renderGearPanel();
-  if(typeof renderInventory === 'function') renderInventory();
-}
-
-function moveStashToBag(stashIdx){
-  const item = setStash[stashIdx];
-  if(!item) return;
-  if(inventory.length >= INVENTORY_MAX){
-    addFeed('⚠ Bag is full', '#ef4444');
-    return;
-  }
-  inventory.push(item);
-  setStash.splice(stashIdx, 1);
-  _stashSelectedIndex = null;
-  addFeed(`◇ ${item.name} → bag`, '#6b9acf');
-  if(typeof writeSave === 'function') writeSave();
-  renderSetStash();
-  if(typeof updateInventoryBadge === 'function') updateInventoryBadge();
+// Sort spares in-place: best pieces first (higher upgrade level, then
+// higher rarity). Keeps the visual order meaningful.
+function sortSparesByQuality(arr){
+  const rarityOrder = {common:0, uncommon:1, rare:2, epic:3, legendary:4, mythic:5};
+  arr.sort((a,b)=>{
+    const aUp = a.upgradeLevel || 0;
+    const bUp = b.upgradeLevel || 0;
+    if(aUp !== bUp) return bUp - aUp;
+    return (rarityOrder[b.rarity]||0) - (rarityOrder[a.rarity]||0);
+  });
 }
 
 // ═══════ PRESET SELECTOR UI ═══════════════════════════════════════
@@ -2618,8 +2808,8 @@ function moveStashToBag(stashIdx){
 function renderPresetSelector(){
   const container = document.getElementById('presetSelector');
   if(!container) return;
+  ensureSetStashDataInitialized();
   container.innerHTML = '';
-  // Filter presets to this class
   const available = Object.values(BUILD_PRESETS).filter(p => p.classId === player.classId);
   if(available.length === 0){
     container.innerHTML = '<div class="preset-empty">No presets available for this class yet.</div>';
@@ -2629,17 +2819,18 @@ function renderPresetSelector(){
     const card = document.createElement('div');
     card.className = 'preset-card';
     card.style.borderLeft = `4px solid ${preset.color}`;
-    // Count how many set pieces player has for this preset
-    const inStash = setStash.filter(i => i.setName === preset.setName).length;
+    const data = setStashData[preset.id] || {chosen:{}, spares:[]};
+    const chosenCount = Object.values(data.chosen).filter(x=>x).length;
+    const spareCount = data.spares.length;
     const equippedCount = Object.values(equipped).filter(i => i && i.setName === preset.setName).length;
-    const totalSet = inStash + equippedCount;
     card.innerHTML = `
       <div class="preset-card-header">
         <span class="preset-name" style="color:${preset.color}">${preset.name}</span>
-        <span class="preset-set-count">${totalSet}/8 set pieces</span>
+        <span class="preset-set-count">${chosenCount}/8 chosen · ${spareCount} spare</span>
       </div>
       <div class="preset-tagline">"${preset.tagline}"</div>
       <div class="preset-desc">${preset.description}</div>
+      <div class="preset-equipped-state">${equippedCount > 0 ? `<span style="color:${preset.color}">✓ ${equippedCount}/8 currently equipped</span>` : ''}</div>
       <div class="preset-actions">
         <button class="preset-apply-btn" style="background:${preset.color}22;color:${preset.color};border-color:${preset.color}66">
           ▲ APPLY PRESET
@@ -2647,7 +2838,7 @@ function renderPresetSelector(){
       </div>
     `;
     card.querySelector('.preset-apply-btn').addEventListener('click', ()=>{
-      if(!confirm(`Apply ${preset.name} preset?\n\nThis will:\n• Respec all talents\n• Auto-equip ${preset.setName} pieces\n• Move currently equipped gear to bag`)){
+      if(!confirm(`Apply ${preset.name} preset?\n\nThis will:\n• Respec all talents\n• Auto-equip ${chosenCount} chosen set pieces\n• Move current gear aside`)){
         return;
       }
       applyPreset(preset.id);
