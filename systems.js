@@ -2204,19 +2204,31 @@ function ensureSetStashDataInitialized(){
 }
 
 // Migration: if an old save has `setStash` as a flat array, move everything
-// into the new nested structure. Items are routed to their preset's spares
-// (not chosen) so the player can pick which pieces they want active.
+// into the new nested structure. Items are routed to their preset's CHOSEN
+// slot first (if that slot is empty), else to spares. This ensures APPLY
+// PRESET immediately has gear to equip instead of landing everything in
+// spares (which would make presets do nothing visible).
 function migrateLegacySetStash(){
   if(!Array.isArray(setStash) || setStash.length === 0) return;
   ensureSetStashDataInitialized();
-  // For each item in the flat array, find its preset by setName
   const setNameToPresetId = {};
   Object.values(BUILD_PRESETS).forEach(p => { setNameToPresetId[p.setName] = p.id; });
+  let routedToChosen = 0;
+  let routedToSpares = 0;
   setStash.forEach(item=>{
     const presetId = setNameToPresetId[item.setName];
     if(!presetId) return; // unknown set — skip
-    setStashData[presetId].spares.push(item);
+    const presetData = setStashData[presetId];
+    // Try chosen slot first — this is the fix
+    if(presetData.chosen[item.slot] === null || presetData.chosen[item.slot] === undefined){
+      presetData.chosen[item.slot] = item;
+      routedToChosen++;
+    } else {
+      presetData.spares.push(item);
+      routedToSpares++;
+    }
   });
+  console.log(`[SET STASH MIGRATE] ${routedToChosen} routed to chosen, ${routedToSpares} to spares`);
   setStash = []; // clear legacy array — migration complete
 }
 
@@ -2500,16 +2512,10 @@ function resetAndRegrantTestSets(){
 
 // ═══════ PRESET APPLICATION ═══════════════════════════════════════
 // Main entry point: respec talents + auto-equip CHOSEN pieces from this
-// preset's stash tab. Logic for handling currently-equipped gear:
-//   - Set piece: goes back to its own preset's chosen slot (if empty)
-//     or spares (if chosen slot filled)
-//   - Non-set piece: goes to main bag
-//
-// NOTE: chosen slots PERSIST. When you APPLY PRESET, the piece in chosen
-// gets equipped but STAYS in the chosen config (as a reference to the same
-// item). This lets you switch presets freely without losing your picks.
-// When you swap AWAY, the piece returns to its original home.
+// preset's stash tab. If no chosen pieces exist, auto-promotes best spares
+// to chosen before equipping (so first-time presets work out of the box).
 function applyPreset(presetId){
+  console.log(`[APPLY PRESET] Starting: ${presetId}`);
   const preset = BUILD_PRESETS[presetId];
   if(!preset){ addFeed(`Unknown preset: ${presetId}`, '#ef4444'); return; }
   if(preset.classId !== player.classId){
@@ -2520,41 +2526,72 @@ function applyPreset(presetId){
 
   // ─── STEP 1: RESPEC TALENTS ───
   const refundedPoints = talentState.pointsEarned || 0;
+  console.log(`[APPLY PRESET] Respec: ${refundedPoints} points available`);
   talentState.points = refundedPoints;
   talentState.learned = {};
   let applied = 0;
   let skipped = 0;
+  const skippedIds = [];
   Object.entries(preset.talentPoints).forEach(([talentId, rank])=>{
     let found = null;
     Object.values(TALENT_TREE).forEach(branch=>{
       if(found) return;
       found = branch.talents.find(t=>t.id === talentId);
     });
-    if(!found){ skipped++; return; }
+    if(!found){
+      skipped++;
+      skippedIds.push(talentId);
+      return;
+    }
     const actualRank = Math.min(rank, found.maxRank);
     if(talentState.points >= actualRank){
       talentState.learned[talentId] = actualRank;
       talentState.points -= actualRank;
       applied += actualRank;
+    } else {
+      console.warn(`[APPLY PRESET] Not enough points for ${talentId} rank ${actualRank} (have ${talentState.points})`);
     }
   });
+  console.log(`[APPLY PRESET] Talents applied: ${applied}, skipped: ${skipped}`, skippedIds.length ? `(skipped IDs: ${skippedIds.join(',')})` : '');
   if(typeof computeTalentBonuses === 'function') computeTalentBonuses();
 
-  // ─── STEP 2: HANDLE CURRENTLY-EQUIPPED GEAR ───
-  // Before we overwrite equipped[], collect all current set pieces and
-  // route them back to their home preset's chosen (if empty) or spares.
-  // Non-set pieces that would be displaced go to main bag.
+  // ─── STEP 2: AUTO-FILL EMPTY CHOSEN SLOTS FROM SPARES ───
+  // If the preset's chosen slots are empty but spares exist, promote the
+  // best spare per slot. This makes first-time APPLY always do something
+  // useful instead of silently doing nothing.
   const presetData = setStashData[presetId];
+  let autoPromoted = 0;
+  GEAR_SLOTS.forEach(slot=>{
+    if(presetData.chosen[slot]) return; // already has a chosen piece
+    // Find the best spare piece for this slot
+    const candidates = presetData.spares
+      .map((item, idx)=>({item, idx}))
+      .filter(c => c.item.slot === slot);
+    if(candidates.length === 0) return;
+    // Pick best by upgrade level then rarity
+    const rarityOrder = {common:0, uncommon:1, rare:2, epic:3, legendary:4, mythic:5};
+    candidates.sort((a,b)=>{
+      const aUp = a.item.upgradeLevel || 0;
+      const bUp = b.item.upgradeLevel || 0;
+      if(aUp !== bUp) return bUp - aUp;
+      return (rarityOrder[b.item.rarity]||0) - (rarityOrder[a.item.rarity]||0);
+    });
+    const best = candidates[0];
+    presetData.chosen[slot] = best.item;
+    presetData.spares.splice(best.idx, 1);
+    autoPromoted++;
+  });
+  console.log(`[APPLY PRESET] Auto-promoted ${autoPromoted} spares to chosen slots`);
 
+  // ─── STEP 3: EQUIP CHOSEN PIECES ───
+  let equippedCount = 0;
   GEAR_SLOTS.forEach(slot=>{
     const chosenPiece = presetData.chosen[slot];
-    if(!chosenPiece) return; // no chosen piece for this slot — skip, keep current equipped
-
+    if(!chosenPiece) return;
     const currentlyEquipped = equipped[slot];
     if(currentlyEquipped && currentlyEquipped !== chosenPiece){
-      // Displace the currently-equipped item
       if(currentlyEquipped.setName){
-        // Set piece — find its preset and put it home
+        // Route back to its home preset
         const homePresetId = findPresetIdForSet(currentlyEquipped.setName);
         if(homePresetId){
           const homeData = setStashData[homePresetId];
@@ -2573,30 +2610,35 @@ function applyPreset(presetId){
         }
       }
     }
-    // Equip the chosen piece (by reference — stays in chosen too)
     equipped[slot] = chosenPiece;
+    equippedCount++;
   });
+  console.log(`[APPLY PRESET] Equipped ${equippedCount} set pieces`);
 
+  // ─── STEP 4: RECALC STATS AND REFRESH ALL UI ───
+  // This is the critical step that was missing. Without it, talents and gear
+  // are stored correctly but don't affect the player's actual stats.
   if(typeof recalcStats === 'function') recalcStats();
   if(typeof checkSetBonuses === 'function') checkSetBonuses();
+  console.log(`[APPLY PRESET] Stats recalculated. Player atk=${player.attack}, maxHp=${player.maxHp}`);
 
-  // Count how many slots actually got set gear after all this
-  const equippedCount = GEAR_SLOTS.filter(slot => {
+  const pieceCount = GEAR_SLOTS.filter(slot => {
     return equipped[slot] && equipped[slot].setName === preset.setName;
   }).length;
 
-  addFeed(`◆ Applied ${preset.name.toUpperCase()} preset`, preset.color);
-  addFeed(`  └ ${applied} talent points spent, ${equippedCount}/8 set pieces equipped`, '#9ca3af');
+  addFeed(`◆ Applied ${preset.name.toUpperCase()}`, preset.color);
+  addFeed(`  └ ${applied} talent points · ${pieceCount}/8 set pieces equipped`, '#9ca3af');
   if(skipped > 0){
-    addFeed(`  └ (${skipped} talents skipped — not in ${player.classId} tree yet)`, '#6b7280');
+    addFeed(`  └ (${skipped} talents skipped — not yet in tree)`, '#6b7280');
   }
 
   if(typeof writeSave === 'function') writeSave();
-  if(typeof renderTalents === 'function') renderTalents();
+  if(typeof renderTalentPanel === 'function') renderTalentPanel();
   if(typeof renderGearPanel === 'function') renderGearPanel();
   if(typeof renderInventory === 'function') renderInventory();
   if(typeof renderSetStash === 'function') renderSetStash();
-  return {applied, equippedCount};
+  if(typeof renderPresetSelector === 'function') renderPresetSelector();
+  return {applied, equippedCount: pieceCount};
 }
 
 // ═══════ SET STASH UI (v2 — tabs + chosen/spare split) ═══════════
