@@ -517,6 +517,15 @@ function startMusic(){
   ambientState.ambMasterGain.gain.linearRampToValueAtTime(1.0, ac.currentTime + 3);
   ambientState.running = true;
   switchAmbientZone(currentZoneId());
+  // If the player has MP3 tracks configured, also launch the file-based music
+  // player. It will fade out the procedural ambient once the first track starts
+  // playing. If no tracks are configured, procedural ambient is the full music.
+  if(typeof startMp3Music === 'function' && MUSIC_TRACKS && MUSIC_TRACKS.length > 0){
+    // Small delay — lets the audio context settle after user-gesture unlock.
+    setTimeout(() => {
+      try{ startMp3Music(); }catch(e){ console.warn('Music start failed:', e); }
+    }, 500);
+  }
 }
 
 function currentZoneId(){
@@ -703,10 +712,9 @@ function scheduleNextAmbientNote(profile, generation){
 // and MP3s take over.
 
 const MUSIC_TRACKS = [
-  // Example entries — REPLACE these with your actual uploaded files:
-  // {file: 'music/dirge_of_hollows.mp3', name: 'Dirge of Hollows'},
-  // {file: 'music/veiled_wanderer.mp3',  name: 'Veiled Wanderer'},
-  // {file: 'music/ashen_requiem.mp3',    name: 'Ashen Requiem'},
+  {file: 'music/graveward_oath.mp3',   name: 'Graveward Oath'},
+  {file: 'music/iron_symphony.mp3',    name: 'Iron Symphony'},
+  {file: 'music/ruined_clockwork.mp3', name: 'Ruined Clockwork'},
 ];
 
 // Music player state — tracks what's loaded and playing
