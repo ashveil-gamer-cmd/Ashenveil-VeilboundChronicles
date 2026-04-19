@@ -56,10 +56,22 @@ function scaleItemStats(stats, mult){
 }
 
 function rollLoot(level){
-  const tierIdx=Math.min(Math.floor(level/20),4);
+  // Tier is driven by level. Each tier unlocks the next rarity as the cap.
+  // Tier 0 (lv 1-14):  common + uncommon, rare case
+  // Tier 1 (lv 15-29): uncommon + rare
+  // Tier 2 (lv 30-49): rare + epic
+  // Tier 3 (lv 50-74): epic + legendary
+  // Tier 4 (lv 75+):   legendary + mythic (mythic via ITEM_POOL)
+  const tierIdx=Math.min(Math.floor(level/15),4);
   const rarities=['common','uncommon','rare','epic','legendary'];
-  const rarity=rarities[Math.min(tierIdx+Math.floor(Math.random()*2),4)];
-  const filtered=ITEM_POOL.filter(i=>i.rarity===rarity||Math.random()<0.12);
+  // Weighted pick within the 2 rarities near this tier.
+  // Bias toward the LOWER rarity (70%) so upgrades feel meaningful.
+  const weightedRoll = Math.random();
+  const rarityIdx = weightedRoll < 0.7 ? tierIdx : Math.min(tierIdx+1, 4);
+  const rarity = rarities[rarityIdx];
+  // Rarity bleed — 3% chance (was 12%) to pull from any rarity in the pool.
+  // This keeps the occasional surprise but doesn't flood early game with epics.
+  const filtered=ITEM_POOL.filter(i=>i.rarity===rarity||Math.random()<0.03);
   const base = filtered.length?filtered[Math.floor(Math.random()*filtered.length)]:ITEM_POOL[Math.floor(Math.random()*ITEM_POOL.length)];
   // Build the rolled item — start from the template, apply rarity-based stat
   // scaling and a small level-based scaling bonus so higher-level drops are
