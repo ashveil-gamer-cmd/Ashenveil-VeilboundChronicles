@@ -1969,10 +1969,98 @@ function drawProp(p,now){
       ctx.fillStyle=fg;ctx.beginPath();ctx.ellipse(0,-s*.05,s*.11,s*.25*fp,0,0,Math.PI*2);ctx.fill();
       ctx.globalAlpha=.12+Math.sin(now/200+seed)*.06;ctx.fillStyle='#aaa';
       ctx.beginPath();ctx.ellipse(Math.sin(now/300+seed)*4,-s*.45,s*.06,s*.2,0,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;break;}
-    case 'ruinWall':
-      ctx.fillStyle='#140c2a';ctx.strokeStyle='#2a1545';ctx.lineWidth=1.5;
-      ctx.fillRect(-s*.08,-s*.8,s*.16,s*1.6);ctx.strokeRect(-s*.08,-s*.8,s*.16,s*1.6);
-      ctx.fillStyle='#0e0820';ctx.fillRect(-s*.12,-s*.85,s*.06,s*.12);ctx.fillRect(s*.04,-s*.82,s*.08,s*.1);break;
+    case 'ruinWall':{
+      // Weathered stone wall fragment — angular broken top, layered tones,
+      // cracks and moss. Reads as a ruined structure, not a narrow rectangle.
+      const wallMain='#1a1238';
+      const wallShadow='#0a0620';
+      const wallMid='#120c2a';
+      const wallLight='#2a1e52';
+      const wallMoss=z.mossColor||'#2a4018';
+      // Ground shadow
+      ctx.fillStyle='rgba(0,0,0,0.55)';
+      ctx.beginPath();ctx.ellipse(s*.02,s*.8,s*.32,s*.12,0,0,Math.PI*2);ctx.fill();
+      // Wall silhouette — vertical rectangle with jagged broken top
+      // Start at bottom-left, go up to jagged top, across, and back down
+      const topJags=5+Math.floor(rngF(seed)*3);
+      const wallWidth=s*0.5;
+      const wallHeight=s*1.7;
+      const halfW=wallWidth/2;
+      const topY=-s*0.85;
+      const botY=topY+wallHeight;
+      // Build path
+      const pathPts=[];
+      pathPts.push({x:-halfW, y:botY}); // bottom-left
+      pathPts.push({x:-halfW, y:topY + s*0.1 + rngF(seed+1)*s*0.15}); // up left side (slightly irregular)
+      // Jagged top
+      for(let i=0;i<=topJags;i++){
+        const t=i/topJags;
+        const jagX=-halfW + t*wallWidth;
+        const jagY=topY + (rngF(seed+i*13)*s*0.22) + Math.sin(t*Math.PI*2.3)*s*0.05;
+        pathPts.push({x:jagX, y:jagY});
+      }
+      pathPts.push({x:halfW, y:topY + s*0.12 + rngF(seed+7)*s*0.15}); // right side upper
+      pathPts.push({x:halfW, y:botY}); // bottom-right
+      // Layer 1: deep shadow offset
+      ctx.fillStyle=wallShadow;
+      ctx.beginPath();
+      pathPts.forEach((pt,idx)=>{
+        const x=pt.x+s*0.06, y=pt.y+s*0.05;
+        if(idx===0)ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      });
+      ctx.closePath();
+      ctx.fill();
+      // Layer 2: mid
+      ctx.fillStyle=wallMid;
+      ctx.beginPath();
+      pathPts.forEach((pt,idx)=>{
+        if(idx===0)ctx.moveTo(pt.x,pt.y); else ctx.lineTo(pt.x,pt.y);
+      });
+      ctx.closePath();
+      ctx.fill();
+      // Layer 3: main body (slightly inset for bevel look)
+      ctx.fillStyle=wallMain;
+      ctx.beginPath();
+      pathPts.forEach((pt,idx)=>{
+        const x=pt.x*0.93, y=pt.y;
+        if(idx===0)ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      });
+      ctx.closePath();
+      ctx.fill();
+      // Layer 4: left-side lit facet (suggests upper-left light source)
+      ctx.fillStyle=wallLight;
+      ctx.fillRect(-halfW*0.88, topY+s*0.15, s*0.06, wallHeight*0.82);
+      // Dark outline
+      ctx.strokeStyle=wallShadow;
+      ctx.lineWidth=1.2;
+      ctx.beginPath();
+      pathPts.forEach((pt,idx)=>{
+        if(idx===0)ctx.moveTo(pt.x,pt.y); else ctx.lineTo(pt.x,pt.y);
+      });
+      ctx.closePath();
+      ctx.stroke();
+      // Cracks — diagonal fissures
+      ctx.strokeStyle=wallShadow;
+      ctx.lineWidth=1;
+      ctx.beginPath();
+      ctx.moveTo(-halfW*0.3, topY+s*0.35);
+      ctx.lineTo(halfW*0.1, topY+s*0.6);
+      ctx.lineTo(-halfW*0.2, botY-s*0.3);
+      ctx.stroke();
+      // Secondary crack
+      ctx.lineWidth=0.7;
+      ctx.beginPath();
+      ctx.moveTo(halfW*0.4, topY+s*0.5);
+      ctx.lineTo(halfW*0.6, botY-s*0.4);
+      ctx.stroke();
+      // Moss at base
+      ctx.fillStyle=wallMoss;
+      ctx.globalAlpha=0.6;
+      ctx.beginPath();ctx.ellipse(-halfW*0.3, botY-s*0.06, s*0.14, s*0.05, 0, 0, Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.ellipse(halfW*0.4, botY-s*0.04, s*0.1, s*0.04, 0, 0, Math.PI*2);ctx.fill();
+      ctx.globalAlpha=1;
+      break;
+    }
     case 'bonePile':{
       // A pile of bones — long bones (with knobbed ends), skull, ribs.
       // Reads as a real pile, not a spider silhouette.
@@ -2058,12 +2146,91 @@ function drawProp(p,now){
       }
       break;
     }
-    case 'cryptPillar':
-      ctx.fillStyle='#14100a';ctx.strokeStyle='#2a2010';ctx.lineWidth=1.5;
-      ctx.fillRect(-s*.2,-s*.85,s*.4,s*1.7);ctx.strokeRect(-s*.2,-s*.85,s*.4,s*1.7);
-      ctx.fillRect(-s*.28,-s*.88,s*.56,s*.14);ctx.fillRect(-s*.28,s*.74,s*.56,s*.14);
-      ctx.strokeStyle='#1a1408';ctx.lineWidth=.8;
-      for(let i=1;i<4;i++){ctx.beginPath();ctx.moveTo(-s*.2,-s*.85+s*i*.42);ctx.lineTo(s*.2,-s*.85+s*i*.42);ctx.stroke();}break;
+    case 'cryptPillar':{
+      // Classical stone pillar — base, fluted shaft, crumbled top (capital broken off).
+      // Proper architectural silhouette with tonal layers.
+      const stone='#1a1410';
+      const stoneShadow='#0a0804';
+      const stoneMid='#120e0a';
+      const stoneLight='#2a2016';
+      // Ground shadow
+      ctx.fillStyle='rgba(0,0,0,0.55)';
+      ctx.beginPath();ctx.ellipse(s*.02,s*.9,s*.48,s*.15,0,0,Math.PI*2);ctx.fill();
+      const shaftW=s*0.28;
+      const shaftHalf=shaftW/2;
+      const baseY=s*0.82;
+      const shaftTop=-s*0.55;
+      const topBrokenY=-s*0.85;
+      // Base: wide stepped plinth
+      // Bottom step
+      ctx.fillStyle=stoneShadow;
+      ctx.fillRect(-s*0.42, baseY-s*0.02, s*0.84, s*0.1);
+      ctx.fillStyle=stoneMid;
+      ctx.fillRect(-s*0.4, baseY-s*0.06, s*0.8, s*0.1);
+      // Upper step
+      ctx.fillStyle=stone;
+      ctx.fillRect(-s*0.34, baseY-s*0.12, s*0.68, s*0.08);
+      // Shaft with irregular broken top — polygon
+      const shaftPts=[
+        {x:-shaftHalf, y:baseY-s*0.12},
+        {x:-shaftHalf, y:topBrokenY+s*0.08+rngF(seed)*s*0.05},
+      ];
+      // Broken top — irregular jagged edge
+      const tt=4+Math.floor(rngF(seed+3)*3);
+      for(let i=0;i<=tt;i++){
+        const t=i/tt;
+        shaftPts.push({
+          x: -shaftHalf + t*shaftW,
+          y: topBrokenY + rngF(seed+i*17)*s*0.12 + Math.sin(t*Math.PI*2)*s*0.04,
+        });
+      }
+      shaftPts.push({x:shaftHalf, y:topBrokenY+s*0.1+rngF(seed+5)*s*0.06});
+      shaftPts.push({x:shaftHalf, y:baseY-s*0.12});
+      // Layer 1: shaft shadow
+      ctx.fillStyle=stoneShadow;
+      ctx.beginPath();
+      shaftPts.forEach((pt,idx)=>{
+        const x=pt.x+s*0.03, y=pt.y+s*0.02;
+        if(idx===0)ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      });
+      ctx.closePath();ctx.fill();
+      // Layer 2: shaft body
+      ctx.fillStyle=stone;
+      ctx.beginPath();
+      shaftPts.forEach((pt,idx)=>{
+        if(idx===0)ctx.moveTo(pt.x,pt.y); else ctx.lineTo(pt.x,pt.y);
+      });
+      ctx.closePath();ctx.fill();
+      // Layer 3: left-side lit edge — thin vertical band
+      ctx.fillStyle=stoneLight;
+      ctx.fillRect(-shaftHalf+1, topBrokenY+s*0.1, s*0.04, baseY-s*0.12-(topBrokenY+s*0.1));
+      // Flutes — vertical grooves on shaft (3 grooves)
+      ctx.strokeStyle=stoneShadow;
+      ctx.lineWidth=0.9;
+      for(let i=1;i<=3;i++){
+        const fx=-shaftHalf + (i/4)*shaftW;
+        ctx.beginPath();
+        ctx.moveTo(fx, topBrokenY+s*0.18);
+        ctx.lineTo(fx, baseY-s*0.14);
+        ctx.stroke();
+      }
+      // Outline
+      ctx.strokeStyle=stoneShadow;
+      ctx.lineWidth=1.1;
+      ctx.beginPath();
+      shaftPts.forEach((pt,idx)=>{
+        if(idx===0)ctx.moveTo(pt.x,pt.y); else ctx.lineTo(pt.x,pt.y);
+      });
+      ctx.closePath();ctx.stroke();
+      // Crack on shaft
+      ctx.strokeStyle=stoneShadow;
+      ctx.lineWidth=0.8;
+      ctx.beginPath();
+      ctx.moveTo(-shaftHalf*0.5, shaftTop+s*0.2);
+      ctx.lineTo(shaftHalf*0.3, baseY-s*0.4);
+      ctx.stroke();
+      break;
+    }
     case 'sarcophagus':
       ctx.fillStyle='#18120a';ctx.strokeStyle='#2a1e10';ctx.lineWidth=1.5;
       ctx.beginPath();ctx.roundRect(-s*.32,-s*.62,s*.64,s*1.24,4);ctx.fill();ctx.stroke();
@@ -2071,16 +2238,172 @@ function drawProp(p,now){
       ctx.beginPath();ctx.moveTo(0,-s*.45);ctx.lineTo(0,s*.3);ctx.stroke();
       ctx.shadowColor='#d97706';ctx.shadowBlur=5;ctx.strokeStyle='rgba(217,119,6,0.18)';ctx.lineWidth=.8;
       ctx.beginPath();ctx.moveTo(-s*.05,-s*.3);ctx.lineTo(s*.08,s*.2);ctx.stroke();break;
-    case 'cryptTomb':
-      ctx.fillStyle='#14100c';ctx.strokeStyle='#221a10';ctx.lineWidth=1.5;
-      ctx.fillRect(-s*.4,-s*.22,s*.8,s*.44);ctx.beginPath();ctx.arc(0,-s*.22,s*.4,Math.PI,0);ctx.fill();ctx.stroke();
-      ctx.strokeStyle='rgba(217,119,6,0.15)';ctx.lineWidth=1;
-      ctx.beginPath();ctx.moveTo(0,-s*.52);ctx.lineTo(0,s*.18);ctx.moveTo(-s*.18,-s*.12);ctx.lineTo(s*.18,-s*.12);ctx.stroke();break;
-    case 'skullPile':
-      for(let i=0;i<4;i++){const sx2=(-1.5+i)*s*.22,sy2=(i%2)*s*.1-s*.05;
-        ctx.fillStyle='#2a2218';ctx.beginPath();ctx.arc(sx2,sy2,s*.16,0,Math.PI*2);ctx.fill();
-        ctx.fillStyle='#0e0c08';ctx.beginPath();ctx.arc(sx2-s*.05,sy2-s*.04,s*.04,0,Math.PI*2);ctx.fill();
-        ctx.beginPath();ctx.arc(sx2+s*.05,sy2-s*.04,s*.04,0,Math.PI*2);ctx.fill();}break;
+    case 'cryptTomb':{
+      // Stone tomb structure with beveled sides, sunken recess, arched alcove.
+      // Reads as a proper crypt structure, not a flat rectangle.
+      const stone='#1a1410';
+      const stoneShadow='#0a0704';
+      const stoneMid='#130e0a';
+      const stoneLight='#2a2218';
+      const arcDark='#050302';
+      const emberColor='rgba(217,119,6,0.25)';
+      // Ground shadow
+      ctx.fillStyle='rgba(0,0,0,0.55)';
+      ctx.beginPath();ctx.ellipse(s*.02,s*.32,s*.52,s*.12,0,0,Math.PI*2);ctx.fill();
+      // Base body — trapezoidal (wider at bottom)
+      const topY=-s*0.35;
+      const botY=s*0.22;
+      const topHalf=s*0.38;
+      const botHalf=s*0.44;
+      // Shadow offset
+      ctx.fillStyle=stoneShadow;
+      ctx.beginPath();
+      ctx.moveTo(-topHalf+s*0.04, topY+s*0.03);
+      ctx.lineTo(topHalf+s*0.04, topY+s*0.03);
+      ctx.lineTo(botHalf+s*0.04, botY+s*0.03);
+      ctx.lineTo(-botHalf+s*0.04, botY+s*0.03);
+      ctx.closePath();ctx.fill();
+      // Main body
+      ctx.fillStyle=stone;
+      ctx.beginPath();
+      ctx.moveTo(-topHalf, topY);
+      ctx.lineTo(topHalf, topY);
+      ctx.lineTo(botHalf, botY);
+      ctx.lineTo(-botHalf, botY);
+      ctx.closePath();ctx.fill();
+      // Left-side lit bevel
+      ctx.fillStyle=stoneLight;
+      ctx.beginPath();
+      ctx.moveTo(-topHalf, topY);
+      ctx.lineTo(-topHalf+s*0.05, topY+s*0.02);
+      ctx.lineTo(-botHalf+s*0.06, botY);
+      ctx.lineTo(-botHalf, botY);
+      ctx.closePath();ctx.fill();
+      // Outline
+      ctx.strokeStyle=stoneShadow;
+      ctx.lineWidth=1.2;
+      ctx.beginPath();
+      ctx.moveTo(-topHalf, topY);
+      ctx.lineTo(topHalf, topY);
+      ctx.lineTo(botHalf, botY);
+      ctx.lineTo(-botHalf, botY);
+      ctx.closePath();ctx.stroke();
+      // Archway recess — dark arched opening in the front face
+      const arcW=s*0.28;
+      const arcH=s*0.4;
+      const arcCenterY=s*0.02;
+      // Recess shadow (deep dark)
+      ctx.fillStyle=arcDark;
+      ctx.beginPath();
+      ctx.moveTo(-arcW/2, arcCenterY+arcH/2);
+      ctx.lineTo(-arcW/2, arcCenterY-arcH/4);
+      ctx.quadraticCurveTo(-arcW/2, arcCenterY-arcH/2, 0, arcCenterY-arcH/2);
+      ctx.quadraticCurveTo(arcW/2, arcCenterY-arcH/2, arcW/2, arcCenterY-arcH/4);
+      ctx.lineTo(arcW/2, arcCenterY+arcH/2);
+      ctx.closePath();ctx.fill();
+      // Arch frame
+      ctx.strokeStyle=stoneMid;
+      ctx.lineWidth=1.5;
+      ctx.stroke();
+      // Ember glow inside the arch (subtle)
+      ctx.shadowColor='#d97706';
+      ctx.shadowBlur=10;
+      ctx.fillStyle=emberColor;
+      ctx.beginPath();ctx.ellipse(0, arcCenterY+arcH*0.2, arcW*0.3, arcH*0.15, 0, 0, Math.PI*2);ctx.fill();
+      ctx.shadowBlur=0;
+      // Cracks on the facade
+      ctx.strokeStyle=stoneShadow;
+      ctx.lineWidth=0.9;
+      ctx.beginPath();
+      ctx.moveTo(-topHalf*0.7, topY+s*0.05);
+      ctx.lineTo(-arcW*0.7, arcCenterY);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(topHalf*0.75, topY+s*0.08);
+      ctx.lineTo(arcW*0.6, arcCenterY-s*0.05);
+      ctx.stroke();
+      break;
+    }
+    case 'skullPile':{
+      // Stack of 3-4 skulls — proper anatomy (eye sockets, nasal cavity, teeth)
+      // with shadow layering and cast shadows for depth.
+      const boneCol='#b8ac92';
+      const boneDark='#6a5c40';
+      const boneShadow='#2a2218';
+      // Ground shadow
+      ctx.fillStyle='rgba(0,0,0,0.45)';
+      ctx.beginPath();ctx.ellipse(0,s*.22,s*.58,s*.16,0,0,Math.PI*2);ctx.fill();
+      // 3-4 skulls arranged as a pile — some stacked, some spread
+      const skullCount=3+Math.floor(rngF(seed+1)%1*2);
+      const skulls=[];
+      for(let i=0;i<skullCount;i++){
+        const sa=rngF(seed+i*19)*Math.PI*2;
+        const sd=rngF(seed+i*23)*s*0.25;
+        // Stack roughly — offset y based on which "layer" of the pile
+        const row=Math.floor(i/2);
+        skulls.push({
+          x: Math.cos(sa)*sd + (i%2 === 0 ? -s*0.12 : s*0.12),
+          y: s*0.12 - row*s*0.18 + Math.sin(sa)*sd*0.3,
+          r: s*(0.17+rngF(seed+i*29)*0.06),
+          tilt: (rngF(seed+i*31)-0.5)*0.5,
+        });
+      }
+      // Sort by y so farther-back skulls draw first (correct painter's order)
+      skulls.sort((a,b)=>a.y-b.y);
+      skulls.forEach(sk=>{
+        ctx.save();
+        ctx.translate(sk.x, sk.y);
+        ctx.rotate(sk.tilt);
+        const r=sk.r;
+        // Cast shadow
+        ctx.fillStyle=boneShadow;
+        ctx.beginPath();ctx.ellipse(r*0.08, r*0.1, r*1.02, r*0.85, 0, 0, Math.PI*2);ctx.fill();
+        // Main skull dome
+        ctx.fillStyle=boneCol;
+        ctx.beginPath();ctx.ellipse(0, 0, r, r*0.82, 0, 0, Math.PI*2);ctx.fill();
+        // Subtle dark shadow on one side for dimension
+        ctx.fillStyle=boneDark;
+        ctx.globalAlpha=0.35;
+        ctx.beginPath();ctx.ellipse(r*0.25, r*0.1, r*0.6, r*0.55, 0, 0, Math.PI*2);ctx.fill();
+        ctx.globalAlpha=1;
+        // Eye sockets — deep dark holes
+        ctx.fillStyle='#080604';
+        ctx.beginPath();ctx.ellipse(-r*0.34, -r*0.08, r*0.22, r*0.28, 0, 0, Math.PI*2);ctx.fill();
+        ctx.beginPath();ctx.ellipse(r*0.34, -r*0.08, r*0.22, r*0.28, 0, 0, Math.PI*2);ctx.fill();
+        // Subtle highlight dot inside each socket (catches the eye)
+        ctx.fillStyle='rgba(180,40,40,0.25)';
+        ctx.beginPath();ctx.arc(-r*0.34, -r*0.08, r*0.06, 0, Math.PI*2);ctx.fill();
+        ctx.beginPath();ctx.arc(r*0.34, -r*0.08, r*0.06, 0, Math.PI*2);ctx.fill();
+        // Nasal cavity — upside-down teardrop
+        ctx.fillStyle='#080604';
+        ctx.beginPath();
+        ctx.moveTo(0, r*0.08);
+        ctx.lineTo(-r*0.11, r*0.3);
+        ctx.lineTo(r*0.11, r*0.3);
+        ctx.closePath();
+        ctx.fill();
+        // Teeth line
+        ctx.strokeStyle=boneDark;
+        ctx.lineWidth=0.9;
+        ctx.beginPath();ctx.moveTo(-r*0.32, r*0.44);ctx.lineTo(r*0.32, r*0.44);ctx.stroke();
+        // Tiny tooth gaps
+        ctx.lineWidth=0.5;
+        for(let t=-3;t<=3;t++){
+          ctx.beginPath();ctx.moveTo(t*r*0.1, r*0.42);ctx.lineTo(t*r*0.1, r*0.48);ctx.stroke();
+        }
+        // Cranial suture line — subtle curved line across top
+        ctx.strokeStyle=boneDark;
+        ctx.lineWidth=0.6;
+        ctx.globalAlpha=0.6;
+        ctx.beginPath();
+        ctx.moveTo(-r*0.4, -r*0.4);
+        ctx.quadraticCurveTo(0, -r*0.58, r*0.4, -r*0.4);
+        ctx.stroke();
+        ctx.globalAlpha=1;
+        ctx.restore();
+      });
+      break;
+    }
     case 'cobweb':
       ctx.strokeStyle='rgba(200,200,210,0.1)';ctx.lineWidth=.7;
       for(let i=0;i<8;i++){const a=(i/8)*Math.PI*2;ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(Math.cos(a)*s*.5,Math.sin(a)*s*.5);ctx.stroke();}
@@ -2706,12 +3029,14 @@ const PLAYER_SPRITE_CATALOG = {
     directions: ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'],
     // Pixel dimensions of each sprite (68×68 from Pixellab)
     pixelSize: 68,
-    // How big the sprite should appear in world units — tweak to match
-    // the old canvas character's size. Old canvas was ~40px tall visually.
-    displaySize: 56,
+    // How big the sprite should appear in world units. Bumped from 56 → 88
+    // so the character has real presence. Old canvas character was ~40 tall,
+    // but the pixel art looks small at that scale — it needs breathing room.
+    displaySize: 88,
     // Vertical offset from player center — the character's feet should sit
-    // near player.y so movement feels grounded. Positive = sprite shifted up.
-    yOffset: -4,
+    // near player.y so movement feels grounded. Slightly up so the visible
+    // feet align with the aura/shadow.
+    yOffset: -6,
   },
   // Ironwake + others fall through to Canvas drawing (no sprites yet)
 };
@@ -2793,7 +3118,15 @@ function drawPlayerSprite(p, t, fl, glow, spCount){
   // Compute display size scaled to match the old Canvas character visually
   const size = catalog.displaySize;
   const half = size / 2;
-  const drawY = catalog.yOffset || 0;
+
+  // ═══ Walk bob — sprite bounces up/down slightly while moving ═══
+  // Without this, a static pixel-art sprite looks like it's floating across
+  // the ground. Bob is tied to walkCycle (which advances when moving) so it
+  // naturally starts/stops with motion. Uses abs(sin) so the character only
+  // bobs UPWARD from resting position, not below it — feet stay grounded.
+  const moving = (Math.abs(p.vx) + Math.abs(p.vy)) > 5;
+  const bobAmount = moving ? Math.abs(Math.sin(p.walkCycle * 1.8)) * 3 : 0;
+  const drawY = (catalog.yOffset || 0) - bobAmount;
 
   // Glow behind the sprite — class identity color
   ctx.save();
