@@ -4019,14 +4019,78 @@ function update(dt,now){
   } else if(isAfk){
     player.afkTimer+=dt*1000;
     const tx=player.afkWpX-player.x,ty=player.afkWpY-player.y,d=Math.sqrt(tx*tx+ty*ty)||1;
-    const ne=getNearestEnemy(320);
-    let mx=tx,my=ty,md=d;
-    if(ne){mx=ne.x-player.x;my=ne.y-player.y;md=Math.sqrt(mx*mx+my*my)||1;}
+    // ═══ Smart AFK pathing ═══
+    // Class attack range determines "safe kite distance". Hollowcaller (ranged)
+    // wants to stay at ~90% of attack range. Ironwake (melee) wants to hover
+    // just inside its range. When surrounded by many mobs, kite OUT rather
+    // than walk deeper into the crowd — this prevents the "stuck in blob"
+    // bug where the player stands still attacking while enemies pile up.
+    const classAttackRangeAfk = (CLASS_DEFS[player.classId]||CLASS_DEFS.hollowcaller).attackRange || ATTACK_RANGE;
+    const isMelee = classAttackRangeAfk < 120;
+    // Ideal range: just inside attack range. Gives us buffer so spawn jitter
+    // doesn't push us out of range mid-swing.
+    const idealRange = classAttackRangeAfk * 0.85;
+    // Count nearby enemies — if 3+, we're in a crowd and need to kite
+    let crowdCount = 0;
+    enemies.forEach(e=>{
+      if(e.dead)return;
+      const ddx=e.x-player.x, ddy=e.y-player.y;
+      if(ddx*ddx+ddy*ddy < 120*120) crowdCount++;
+    });
+    const inCrowd = crowdCount >= 3;
+    // Compute center-of-mass of nearby threats (so we can kite AWAY from it)
+    let threatX=0, threatY=0, threatN=0;
+    enemies.forEach(e=>{
+      if(e.dead)return;
+      const ddx=e.x-player.x, ddy=e.y-player.y;
+      if(ddx*ddx+ddy*ddy < 200*200){
+        threatX+=e.x; threatY+=e.y; threatN++;
+      }
+    });
+    const ne=getNearestEnemy(classAttackRangeAfk + 120);
+    let mx=tx, my=ty, md=d;
+    if(ne){
+      const edx=ne.x-player.x, edy=ne.y-player.y, eDist=Math.sqrt(edx*edx+edy*edy)||1;
+      if(inCrowd){
+        // ═ KITE MODE ═ Too many enemies nearby — back away from their center
+        threatX/=threatN; threatY/=threatN;
+        const kdx=player.x-threatX, kdy=player.y-threatY;
+        const kMag=Math.sqrt(kdx*kdx+kdy*kdy)||1;
+        // Move AWAY from threat cluster
+        mx=kdx; my=kdy; md=kMag;
+        // Boost to escape speed to actually get out
+      } else if(eDist < idealRange * 0.7){
+        // ═ TOO CLOSE ═ back off to restore optimal range (only matters for melee)
+        if(!isMelee){
+          mx=-edx; my=-edy; md=eDist;
+        } else {
+          // Melee: if inside attack range but not in crowd, slow creep is fine
+          // Move perpendicular to maintain positioning without piling in
+          mx=-edy; my=edx; md=eDist;
+        }
+      } else if(eDist > idealRange){
+        // ═ TOO FAR ═ close distance to enemy (same as old behavior)
+        mx=edx; my=edy; md=eDist;
+      } else {
+        // ═ OPTIMAL RANGE ═ we're in the sweet spot — orbit slightly to stay
+        // mobile (prevents enemies from stacking on top of us) while keeping
+        // the target in range.
+        mx=-edy; my=edx; md=eDist;
+      }
+    }
     if(d<80||player.afkTimer>player.afkCommit){player.visitedSectors[player.sector]=true;setAfkWaypoint();}
     const spdMult=(1+_tb('moveSpdPct')/100) * classSpdMult * levelSpdBonus;
-    const spd=(ne&&md<320?PLAYER_SPEED*0.9:PLAYER_SPEED*0.72)*spdMult;
-    player.vx=(mx/md)*spd;player.vy=(my/md)*spd;
+    // Kite mode moves at full speed to escape crowds; otherwise slower so
+    // abilities have time to cycle.
+    const spdBase = inCrowd ? PLAYER_SPEED*1.0 : (ne && md<classAttackRangeAfk+120 ? PLAYER_SPEED*0.9 : PLAYER_SPEED*0.72);
+    const spd = spdBase * spdMult;
+    player.vx=(mx/md)*spd; player.vy=(my/md)*spd;
     player.facing=Math.atan2(my,mx);
+    // Face the nearest enemy even when orbiting/kiting — so auto-attack targets correctly
+    if(ne){
+      const fdx=ne.x-player.x, fdy=ne.y-player.y;
+      player.facing=Math.atan2(fdy,fdx);
+    }
   } else{player.vx*=0.78;player.vy*=0.78;}
 
   // Proposed next position — clamped to world bounds
