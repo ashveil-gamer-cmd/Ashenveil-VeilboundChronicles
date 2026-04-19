@@ -55,6 +55,126 @@ function scaleItemStats(stats, mult){
   return out;
 }
 
+// ═══════ GEAR UPGRADE SYSTEM ═══════════════════════════════════
+// Every item can be upgraded +1/+2/+3 to boost its stats by 15% per tier.
+// Upgrades cost Scrap + Ether Dust (higher rarities cost more).
+// This creates a meaningful long-term sink for salvaged materials and
+// makes every piece of gear progressable — not just replaceable.
+const MAX_UPGRADE_LEVEL = 3;
+const UPGRADE_STAT_MULT = 0.15; // +15% stats per upgrade level
+
+// Cost table — scales by rarity (better items cost more to upgrade).
+// Lookup: UPGRADE_COST[rarity][targetLevel] = {scrap, etherDust, runecore?, soulbond?}
+const UPGRADE_COST = {
+  uncommon: {
+    1: {scrap: 6,  etherDust: 1},
+    2: {scrap: 12, etherDust: 3},
+    3: {scrap: 20, etherDust: 6},
+  },
+  rare: {
+    1: {scrap: 10, etherDust: 3},
+    2: {scrap: 20, etherDust: 8,  runecore: 1},
+    3: {scrap: 35, etherDust: 15, runecore: 3},
+  },
+  epic: {
+    1: {scrap: 18, etherDust: 8,  runecore: 1},
+    2: {scrap: 30, etherDust: 18, runecore: 3},
+    3: {scrap: 50, etherDust: 30, runecore: 6, soulbond: 1},
+  },
+  legendary: {
+    1: {scrap: 30, etherDust: 15, runecore: 3, soulbond: 1},
+    2: {scrap: 50, etherDust: 30, runecore: 6, soulbond: 2},
+    3: {scrap: 80, etherDust: 50, runecore: 12, soulbond: 4},
+  },
+  mythic: {
+    1: {scrap: 50, etherDust: 30, runecore: 6,  soulbond: 2},
+    2: {scrap: 80, etherDust: 50, runecore: 12, soulbond: 5},
+    3: {scrap:120, etherDust: 80, runecore: 25, soulbond:10},
+  },
+};
+
+// Returns the cost to upgrade this item to the next level, or null if it
+// can't be upgraded further (already +3 or not upgradeable rarity).
+function getUpgradeCost(item){
+  if(!item) return null;
+  const currentLevel = item.upgradeLevel || 0;
+  if(currentLevel >= MAX_UPGRADE_LEVEL) return null;
+  const targetLevel = currentLevel + 1;
+  const rarityCosts = UPGRADE_COST[item.rarity];
+  if(!rarityCosts) return null; // commons can't be upgraded (they auto-salvage anyway)
+  return rarityCosts[targetLevel] || null;
+}
+
+// Returns true if the player has enough materials to upgrade this item.
+function canAffordUpgrade(item){
+  const cost = getUpgradeCost(item);
+  if(!cost) return false;
+  // Materials are shared across all professions (same value stored in each),
+  // so just check against Weaponsmith's materials table.
+  const mats = (professions.Weaponsmith && professions.Weaponsmith.materials) || {};
+  for(const [mat, qty] of Object.entries(cost)){
+    if((mats[mat] || 0) < qty) return false;
+  }
+  return true;
+}
+
+// Returns a preview of what the item's stats will look like at the next level.
+// Used by UI to show "+X atk" hints before player confirms.
+function previewUpgradedStats(item){
+  const currentLevel = item.upgradeLevel || 0;
+  if(currentLevel >= MAX_UPGRADE_LEVEL) return null;
+  // Base stats (without any upgrade bonus) live in item.baseStats if it was
+  // previously upgraded. Otherwise item.stats IS the base.
+  const base = item.baseStats || item.stats;
+  const targetMult = 1 + (currentLevel + 1) * UPGRADE_STAT_MULT;
+  return scaleItemStats(base, targetMult);
+}
+
+// Execute the upgrade on an item. Finds the item in equipped or inventory,
+// deducts materials, increments upgradeLevel, rebuilds stats from baseStats,
+// awards profession XP, recalcs player stats if equipped.
+// Returns {ok: true} on success, {ok: false, reason} on failure.
+function upgradeItem(item){
+  if(!item) return {ok:false, reason:'No item'};
+  const cost = getUpgradeCost(item);
+  if(!cost) return {ok:false, reason:'Cannot upgrade further'};
+  if(!canAffordUpgrade(item)) return {ok:false, reason:'Not enough materials'};
+  // Deduct cost from all profession material pools (they share values)
+  Object.values(professions).forEach(p=>{
+    for(const [mat, qty] of Object.entries(cost)){
+      p.materials[mat] = Math.max(0, (p.materials[mat] || 0) - qty);
+    }
+  });
+  // Save original base stats the first time so we can re-apply multipliers cleanly
+  if(!item.baseStats){
+    item.baseStats = {...item.stats};
+  }
+  // Bump upgrade level and rebuild stats from base
+  item.upgradeLevel = (item.upgradeLevel || 0) + 1;
+  const newMult = 1 + item.upgradeLevel * UPGRADE_STAT_MULT;
+  item.stats = scaleItemStats(item.baseStats, newMult);
+  // Award Weaponsmith profession XP proportional to rarity
+  const upgradeXP = {uncommon:20, rare:50, epic:120, legendary:300, mythic:600}[item.rarity] || 20;
+  addProfXP('Weaponsmith', upgradeXP);
+  // If the item is equipped, recalc player stats
+  const equipSlotKey = Object.keys(equipped).find(k => equipped[k] === item);
+  if(equipSlotKey && typeof recalcStats === 'function') recalcStats();
+  addFeed(`⚒ ${item.name} upgraded to +${item.upgradeLevel}`, RARITY_COLORS[item.rarity] || '#f59e0b');
+  if(typeof checkSetBonuses === 'function') checkSetBonuses();
+  if(typeof writeSave === 'function') writeSave();
+  if(typeof renderInventory === 'function') renderInventory();
+  if(typeof renderGear === 'function') renderGear();
+  return {ok:true};
+}
+
+// Format an item's display name including upgrade level.
+// "Bone-Hilt Sword +2" — used throughout the UI.
+function itemDisplayName(item){
+  if(!item) return '';
+  const up = item.upgradeLevel || 0;
+  return up > 0 ? `${item.name} +${up}` : item.name;
+}
+
 function rollLoot(level){
   // Tier is driven by level. Each tier unlocks the next rarity as the cap.
   // Tier 0 (lv 1-14):  common + uncommon, rare case
@@ -100,15 +220,33 @@ const SLOT_ICONS={Weapon:'⚔',Helmet:'🜲',Chest:'🛡',Gloves:'✋',Boots:'�
 const INVENTORY_MAX=24;
 let inventory=[]; // array of full item objects
 
-// Called by combat drop logic. Decides: auto-equip if slot empty, else route to bag.
-// If bag is full, common/uncommon items auto-salvage into materials so AFK drops
-// aren't silently lost. Rare+ items WARN the player but don't auto-consume — the
-// player should make that decision.
+// Called by combat drop logic. Routes loot through the right pipeline.
+// - Common items: ALWAYS auto-salvage into Scrap (never clutter bag)
+// - Uncommon+: auto-equip if slot empty, otherwise go to bag
+// - If bag is full, uncommons also auto-salvage silently; rare+ warns
+// This keeps the bag for meaningful decisions only and turns AFK farming
+// into a steady stream of Scrap for upgrades.
 function acquireLoot(item){
   const current=equipped[item.slot];
   const col=RARITY_COLORS[item.rarity]||'#9ca3af';
   const label=RARITY_LABELS[item.rarity]||'ITEM';
   const icon=SLOT_ICONS[item.slot]||'✦';
+  const rarityTier={common:0,uncommon:1,rare:2,epic:3,legendary:4,mythic:5}[item.rarity]||0;
+
+  // Commons always auto-salvage — they never go in bag or equip
+  // (still useful for feeding Scrap for upgrades)
+  if(rarityTier === 0){
+    const yields = salvageYieldFor(item);
+    Object.entries(yields).forEach(([mat,qty])=>creditMaterial(mat,qty));
+    // Small XP even from common auto-salvage
+    Object.keys(professions).forEach(p=>addProfXP(p, 2));
+    const gained=Object.entries(yields).map(([k,v])=>`+${v} ${MATERIAL_LABELS[k]}`).join(' ');
+    // Quieter feed message — this happens a lot
+    addFeed(`• ${gained}`, '#6b7280');
+    if(typeof writeSave==='function')writeSave();
+    return;
+  }
+
   if(!current){
     // Slot empty — auto-equip for frictionless early game / first drops
     equipped[item.slot]=item;
@@ -123,13 +261,12 @@ function acquireLoot(item){
     updateInventoryBadge();
   } else {
     // Bag full — behavior depends on rarity
-    const rarityTier={common:0,uncommon:1,rare:2,epic:3,legendary:4,mythic:5}[item.rarity]||0;
     if(rarityTier<=1){
-      // Common/uncommon — auto-salvage silently into materials so AFK doesn't waste them
+      // Uncommon — auto-salvage silently into materials so AFK doesn't waste them
       const yields=salvageYieldFor(item);
       Object.entries(yields).forEach(([mat,qty])=>creditMaterial(mat,qty));
       // Small profession XP even from auto-salvage so AFK contributes to crafting
-      const salvageXP = {common:5, uncommon:10}[item.rarity] || 5;
+      const salvageXP = {uncommon:10}[item.rarity] || 5;
       Object.keys(professions).forEach(p=>addProfXP(p, salvageXP));
       const gained=Object.entries(yields).map(([k,v])=>`+${v} ${MATERIAL_LABELS[k]}`).join(' ');
       addFeed(`⚒ Bag full — auto-salvaged ${item.name} (${gained})`,'#a78bfa');
@@ -539,7 +676,7 @@ function renderGearPanel(){
           <span class="gear-slot-name">${slot}</span>
           <span class="gear-rarity-tag" style="color:${rarityCol};border-color:${rarityCol}66;background:${rarityCol}22">${rarityLabel}</span>
         </div>
-        <div class="gear-item-name" style="color:${rarityCol};text-shadow:0 0 8px ${rarityCol}44">${item.name} ${craftedBadge}</div>
+        <div class="gear-item-name" style="color:${rarityCol};text-shadow:0 0 8px ${rarityCol}44">${itemDisplayName(item)} ${craftedBadge}</div>
         <div class="gear-stats-block">${statsHtml}</div>
         ${setLine}
       `;
@@ -557,6 +694,22 @@ function renderGearPanel(){
         let actionsHtml=`
           <button class="gear-action-btn gear-action-move">◇ MOVE TO BAG</button>
         `;
+        // Upgrade button — available for all upgradeable items
+        const uCost=getUpgradeCost(item);
+        if(UPGRADE_COST[item.rarity]){
+          if(uCost){
+            const canUp=canAffordUpgrade(item);
+            const uCostText=Object.entries(uCost).map(([k,v])=>`${v} ${MATERIAL_LABELS[k]||k}`).join(', ');
+            const upgradeTitle=canUp?`Upgrade to +${(item.upgradeLevel||0)+1} — ${uCostText}`:`Need: ${uCostText}`;
+            actionsHtml+=`
+              <button class="gear-action-btn gear-action-upgrade" ${canUp?'':'disabled'} title="${upgradeTitle}">▲ +${(item.upgradeLevel||0)+1}</button>
+            `;
+          } else if((item.upgradeLevel||0) >= MAX_UPGRADE_LEVEL){
+            actionsHtml+=`
+              <button class="gear-action-btn gear-action-upgrade" disabled title="Fully upgraded">▲ MAX</button>
+            `;
+          }
+        }
         // Reforge button — only shown for crafted items
         if(item.crafted){
           const canReforgeThis=canReforge(item);
@@ -575,6 +728,18 @@ function renderGearPanel(){
         actions.innerHTML=actionsHtml;
         actions.querySelector('.gear-action-move').addEventListener('click',e=>{e.stopPropagation();unequipToBag(slot);});
         actions.querySelector('.gear-action-salvage').addEventListener('click',e=>{e.stopPropagation();salvageFromGear(slot);});
+        // Upgrade wiring
+        const upBtn=actions.querySelector('.gear-action-upgrade');
+        if(upBtn && !upBtn.disabled){
+          upBtn.addEventListener('click',e=>{
+            e.stopPropagation();
+            const it=equipped[slot];
+            if(!it) return;
+            const result=upgradeItem(it);
+            if(!result.ok) addFeed(`⚠ ${result.reason}`, '#ef4444');
+            else renderGearPanel();
+          });
+        }
         if(item.crafted){
           const reforgeBtn=actions.querySelector('.gear-action-reforge');
           if(reforgeBtn && !reforgeBtn.disabled){
@@ -1393,9 +1558,39 @@ function renderInventory(){
         }
       }
 
+      // Upgrade info — shown for all upgradeable items (uncommon+)
+      let upgradeSection='';
+      let upgradeButton='';
+      const uCost=getUpgradeCost(item);
+      const currentUpgradeLv=item.upgradeLevel||0;
+      if(UPGRADE_COST[item.rarity]){
+        if(uCost){
+          // Can still upgrade — show cost + preview
+          const canUp=canAffordUpgrade(item);
+          const uCostText=Object.entries(uCost)
+            .map(([k,v])=>`<span style="color:${MATERIAL_COLORS[k]||'#fff'}">${v} ${MATERIAL_LABELS[k]||k}</span>`)
+            .join(' · ');
+          upgradeSection=`
+            <div class="bag-tt-section">
+              <div class="bag-tt-section-label">Upgrade to +${currentUpgradeLv+1}</div>
+              <div class="bag-stat-line">${uCostText}</div>
+              <div class="bag-stat-line" style="color:#9ca3af;font-size:11px">+15% all stats</div>
+              ${!canUp?`<div class="bag-stat-line" style="color:#ef4444;font-style:italic">Not enough materials</div>`:''}
+            </div>
+          `;
+          upgradeButton=`<button class="bag-btn bag-btn-upgrade" ${canUp?'':'disabled'}>▲ UPGRADE</button>`;
+        } else if(currentUpgradeLv >= MAX_UPGRADE_LEVEL){
+          upgradeSection=`
+            <div class="bag-tt-section">
+              <div class="bag-stat-line" style="color:#f59e0b">✦ Fully upgraded (+${MAX_UPGRADE_LEVEL})</div>
+            </div>
+          `;
+        }
+      }
+
       tooltip.innerHTML=`
         <div class="bag-tooltip-header" style="border-color:${col}88">
-          <span class="bag-tt-name" style="color:${col};text-shadow:0 0 10px ${col}66">${item.name}</span>
+          <span class="bag-tt-name" style="color:${col};text-shadow:0 0 10px ${col}66">${itemDisplayName(item)}</span>
           <span class="bag-tt-rarity" style="background:${col}22;color:${col}">${RARITY_LABELS[item.rarity]||'?'}</span>
         </div>
         <div class="bag-tt-slot">${SLOT_ICONS[item.slot]||'✦'} ${item.slot.toUpperCase()}${item.crafted?' <span class="gear-crafted-badge">⚒ CRAFTED</span>':''}</div>
@@ -1406,9 +1601,10 @@ function renderInventory(){
           ${statsHtml}
         </div>
         ${current?`<div class="bag-tt-section">
-          <div class="bag-tt-section-label">vs. Equipped (${current.name})</div>
+          <div class="bag-tt-section-label">vs. Equipped (${itemDisplayName(current)})</div>
           ${diffHtml||'<div class="bag-stat-line" style="color:#6b4d8a">— identical —</div>'}
         </div>`:''}
+        ${upgradeSection}
         ${reforgeSection}
         <div class="bag-tt-section bag-tt-salvage-preview">
           <div class="bag-tt-section-label">Salvage Yield</div>
@@ -1416,6 +1612,7 @@ function renderInventory(){
         </div>
         <div class="bag-tt-actions">
           <button class="bag-btn bag-btn-equip">⚔ EQUIP</button>
+          ${upgradeButton}
           ${reforgeButton}
           <button class="bag-btn bag-btn-salvage">⚒ SALVAGE</button>
           <button class="bag-btn bag-btn-discard">✗ DISCARD</button>
@@ -1427,6 +1624,17 @@ function renderInventory(){
       tooltip.querySelector('.bag-btn-equip').addEventListener('click',()=>equipFromBag(idx));
       tooltip.querySelector('.bag-btn-salvage').addEventListener('click',()=>salvageFromBag(idx));
       tooltip.querySelector('.bag-btn-discard').addEventListener('click',()=>discardFromBag(idx));
+      // Upgrade button
+      const upgradeBtn=tooltip.querySelector('.bag-btn-upgrade');
+      if(upgradeBtn && !upgradeBtn.disabled){
+        upgradeBtn.addEventListener('click',()=>{
+          const it=inventory[idx];
+          if(!it)return;
+          const result=upgradeItem(it);
+          if(!result.ok) addFeed(`⚠ ${result.reason}`, '#ef4444');
+          else renderInventory();
+        });
+      }
       // Reforge button only exists for crafted items
       const reforgeBtn=tooltip.querySelector('.bag-btn-reforge');
       if(reforgeBtn && !reforgeBtn.disabled){
