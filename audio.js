@@ -161,25 +161,324 @@ function playNoise(dur,gain,filterFreq,filterType='lowpass',delay=0){
     src.onended = ()=>{ try{src.disconnect();flt.disconnect();g.disconnect();}catch(e){} };
   }catch(e){}
 }
+
+// ═══════ IMPROVED SFX SYNTHESIS ═══════════════════════════════════
+// Helpers for creating weighty, layered, atmospheric sounds. Each helper
+// is built around real acoustic principles (transient + body + tail)
+// rather than single-oscillator blips.
+
+// Shared reverb — ConvolverNode with a generated impulse response giving
+// a "cavern" feel. SFX route a wet signal through this for atmospheric depth.
+let _reverbNode = null;
+let _reverbSend = null;
+function getReverb(){
+  if(_reverbNode) return _reverbNode;
+  const ac = getAC();
+  _reverbNode = ac.createConvolver();
+  const sampleRate = ac.sampleRate;
+  const duration = 1.8; // 1.8s tail — dungeon-cavern feel
+  const length = Math.max(1, Math.floor(sampleRate * duration));
+  const impulse = ac.createBuffer(2, length, sampleRate);
+  for(let ch = 0; ch < 2; ch++){
+    const data = impulse.getChannelData(ch);
+    for(let i = 0; i < length; i++){
+      const t = i / length;
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, 2.8);
+    }
+  }
+  _reverbNode.buffer = impulse;
+  _reverbSend = ac.createGain();
+  _reverbSend.gain.value = 0.18;
+  _reverbNode.connect(_reverbSend);
+  _reverbSend.connect(audioDest());
+  return _reverbNode;
+}
+
+// Play an oscillator with ADSR envelope + optional filter + optional reverb send.
+// opts: {freq, endFreq, type, attack, decay, sustain, release, gain,
+//        filterFreq, filterQ, filterType, detune, reverbAmount, delay}
+function playOsc(opts){
+  try{
+    const ac = getAC();
+    const t0 = ac.currentTime + (opts.delay || 0);
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.type = opts.type || 'sine';
+    if(opts.detune) osc.detune.value = opts.detune;
+    osc.frequency.setValueAtTime(opts.freq, t0);
+    const attack = Math.max(0.002, opts.attack || 0.008);
+    const decay = Math.max(0.01, opts.decay || 0.15);
+    const release = Math.max(0.01, opts.release || 0.1);
+    const peakGain = opts.gain || 0.2;
+    const sustainLevel = (opts.sustain !== undefined ? opts.sustain : 0.0) * peakGain;
+    if(opts.endFreq !== undefined && opts.endFreq !== opts.freq){
+      osc.frequency.exponentialRampToValueAtTime(Math.max(1, opts.endFreq), t0 + attack + decay);
+    }
+    gain.gain.setValueAtTime(0, t0);
+    gain.gain.linearRampToValueAtTime(peakGain, t0 + attack);
+    if(sustainLevel > 0.0001){
+      gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, sustainLevel), t0 + attack + decay);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + attack + decay + release);
+    } else {
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + attack + decay);
+    }
+    const totalDur = attack + decay + release + 0.05;
+    let filterNode = null;
+    if(opts.filterFreq !== undefined){
+      filterNode = ac.createBiquadFilter();
+      filterNode.type = opts.filterType || 'lowpass';
+      filterNode.frequency.value = opts.filterFreq;
+      if(opts.filterQ !== undefined) filterNode.Q.value = opts.filterQ;
+      osc.connect(filterNode);
+      filterNode.connect(gain);
+    } else {
+      osc.connect(gain);
+    }
+    gain.connect(audioDest());
+    if(opts.reverbAmount && opts.reverbAmount > 0){
+      const send = ac.createGain();
+      send.gain.value = opts.reverbAmount;
+      gain.connect(send);
+      send.connect(getReverb());
+    }
+    osc.start(t0);
+    osc.stop(t0 + totalDur);
+    osc.onended = () => {
+      try{ osc.disconnect(); gain.disconnect(); if(filterNode) filterNode.disconnect(); }catch(e){}
+    };
+  }catch(e){}
+}
+
+// Play filtered noise burst with attack envelope and optional reverb.
+// opts: {dur, gain, freq, filterType, filterQ, attack, reverbAmount, delay}
+function playNoiseBurst(opts){
+  try{
+    const ac = getAC();
+    const t0 = ac.currentTime + (opts.delay || 0);
+    const dur = opts.dur || 0.1;
+    const bufSize = Math.ceil(ac.sampleRate * (dur + 0.05));
+    const buf = ac.createBuffer(1, bufSize, ac.sampleRate);
+    const data = buf.getChannelData(0);
+    for(let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+    const src = ac.createBufferSource();
+    src.buffer = buf;
+    const filter = ac.createBiquadFilter();
+    filter.type = opts.filterType || 'lowpass';
+    filter.frequency.value = opts.freq || 1000;
+    if(opts.filterQ !== undefined) filter.Q.value = opts.filterQ;
+    const gain = ac.createGain();
+    const attack = Math.max(0.002, opts.attack || 0.005);
+    const peakGain = opts.gain || 0.15;
+    gain.gain.setValueAtTime(0, t0);
+    gain.gain.linearRampToValueAtTime(peakGain, t0 + attack);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(audioDest());
+    if(opts.reverbAmount && opts.reverbAmount > 0){
+      const send = ac.createGain();
+      send.gain.value = opts.reverbAmount;
+      gain.connect(send);
+      send.connect(getReverb());
+    }
+    src.start(t0);
+    src.stop(t0 + dur + 0.05);
+    src.onended = () => {
+      try{ src.disconnect(); filter.disconnect(); gain.disconnect(); }catch(e){}
+    };
+  }catch(e){}
+}
+
+// Tiny utility — random detune in cents for natural variation on repeated sfx
+function rDetune(cents){ return (Math.random() - 0.5) * 2 * (cents || 20); }
+
 const SFX={
-  hit:()=>{playTone(120,55,0.08,0.22);playNoise(0.05,0.18,3000,'highpass');},
-  crit:()=>{playTone(100,45,0.12,0.3);playNoise(0.07,0.25,4000,'highpass');playTone(800,1200,0.06,0.12,'sine',0.02);},
-  spiritSummon:()=>{playTone(440,880,0.18,0.16);playTone(330,660,0.14,0.10,'sine',0.03);},
-  veilmark:()=>{playTone(110,55,0.14,0.22);playNoise(0.10,0.12,500,'bandpass');},
-  detonate:()=>{playTone(60,25,0.4,0.28);playNoise(0.3,0.26,300,'lowpass');playTone(900,200,0.1,0.14,'sine',0.01);},
-  wrathTide:()=>{playTone(200,80,0.25,0.16);playNoise(0.22,0.18,1200,'bandpass');},
-  levelUp:()=>{playTone(523,523,0.12,0.2);playTone(659,659,0.12,0.2,'sine',0.13);playTone(784,784,0.18,0.18,'sine',0.26);},
-  enemyDeath:()=>{playTone(180,70,0.08,0.14);playNoise(0.06,0.10,800,'lowpass');},
-  eliteDeath:()=>{playTone(100,35,0.22,0.22);playNoise(0.18,0.20,600,'lowpass');},
-  playerHit:()=>{playTone(200,100,0.08,0.20);playNoise(0.06,0.18,1500,'bandpass');},
-  pickup:()=>{playTone(660,990,0.07,0.14);playTone(990,1320,0.05,0.11,'sine',0.06);},
-  pickupCommon:()=>{playTone(500,700,0.06,0.10);},
-  pickupUncommon:()=>{playTone(660,990,0.08,0.14);playTone(880,1100,0.05,0.10,'sine',0.05);},
-  pickupRare:()=>{playTone(550,880,0.12,0.18);playTone(880,1320,0.10,0.14,'sine',0.08);playTone(440,660,0.08,0.10,'triangle',0.15);},
-  pickupEpic:()=>{playTone(440,660,0.20,0.22);playTone(660,990,0.16,0.18,'sine',0.08);playTone(990,1320,0.14,0.16,'sine',0.18);playNoise(0.08,0.14,2000,'highpass',0.05);},
-  pickupLegendary:()=>{playTone(330,440,0.3,0.26);playTone(550,880,0.26,0.22,'sine',0.1);playTone(880,1320,0.22,0.20,'sine',0.22);playTone(1320,1760,0.18,0.16,'triangle',0.38);playNoise(0.15,0.18,3000,'highpass',0.05);},
-  pickupMythic:()=>{playTone(220,330,0.4,0.28);playTone(440,660,0.35,0.24,'sine',0.12);playTone(880,1320,0.3,0.22,'sine',0.28);playTone(1760,2200,0.25,0.2,'triangle',0.48);playNoise(0.25,0.2,4000,'highpass',0.05);playTone(110,55,0.5,0.18,'sine',0.1);},
-  zoneChange:()=>{playTone(220,440,0.35,0.18);playTone(330,660,0.25,0.14,'sine',0.1);playTone(440,880,0.2,0.12,'sine',0.2);},
+  // ═══ HIT — basic attack impact ═══
+  // Three layers: low thud (body), mid click (transient), high hiss (air/edge)
+  // Detune varies slightly each hit so 50 hits in a row don't feel identical.
+  hit:()=>{
+    const d = rDetune(40);
+    playOsc({freq:180, endFreq:70, type:'sine', attack:0.003, decay:0.08, gain:0.22, detune:d, reverbAmount:0.10});
+    playOsc({freq:85, endFreq:45, type:'triangle', attack:0.003, decay:0.11, gain:0.14, detune:d});
+    playNoiseBurst({dur:0.05, gain:0.17, freq:2800, filterType:'bandpass', filterQ:2, attack:0.002, reverbAmount:0.08});
+  },
+
+  // ═══ CRIT — bigger, brighter version of hit with metallic ring ═══
+  crit:()=>{
+    const d = rDetune(30);
+    playOsc({freq:200, endFreq:60, type:'sine', attack:0.002, decay:0.12, gain:0.3, detune:d, reverbAmount:0.14});
+    playOsc({freq:75, endFreq:40, type:'triangle', attack:0.003, decay:0.18, gain:0.22, detune:d});
+    playOsc({freq:1100, endFreq:1850, type:'triangle', attack:0.003, decay:0.09, gain:0.13, delay:0.015, reverbAmount:0.25});
+    playOsc({freq:2200, endFreq:2800, type:'sine', attack:0.004, decay:0.06, gain:0.09, delay:0.02, reverbAmount:0.3});
+    playNoiseBurst({dur:0.08, gain:0.22, freq:4500, filterType:'highpass', attack:0.001, reverbAmount:0.12});
+  },
+
+  // ═══ SPIRIT SUMMON — ethereal rising chime ═══
+  spiritSummon:()=>{
+    playOsc({freq:392, endFreq:784, type:'sine', attack:0.04, decay:0.3, gain:0.16, reverbAmount:0.35});
+    playOsc({freq:293, endFreq:587, type:'triangle', attack:0.05, decay:0.26, gain:0.11, delay:0.05, reverbAmount:0.4});
+    playOsc({freq:1568, endFreq:2349, type:'sine', attack:0.06, decay:0.22, gain:0.06, delay:0.08, reverbAmount:0.5});
+    playNoiseBurst({dur:0.2, gain:0.05, freq:3500, filterType:'bandpass', filterQ:3, attack:0.08, reverbAmount:0.5});
+  },
+
+  // ═══ VEILMARK — dark targeting chime, gothic descent ═══
+  veilmark:()=>{
+    playOsc({freq:330, endFreq:165, type:'triangle', attack:0.008, decay:0.18, gain:0.2, reverbAmount:0.3});
+    playOsc({freq:440, endFreq:220, type:'sine', attack:0.01, decay:0.14, gain:0.12, delay:0.02, reverbAmount:0.3});
+    playNoiseBurst({dur:0.15, gain:0.1, freq:700, filterType:'bandpass', filterQ:5, attack:0.015, reverbAmount:0.25});
+  },
+
+  // ═══ DETONATE — big explosion ═══
+  detonate:()=>{
+    playOsc({freq:90, endFreq:30, type:'sine', attack:0.003, decay:0.6, gain:0.35, reverbAmount:0.3});
+    playOsc({freq:180, endFreq:55, type:'triangle', attack:0.004, decay:0.4, gain:0.22, reverbAmount:0.2});
+    playNoiseBurst({dur:0.45, gain:0.3, freq:600, filterType:'lowpass', attack:0.005, reverbAmount:0.35});
+    playNoiseBurst({dur:0.2, gain:0.15, freq:3500, filterType:'highpass', attack:0.008, delay:0.04, reverbAmount:0.2});
+    playOsc({freq:1200, endFreq:200, type:'sawtooth', attack:0.001, decay:0.08, gain:0.14, reverbAmount:0.15});
+  },
+
+  // ═══ WRATH TIDE — sweeping energy wash ═══
+  wrathTide:()=>{
+    playOsc({freq:220, endFreq:110, type:'sawtooth', attack:0.04, decay:0.3, gain:0.18, reverbAmount:0.3});
+    playOsc({freq:330, endFreq:165, type:'triangle', attack:0.05, decay:0.28, gain:0.14, delay:0.03, reverbAmount:0.3});
+    playNoiseBurst({dur:0.28, gain:0.18, freq:1400, filterType:'bandpass', filterQ:2, attack:0.06, reverbAmount:0.4});
+    playOsc({freq:440, endFreq:880, type:'sine', attack:0.08, decay:0.2, gain:0.08, delay:0.1, reverbAmount:0.4});
+  },
+
+  // ═══ LEVEL UP — triumphant three-chord fanfare with bass punch ═══
+  levelUp:()=>{
+    playOsc({freq:131, endFreq:131, type:'triangle', attack:0.01, decay:0.5, gain:0.16, reverbAmount:0.25});
+    playOsc({freq:523, endFreq:523, type:'triangle', attack:0.01, decay:0.25, gain:0.22, reverbAmount:0.3});
+    playOsc({freq:784, endFreq:784, type:'triangle', attack:0.01, decay:0.25, gain:0.2, reverbAmount:0.3, delay:0.13});
+    playOsc({freq:1047, endFreq:1047, type:'triangle', attack:0.01, decay:0.35, gain:0.22, reverbAmount:0.35, delay:0.26});
+    playOsc({freq:1568, endFreq:2093, type:'sine', attack:0.02, decay:0.5, gain:0.1, reverbAmount:0.5, delay:0.3});
+    playNoiseBurst({dur:0.3, gain:0.08, freq:5000, filterType:'highpass', attack:0.1, reverbAmount:0.4, delay:0.26});
+  },
+
+  // ═══ ENEMY DEATH — soft disintegration / bone crumble ═══
+  enemyDeath:()=>{
+    playOsc({freq:220, endFreq:60, type:'triangle', attack:0.005, decay:0.15, gain:0.14, detune:rDetune(60), reverbAmount:0.2});
+    playNoiseBurst({dur:0.15, gain:0.15, freq:1800, filterType:'bandpass', filterQ:2, attack:0.005, reverbAmount:0.15});
+    playNoiseBurst({dur:0.08, gain:0.08, freq:450, filterType:'lowpass', attack:0.02, delay:0.06});
+  },
+
+  // ═══ ELITE DEATH — deeper, more dramatic fall ═══
+  eliteDeath:()=>{
+    playOsc({freq:120, endFreq:35, type:'triangle', attack:0.01, decay:0.35, gain:0.28, reverbAmount:0.35});
+    playOsc({freq:220, endFreq:80, type:'sine', attack:0.008, decay:0.25, gain:0.18, reverbAmount:0.3});
+    playNoiseBurst({dur:0.3, gain:0.22, freq:900, filterType:'lowpass', attack:0.01, reverbAmount:0.35});
+    playOsc({freq:55, endFreq:35, type:'sine', attack:0.04, decay:0.5, gain:0.15, reverbAmount:0.4, delay:0.08});
+  },
+
+  // ═══ PLAYER HIT — taking damage ═══
+  playerHit:()=>{
+    playOsc({freq:280, endFreq:140, type:'sawtooth', attack:0.002, decay:0.1, gain:0.16, reverbAmount:0.1});
+    playNoiseBurst({dur:0.08, gain:0.15, freq:1800, filterType:'bandpass', filterQ:3, attack:0.002, reverbAmount:0.15});
+    playOsc({freq:65, endFreq:40, type:'sine', attack:0.006, decay:0.14, gain:0.14});
+  },
+
+  // ═══ PICKUP — generic small chime ═══
+  pickup:()=>{
+    playOsc({freq:880, endFreq:1320, type:'sine', attack:0.004, decay:0.1, gain:0.14, reverbAmount:0.15});
+    playOsc({freq:1320, endFreq:1760, type:'triangle', attack:0.008, decay:0.08, gain:0.1, delay:0.04, reverbAmount:0.25});
+  },
+
+  // ═══ RARITY PICKUPS — progressively more dramatic ═══
+  pickupCommon:()=>{
+    playOsc({freq:660, endFreq:880, type:'sine', attack:0.003, decay:0.08, gain:0.11, reverbAmount:0.1});
+  },
+  pickupUncommon:()=>{
+    playOsc({freq:784, endFreq:1047, type:'sine', attack:0.004, decay:0.1, gain:0.14, reverbAmount:0.15});
+    playOsc({freq:1175, endFreq:1568, type:'triangle', attack:0.008, decay:0.08, gain:0.09, delay:0.05, reverbAmount:0.2});
+  },
+  pickupRare:()=>{
+    playOsc({freq:659, endFreq:880, type:'sine', attack:0.005, decay:0.15, gain:0.18, reverbAmount:0.25});
+    playOsc({freq:988, endFreq:1318, type:'sine', attack:0.008, decay:0.13, gain:0.15, delay:0.08, reverbAmount:0.3});
+    playOsc({freq:1760, endFreq:2349, type:'triangle', attack:0.012, decay:0.1, gain:0.08, delay:0.14, reverbAmount:0.4});
+  },
+  pickupEpic:()=>{
+    playOsc({freq:523, endFreq:659, type:'sine', attack:0.01, decay:0.2, gain:0.2, reverbAmount:0.3});
+    playOsc({freq:659, endFreq:880, type:'sine', attack:0.01, decay:0.2, gain:0.18, delay:0.08, reverbAmount:0.3});
+    playOsc({freq:988, endFreq:1318, type:'triangle', attack:0.012, decay:0.2, gain:0.15, delay:0.16, reverbAmount:0.35});
+    playOsc({freq:1318, endFreq:1760, type:'sine', attack:0.015, decay:0.22, gain:0.12, delay:0.22, reverbAmount:0.4});
+    playNoiseBurst({dur:0.2, gain:0.1, freq:5000, filterType:'highpass', attack:0.06, reverbAmount:0.5, delay:0.1});
+  },
+  pickupLegendary:()=>{
+    playOsc({freq:131, endFreq:131, type:'triangle', attack:0.01, decay:0.5, gain:0.18, reverbAmount:0.3});
+    playOsc({freq:392, endFreq:523, type:'triangle', attack:0.01, decay:0.35, gain:0.22, reverbAmount:0.3});
+    playOsc({freq:523, endFreq:659, type:'sine', attack:0.015, decay:0.32, gain:0.2, delay:0.1, reverbAmount:0.35});
+    playOsc({freq:784, endFreq:988, type:'sine', attack:0.02, decay:0.3, gain:0.18, delay:0.2, reverbAmount:0.35});
+    playOsc({freq:1047, endFreq:1318, type:'triangle', attack:0.02, decay:0.35, gain:0.15, delay:0.3, reverbAmount:0.4});
+    playOsc({freq:1760, endFreq:2349, type:'sine', attack:0.03, decay:0.4, gain:0.12, delay:0.4, reverbAmount:0.5});
+    playNoiseBurst({dur:0.35, gain:0.14, freq:6000, filterType:'highpass', attack:0.1, reverbAmount:0.55, delay:0.15});
+  },
+  pickupMythic:()=>{
+    playOsc({freq:98, endFreq:65, type:'triangle', attack:0.01, decay:0.8, gain:0.24, reverbAmount:0.4});
+    playOsc({freq:196, endFreq:262, type:'triangle', attack:0.01, decay:0.55, gain:0.22, delay:0.05, reverbAmount:0.35});
+    playOsc({freq:330, endFreq:392, type:'sine', attack:0.015, decay:0.5, gain:0.2, delay:0.15, reverbAmount:0.4});
+    playOsc({freq:523, endFreq:659, type:'sine', attack:0.02, decay:0.45, gain:0.2, delay:0.25, reverbAmount:0.4});
+    playOsc({freq:784, endFreq:988, type:'triangle', attack:0.025, decay:0.45, gain:0.18, delay:0.35, reverbAmount:0.45});
+    playOsc({freq:1175, endFreq:1568, type:'sine', attack:0.03, decay:0.45, gain:0.15, delay:0.45, reverbAmount:0.5});
+    playOsc({freq:2349, endFreq:3136, type:'sine', attack:0.04, decay:0.5, gain:0.12, delay:0.55, reverbAmount:0.6});
+    playNoiseBurst({dur:0.5, gain:0.16, freq:7000, filterType:'highpass', attack:0.15, reverbAmount:0.65, delay:0.2});
+    playOsc({freq:44, endFreq:44, type:'sine', attack:0.08, decay:1.0, gain:0.18, reverbAmount:0.4, delay:0.1});
+  },
+
+  // ═══ ZONE CHANGE — transition swell ═══
+  zoneChange:()=>{
+    playOsc({freq:220, endFreq:440, type:'triangle', attack:0.08, decay:0.4, gain:0.16, reverbAmount:0.4});
+    playOsc({freq:330, endFreq:660, type:'sine', attack:0.1, decay:0.35, gain:0.13, delay:0.08, reverbAmount:0.45});
+    playOsc({freq:440, endFreq:880, type:'sine', attack:0.12, decay:0.3, gain:0.1, delay:0.16, reverbAmount:0.5});
+    playNoiseBurst({dur:0.4, gain:0.07, freq:1500, filterType:'bandpass', filterQ:1.5, attack:0.15, reverbAmount:0.55});
+  },
+
+  // ═══ UI SOUNDS — subtle clicks and panel transitions ═══
+  // Added for future use — can be wired into menu buttons and panels.
+
+  // UI click — short, tactile tap
+  uiClick:()=>{
+    playOsc({freq:1800, endFreq:1200, type:'sine', attack:0.002, decay:0.04, gain:0.08});
+    playNoiseBurst({dur:0.02, gain:0.05, freq:4000, filterType:'highpass', attack:0.001});
+  },
+
+  // Panel open — soft upward swoosh
+  uiOpen:()=>{
+    playOsc({freq:330, endFreq:660, type:'triangle', attack:0.01, decay:0.15, gain:0.1, reverbAmount:0.2});
+    playNoiseBurst({dur:0.1, gain:0.05, freq:2500, filterType:'bandpass', filterQ:2, attack:0.02, reverbAmount:0.2});
+  },
+
+  // Panel close — soft downward sigh
+  uiClose:()=>{
+    playOsc({freq:660, endFreq:330, type:'triangle', attack:0.008, decay:0.12, gain:0.09, reverbAmount:0.15});
+  },
+
+  // Error — negative feedback for invalid actions
+  uiError:()=>{
+    playOsc({freq:220, endFreq:165, type:'sawtooth', attack:0.003, decay:0.08, gain:0.12});
+    playOsc({freq:165, endFreq:110, type:'sawtooth', attack:0.003, decay:0.1, gain:0.1, delay:0.05});
+  },
+
+  // Gold pickup — quick bright chime, distinct from item pickup
+  goldPickup:()=>{
+    playOsc({freq:1047, endFreq:1568, type:'sine', attack:0.003, decay:0.08, gain:0.12, reverbAmount:0.2});
+    playOsc({freq:1568, endFreq:2093, type:'triangle', attack:0.006, decay:0.07, gain:0.08, delay:0.03, reverbAmount:0.3});
+  },
+
+  // Portal spawn — ominous rising drone announcing new content
+  portalOpen:()=>{
+    playOsc({freq:110, endFreq:165, type:'sawtooth', attack:0.3, decay:0.5, gain:0.14, reverbAmount:0.45});
+    playOsc({freq:220, endFreq:330, type:'triangle', attack:0.4, decay:0.4, gain:0.1, delay:0.1, reverbAmount:0.5});
+    playNoiseBurst({dur:0.6, gain:0.08, freq:1200, filterType:'bandpass', filterQ:2.5, attack:0.3, reverbAmount:0.6});
+  },
+
+  // Boss appear — dramatic low growl with rising harmonic
+  bossAppear:()=>{
+    playOsc({freq:55, endFreq:55, type:'sawtooth', attack:0.1, decay:0.9, gain:0.22, reverbAmount:0.4});
+    playOsc({freq:82, endFreq:110, type:'sawtooth', attack:0.2, decay:0.7, gain:0.16, delay:0.1, reverbAmount:0.45});
+    playOsc({freq:220, endFreq:165, type:'triangle', attack:0.15, decay:0.6, gain:0.12, delay:0.3, reverbAmount:0.5});
+    playNoiseBurst({dur:0.6, gain:0.18, freq:400, filterType:'lowpass', attack:0.08, reverbAmount:0.5});
+    playNoiseBurst({dur:0.4, gain:0.12, freq:2500, filterType:'bandpass', filterQ:3, attack:0.2, reverbAmount:0.5, delay:0.2});
+  },
 };
 
 // ═══════ ZONE AMBIENT (procedural, leak-free) ══════════════════════
