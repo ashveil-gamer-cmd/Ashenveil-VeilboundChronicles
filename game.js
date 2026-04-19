@@ -42,7 +42,26 @@ const ctx = canvas.getContext('2d');
 })();
 
 let W, H;
-function resize(){ W=canvas.width=window.innerWidth; H=canvas.height=window.innerHeight; }
+// WORLD_ZOOM — Scale factor for the world rendering (not UI).
+// On mobile/narrow screens stays 1.0 so the existing mobile layout works.
+// On desktop-sized viewports, zooms in 1.5x so the player, enemies, and
+// props feel appropriately sized (not tiny) on a large monitor.
+// Set on every resize.
+let WORLD_ZOOM = 1.0;
+function computeWorldZoom(){
+  // Anything 900px or narrower (phones, tablets in portrait): no zoom
+  // Anything 1200px+ (laptops, desktops): full 1.5x zoom
+  // Between: lerp smoothly
+  const w = window.innerWidth;
+  if(w <= 900) return 1.0;
+  if(w >= 1200) return 1.5;
+  return 1.0 + (w - 900) / 300 * 0.5; // linear 1.0→1.5 over 900→1200
+}
+function resize(){
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  WORLD_ZOOM = computeWorldZoom();
+}
 resize(); window.addEventListener('resize',resize);
 
 
@@ -384,134 +403,418 @@ function drawAbilityIcons(){
   // Ironwake icon set — 5 melee/guardian themed icons.
   // Style-matched to Hollowcaller (same iconBG helper, rune accents) but warm/red palette.
   const icons_ironwake = [
-    // ═══ 0: ANCHOR STRIKE — cleaving arc sword ═══
+    // ═══ 0: ANCHOR STRIKE — greatsword overhead slam with shockwave ═══
+    // Vertical blade buried into cracked earth, dust rising, heavy impact.
+    // Reads as "heavy downward strike" at a glance.
     (x)=>{
       x.clearRect(0,0,S,S);
       iconBG(x,'#ef4444','#2a0a10','#0a0005');
-      // Sweeping arc — the cleave path
-      x.strokeStyle='#ef4444';x.lineWidth=2.5;x.shadowColor='#ef4444';x.shadowBlur=8;
-      x.beginPath();x.arc(CX,CY+8,18,Math.PI*1.1,Math.PI*1.9);x.stroke();
+      // Cracked ground at bottom — jagged lines fanning out from impact
+      x.strokeStyle='#8b2e1f';x.lineWidth=1.2;x.shadowBlur=0;
+      x.beginPath();
+      x.moveTo(CX-18,CY+16);x.lineTo(CX-8,CY+12);x.lineTo(CX-3,CY+16);
+      x.moveTo(CX+18,CY+16);x.lineTo(CX+8,CY+12);x.lineTo(CX+3,CY+16);
+      x.moveTo(CX-12,CY+19);x.lineTo(CX-6,CY+15);
+      x.moveTo(CX+12,CY+19);x.lineTo(CX+6,CY+15);
+      x.stroke();
+      // Impact dust cloud — semi-transparent ember puffs at ground level
+      x.fillStyle='rgba(180,120,80,0.4)';x.shadowColor='#ff6633';x.shadowBlur=6;
+      [[CX-10,CY+13,4],[CX+10,CY+13,4],[CX,CY+15,3],[CX-14,CY+11,3],[CX+14,CY+11,3]].forEach(([px,py,pr])=>{
+        x.beginPath();x.arc(px,py,pr,0,Math.PI*2);x.fill();
+      });
       x.shadowBlur=0;
-      // Vertical sword down the center
-      x.fillStyle='#d4c896';
-      x.fillRect(CX-1.5,CY-18,3,26); // blade
+      // Greatsword — vertical orientation, blade pointing up
+      // Blade: tapered, metallic gradient, catches light on one edge
+      const bladeGrad=x.createLinearGradient(CX-3,0,CX+3,0);
+      bladeGrad.addColorStop(0,'#6a6a7a');
+      bladeGrad.addColorStop(0.5,'#f4f4f8');
+      bladeGrad.addColorStop(1,'#8a8a96');
+      x.fillStyle=bladeGrad;
+      x.shadowColor='#ff8866';x.shadowBlur=5;
+      x.beginPath();
+      x.moveTo(CX-3,CY-18);
+      x.lineTo(CX-2,CY+8);
+      x.lineTo(CX+2,CY+8);
+      x.lineTo(CX+3,CY-18);
+      x.lineTo(CX,CY-22);  // pointed tip
+      x.closePath();
+      x.fill();
+      x.shadowBlur=0;
+      // Blade highlight line — catches the light
+      x.strokeStyle='rgba(255,255,255,0.7)';x.lineWidth=0.7;
+      x.beginPath();x.moveTo(CX-1.5,CY-17);x.lineTo(CX-1,CY+6);x.stroke();
+      // Crossguard — wide, flared, brass color
+      x.fillStyle='#b8860b';
+      x.shadowColor='#ffb347';x.shadowBlur=4;
+      x.fillRect(CX-10,CY+7,20,4);
+      // Crossguard decorative endcaps
       x.fillStyle='#8b6914';
-      x.fillRect(CX-5,CY+7,10,3); // crossguard
-      x.fillRect(CX-1.5,CY+10,3,6); // hilt
-      // Spark particles at tip
+      x.fillRect(CX-11,CY+7,2,4);
+      x.fillRect(CX+9,CY+7,2,4);
+      x.shadowBlur=0;
+      // Crossguard top highlight
+      x.strokeStyle='rgba(255,220,160,0.6)';x.lineWidth=0.5;
+      x.beginPath();x.moveTo(CX-9,CY+7.5);x.lineTo(CX+9,CY+7.5);x.stroke();
+      // Hilt — dark leather wrap
+      x.fillStyle='#2a1810';
+      x.fillRect(CX-2,CY+11,4,4);
+      // Anchor cross on the blade — signature detail for this ability
+      x.strokeStyle='rgba(255,220,160,0.5)';x.lineWidth=0.8;
+      x.beginPath();
+      x.moveTo(CX-3,CY-8);x.lineTo(CX+3,CY-8);
+      x.stroke();
+      // Impact sparks at tip of crossguard (strike moment)
       x.fillStyle='#fff4a0';
-      [[CX-3,CY-20],[CX+3,CY-19],[CX,CY-24]].forEach(([px,py])=>{
-        x.beginPath();x.arc(px,py,1.5,0,Math.PI*2);x.fill();
+      x.shadowColor='#ffee88';x.shadowBlur=4;
+      [[CX-12,CY+9,1.5],[CX+12,CY+9,1.5],[CX-14,CY+11,1],[CX+14,CY+11,1]].forEach(([px,py,pr])=>{
+        x.beginPath();x.arc(px,py,pr,0,Math.PI*2);x.fill();
       });
     },
-    // ═══ 1: BULWARK — shield with radiant guard ═══
+
+    // ═══ 1: BULWARK — kite shield with golden emanation ═══
+    // Broad tower shield, angled to show depth, radiating divine light.
+    // Reads as "defensive shield wall" immediately.
     (x)=>{
       x.clearRect(0,0,S,S);
       iconBG(x,'#d4c896','#231e10','#08060a');
-      // Shield shape (kite)
-      x.fillStyle='#b8a05a';x.shadowColor='#d4c896';x.shadowBlur=6;
+      // Radial light emanation behind shield — soft golden halo
+      const halo=x.createRadialGradient(CX,CY,4,CX,CY,22);
+      halo.addColorStop(0,'rgba(255,240,160,0.4)');
+      halo.addColorStop(0.6,'rgba(255,200,80,0.12)');
+      halo.addColorStop(1,'rgba(255,200,80,0)');
+      x.fillStyle=halo;
+      x.beginPath();x.arc(CX,CY,22,0,Math.PI*2);x.fill();
+      // Shield — tall kite shape with subtle 3D via gradient
+      const shieldGrad=x.createLinearGradient(CX-13,0,CX+13,0);
+      shieldGrad.addColorStop(0,'#8b6914');
+      shieldGrad.addColorStop(0.4,'#d4c896');
+      shieldGrad.addColorStop(0.6,'#fff4a0');
+      shieldGrad.addColorStop(1,'#8b6914');
+      x.fillStyle=shieldGrad;
+      x.shadowColor='#ffdd66';x.shadowBlur=6;
       x.beginPath();
-      x.moveTo(CX,CY-16);
-      x.quadraticCurveTo(CX+14,CY-14,CX+12,CY);
-      x.quadraticCurveTo(CX+10,CY+12,CX,CY+18);
-      x.quadraticCurveTo(CX-10,CY+12,CX-12,CY);
-      x.quadraticCurveTo(CX-14,CY-14,CX,CY-16);
-      x.closePath();x.fill();
+      x.moveTo(CX,CY-17);
+      x.quadraticCurveTo(CX+13,CY-15,CX+13,CY-2);
+      x.quadraticCurveTo(CX+11,CY+13,CX,CY+19);
+      x.quadraticCurveTo(CX-11,CY+13,CX-13,CY-2);
+      x.quadraticCurveTo(CX-13,CY-15,CX,CY-17);
+      x.closePath();
+      x.fill();
       x.shadowBlur=0;
-      // Shield boss — golden dot center
+      // Shield rim — darker border for definition
+      x.strokeStyle='#5a4a0a';x.lineWidth=1.2;
+      x.beginPath();
+      x.moveTo(CX,CY-17);
+      x.quadraticCurveTo(CX+13,CY-15,CX+13,CY-2);
+      x.quadraticCurveTo(CX+11,CY+13,CX,CY+19);
+      x.quadraticCurveTo(CX-11,CY+13,CX-13,CY-2);
+      x.quadraticCurveTo(CX-13,CY-15,CX,CY-17);
+      x.stroke();
+      // Central vertical ridge (shield boss running top to bottom)
+      x.strokeStyle='rgba(90,74,10,0.7)';x.lineWidth=0.8;
+      x.beginPath();x.moveTo(CX,CY-15);x.lineTo(CX,CY+17);x.stroke();
+      // Shield boss — raised center disc with jewel
+      x.fillStyle='#8b6914';
+      x.beginPath();x.arc(CX,CY-2,4.5,0,Math.PI*2);x.fill();
       x.fillStyle='#fff4a0';
+      x.shadowColor='#fff4a0';x.shadowBlur=8;
       x.beginPath();x.arc(CX,CY-2,3,0,Math.PI*2);x.fill();
-      // Emanating rays outward
-      x.strokeStyle='#fff4a0aa';x.lineWidth=1;
-      for(let i=0;i<6;i++){
-        const a=i*Math.PI/3;
+      // Boss inner gem
+      x.shadowBlur=0;
+      x.fillStyle='#ffb347';
+      x.beginPath();x.arc(CX,CY-2,1.5,0,Math.PI*2);x.fill();
+      x.fillStyle='#ffffff';
+      x.beginPath();x.arc(CX-0.5,CY-2.8,0.6,0,Math.PI*2);x.fill();
+      // Decorative stud rivets at cardinal points
+      x.fillStyle='#b8860b';
+      [[CX,CY-14],[CX+10,CY-5],[CX-10,CY-5],[CX+8,CY+9],[CX-8,CY+9]].forEach(([rx,ry])=>{
+        x.beginPath();x.arc(rx,ry,1.2,0,Math.PI*2);x.fill();
+      });
+      // Protective light rays emanating outward — 8 short lines
+      x.strokeStyle='rgba(255,244,160,0.7)';x.lineWidth=1;
+      x.shadowColor='#fff4a0';x.shadowBlur=4;
+      for(let i=0;i<8;i++){
+        const a=i*Math.PI/4 + Math.PI/8;
+        const r1=19, r2=24;
         x.beginPath();
-        x.moveTo(CX+Math.cos(a)*14,CY+Math.sin(a)*14);
-        x.lineTo(CX+Math.cos(a)*20,CY+Math.sin(a)*20);
+        x.moveTo(CX+Math.cos(a)*r1,CY+Math.sin(a)*r1);
+        x.lineTo(CX+Math.cos(a)*r2,CY+Math.sin(a)*r2);
         x.stroke();
       }
+      x.shadowBlur=0;
     },
-    // ═══ 2: GROUND SHATTER — cracked earth + impact ═══
+
+    // ═══ 2: GROUND SHATTER — earth-rending stomp impact ═══
+    // Warhammer head slammed into ground, radial cracks, debris chunks flying.
+    // Reads as "earth-shaking AoE strike."
     (x)=>{
       x.clearRect(0,0,S,S);
       iconBG(x,'#fbbf24','#2a1a05','#080500');
-      // Impact burst lines radiating from center
-      x.strokeStyle='#fbbf24';x.lineWidth=2;x.shadowColor='#fbbf24';x.shadowBlur=8;
-      for(let i=0;i<8;i++){
-        const a=i*Math.PI/4;
-        x.beginPath();
-        x.moveTo(CX+Math.cos(a)*5,CY+Math.sin(a)*5);
-        x.lineTo(CX+Math.cos(a)*18,CY+Math.sin(a)*18);
-        x.stroke();
-      }
-      x.shadowBlur=0;
-      // Cracks in the ground (zigzag)
-      x.strokeStyle='#b8860b';x.lineWidth=1.5;
+      // Ground plane — horizontal shadow band
+      x.fillStyle='rgba(40,25,10,0.6)';
+      x.fillRect(0,CY+10,S,4);
+      // Deep radial crack fissures — 6 jagged lines radiating from center
+      x.strokeStyle='#b8860b';x.lineWidth=1.8;x.shadowColor='#ffaa44';x.shadowBlur=3;
       x.beginPath();
-      x.moveTo(CX-15,CY+10);x.lineTo(CX-8,CY+14);x.lineTo(CX-3,CY+11);x.lineTo(CX+5,CY+15);x.lineTo(CX+14,CY+12);
+      // Draw 6 zigzag fissures
+      const fissures=[
+        [[-20,8],[-14,5],[-10,8],[-5,3]],
+        [[20,8],[14,5],[10,8],[5,3]],
+        [[-22,-4],[-16,-2],[-12,-4]],
+        [[22,-4],[16,-2],[12,-4]],
+        [[-6,20],[-4,14],[-2,10]],
+        [[6,20],[4,14],[2,10]],
+      ];
+      fissures.forEach(f=>{
+        x.moveTo(CX+f[0][0],CY+f[0][1]);
+        f.slice(1).forEach(([dx,dy])=>x.lineTo(CX+dx,CY+dy));
+      });
       x.stroke();
-      // Center impact glow
-      const g=x.createRadialGradient(CX,CY,0,CX,CY,10);
-      g.addColorStop(0,'#fff4a0');g.addColorStop(1,'#fbbf2400');
-      x.fillStyle=g;x.beginPath();x.arc(CX,CY,10,0,Math.PI*2);x.fill();
+      x.shadowBlur=0;
+      // Upturned debris chunks — irregular rock shards
+      x.fillStyle='#6a5020';
+      [
+        [CX-16,CY+3,4,3],
+        [CX+15,CY+5,3,3],
+        [CX-12,CY+16,5,3],
+        [CX+14,CY+14,4,3],
+      ].forEach(([rx,ry,rw,rh])=>{
+        x.beginPath();
+        x.moveTo(rx,ry);
+        x.lineTo(rx+rw,ry-1);
+        x.lineTo(rx+rw+1,ry+rh);
+        x.lineTo(rx-1,ry+rh);
+        x.closePath();x.fill();
+      });
+      // Warhammer — large head dominating the upper half
+      // Hammer head — trapezoidal with metallic gradient
+      const hammerGrad=x.createLinearGradient(0,CY-18,0,CY-4);
+      hammerGrad.addColorStop(0,'#3a3a44');
+      hammerGrad.addColorStop(0.5,'#8a8a96');
+      hammerGrad.addColorStop(1,'#5a5a66');
+      x.fillStyle=hammerGrad;
+      x.shadowColor='#ffaa44';x.shadowBlur=6;
+      x.beginPath();
+      x.moveTo(CX-11,CY-17);
+      x.lineTo(CX+11,CY-17);
+      x.lineTo(CX+13,CY-4);
+      x.lineTo(CX-13,CY-4);
+      x.closePath();x.fill();
+      x.shadowBlur=0;
+      // Hammer head top highlight
+      x.strokeStyle='rgba(255,255,255,0.4)';x.lineWidth=0.8;
+      x.beginPath();x.moveTo(CX-10,CY-16);x.lineTo(CX+10,CY-16);x.stroke();
+      // Hammer head rivets/studs
+      x.fillStyle='#2a2a34';
+      [[CX-7,CY-11],[CX+7,CY-11],[CX-7,CY-7],[CX+7,CY-7]].forEach(([rx,ry])=>{
+        x.beginPath();x.arc(rx,ry,1,0,Math.PI*2);x.fill();
+      });
+      // Haft extending down — thin wooden shaft
+      x.fillStyle='#5a3c1e';
+      x.fillRect(CX-2,CY-4,4,8);
+      // Shockwave ring — soft golden circle pulsing outward from impact
+      x.strokeStyle='rgba(251,191,36,0.7)';x.lineWidth=1.5;
+      x.shadowColor='#fbbf24';x.shadowBlur=8;
+      x.beginPath();x.arc(CX,CY,20,0,Math.PI*1.5);x.stroke();
+      x.strokeStyle='rgba(255,244,160,0.4)';x.lineWidth=1;
+      x.beginPath();x.arc(CX,CY,23,Math.PI*0.2,Math.PI*1.2);x.stroke();
+      x.shadowBlur=0;
+      // Center impact flash
+      const flash=x.createRadialGradient(CX,CY-3,0,CX,CY-3,8);
+      flash.addColorStop(0,'rgba(255,255,255,0.9)');
+      flash.addColorStop(0.4,'rgba(255,244,160,0.5)');
+      flash.addColorStop(1,'rgba(251,191,36,0)');
+      x.fillStyle=flash;
+      x.beginPath();x.arc(CX,CY-3,8,0,Math.PI*2);x.fill();
     },
-    // ═══ 3: RETRIBUTION — shield with reflected arrow ═══
+
+    // ═══ 3: RETRIBUTION — shield with reflecting sword arcs ═══
+    // Tight shield center with two curved deflection arcs (swords bouncing back)
+    // plus accent sparks where blows were turned. Reads as "damage returned."
     (x)=>{
       x.clearRect(0,0,S,S);
       iconBG(x,'#a78bfa','#1a0d2e','#06020a');
-      // Shield silhouette — smaller, purple-tinted
-      x.strokeStyle='#a78bfa';x.lineWidth=2;x.shadowColor='#a78bfa';x.shadowBlur=6;
-      x.beginPath();
-      x.moveTo(CX,CY-12);
-      x.quadraticCurveTo(CX+10,CY-10,CX+9,CY+2);
-      x.quadraticCurveTo(CX+7,CY+11,CX,CY+15);
-      x.quadraticCurveTo(CX-7,CY+11,CX-9,CY+2);
-      x.quadraticCurveTo(CX-10,CY-10,CX,CY-12);
-      x.closePath();x.stroke();
+      // Arcane pulse backdrop — faint purple halo
+      const halo=x.createRadialGradient(CX,CY,3,CX,CY,22);
+      halo.addColorStop(0,'rgba(167,139,250,0.25)');
+      halo.addColorStop(1,'rgba(167,139,250,0)');
+      x.fillStyle=halo;
+      x.beginPath();x.arc(CX,CY,22,0,Math.PI*2);x.fill();
+      // Shield — smaller, round, purple-lavender rim (reflects attacks)
+      const shieldGrad=x.createRadialGradient(CX-3,CY-3,2,CX,CY,13);
+      shieldGrad.addColorStop(0,'#d4bff8');
+      shieldGrad.addColorStop(0.6,'#8a6ef0');
+      shieldGrad.addColorStop(1,'#4a2a8a');
+      x.fillStyle=shieldGrad;
+      x.shadowColor='#a78bfa';x.shadowBlur=8;
+      x.beginPath();x.arc(CX,CY,11,0,Math.PI*2);x.fill();
       x.shadowBlur=0;
-      // Reflected beams shooting OUTWARD (the reflection)
-      x.strokeStyle='#c084fc';x.lineWidth=2;
-      [[-1,-1],[1,-1],[-1.2,0.3],[1.2,0.3]].forEach(([dx,dy])=>{
-        const a=Math.atan2(dy,dx);
+      // Shield rim
+      x.strokeStyle='#4a2a8a';x.lineWidth=1.2;
+      x.beginPath();x.arc(CX,CY,11,0,Math.PI*2);x.stroke();
+      // Inner boss
+      x.fillStyle='#1a0d2e';
+      x.beginPath();x.arc(CX,CY,5,0,Math.PI*2);x.fill();
+      x.fillStyle='#a78bfa';
+      x.shadowColor='#d4bff8';x.shadowBlur=5;
+      x.beginPath();x.arc(CX,CY,3,0,Math.PI*2);x.fill();
+      x.shadowBlur=0;
+      // Center gem sparkle
+      x.fillStyle='#ffffff';
+      x.beginPath();x.arc(CX-0.8,CY-0.8,0.8,0,Math.PI*2);x.fill();
+      // Deflection arcs — four curved paths showing attacks bouncing off
+      x.strokeStyle='#c4b5fd';x.lineWidth=1.8;
+      x.shadowColor='#a78bfa';x.shadowBlur=6;
+      // Top-left incoming → deflected up-left
+      x.beginPath();
+      x.moveTo(CX-22,CY-18);
+      x.quadraticCurveTo(CX-14,CY-14,CX-22,CY-4);
+      x.stroke();
+      // Top-right incoming → deflected up-right
+      x.beginPath();
+      x.moveTo(CX+22,CY-18);
+      x.quadraticCurveTo(CX+14,CY-14,CX+22,CY-4);
+      x.stroke();
+      // Bottom-left
+      x.beginPath();
+      x.moveTo(CX-22,CY+18);
+      x.quadraticCurveTo(CX-14,CY+14,CX-22,CY+4);
+      x.stroke();
+      // Bottom-right
+      x.beginPath();
+      x.moveTo(CX+22,CY+18);
+      x.quadraticCurveTo(CX+14,CY+14,CX+22,CY+4);
+      x.stroke();
+      x.shadowBlur=0;
+      // Arrowheads at the deflected tips — showing the damage returning
+      x.fillStyle='#c4b5fd';
+      x.shadowColor='#a78bfa';x.shadowBlur=4;
+      const arrows=[[-22,-4,-1,0.3],[22,-4,1,0.3],[-22,4,-1,-0.3],[22,4,1,-0.3]];
+      arrows.forEach(([ax,ay,dx,dy])=>{
         x.beginPath();
-        x.moveTo(CX+dx*11,CY+dy*11);
-        x.lineTo(CX+Math.cos(a)*22,CY+Math.sin(a)*22);
-        x.stroke();
-        // arrowhead
-        x.fillStyle='#c084fc';
-        x.beginPath();
-        x.arc(CX+Math.cos(a)*22,CY+Math.sin(a)*22,2,0,Math.PI*2);x.fill();
+        x.moveTo(CX+ax,CY+ay);
+        x.lineTo(CX+ax-dx*3,CY+ay-dy*3-2);
+        x.lineTo(CX+ax-dx*3,CY+ay-dy*3+2);
+        x.closePath();x.fill();
+      });
+      x.shadowBlur=0;
+      // Deflection sparks at shield rim — four small bursts where blows struck
+      x.fillStyle='#fff4a0';
+      x.shadowColor='#fff4a0';x.shadowBlur=3;
+      [[CX-10,CY-6],[CX+10,CY-6],[CX-10,CY+6],[CX+10,CY+6]].forEach(([px,py])=>{
+        x.beginPath();x.arc(px,py,1.2,0,Math.PI*2);x.fill();
       });
     },
-    // ═══ 4: IRONWAKE'S FURY — charging figure with trail ═══
+
+    // ═══ 4: IRONWAKE'S FURY — armored berserker mid-charge ═══
+    // Figure leaning forward with weapon raised, motion lines, fire trail.
+    // Reads as "devastating forward charge."
     (x)=>{
       x.clearRect(0,0,S,S);
       iconBG(x,'#ff4400','#2a0a00','#0a0300');
-      // Motion-blur trail behind (lines from left)
-      x.strokeStyle='#ff440055';x.lineWidth=1.5;
-      for(let i=0;i<5;i++){
+      // Fire trail behind — flame licks streaming from bottom-left
+      x.shadowColor='#ff6600';x.shadowBlur=6;
+      // Larger flame shapes
+      const flameGrad=x.createLinearGradient(2,CY+8,18,CY);
+      flameGrad.addColorStop(0,'rgba(255,68,0,0.7)');
+      flameGrad.addColorStop(0.5,'rgba(255,160,40,0.5)');
+      flameGrad.addColorStop(1,'rgba(255,68,0,0)');
+      x.fillStyle=flameGrad;
+      x.beginPath();
+      x.moveTo(4,CY+10);
+      x.quadraticCurveTo(8,CY-2,16,CY-4);
+      x.quadraticCurveTo(14,CY+4,10,CY+8);
+      x.quadraticCurveTo(8,CY+14,4,CY+10);
+      x.closePath();x.fill();
+      // Smaller flame wisps
+      x.fillStyle='rgba(255,100,20,0.5)';
+      [[6,CY-2,3],[10,CY+3,2],[3,CY+6,2.5]].forEach(([fx,fy,fr])=>{
         x.beginPath();
-        x.moveTo(6,CY-8+i*3);
-        x.lineTo(18,CY-8+i*3);
+        x.moveTo(fx-fr,fy);
+        x.quadraticCurveTo(fx,fy-fr*2,fx+fr,fy);
+        x.closePath();x.fill();
+      });
+      x.shadowBlur=0;
+      // Motion blur streaks — horizontal lines behind figure
+      x.strokeStyle='rgba(255,68,0,0.35)';x.lineWidth=1;
+      for(let i=0;i<4;i++){
+        x.beginPath();
+        x.moveTo(2,CY-6+i*4);
+        x.lineTo(14-i*2,CY-6+i*4);
         x.stroke();
       }
-      // Forward-leaning armored figure
-      x.fillStyle='#8b2e1f';x.shadowColor='#ff4400';x.shadowBlur=8;
-      // Body/torso, angled forward
+      // Armored figure — forward-leaning warrior with raised weapon
       x.save();
       x.translate(CX+4,CY);
-      x.rotate(0.15); // slight forward lean
-      x.fillRect(-5,-10,10,14); // torso
-      x.fillStyle='#d4c896';
-      x.fillRect(-3,-16,6,7); // head/helm
-      // Sword held forward
-      x.strokeStyle='#fff4a0';x.lineWidth=2;
-      x.beginPath();x.moveTo(2,-4);x.lineTo(14,-12);x.stroke();
-      x.restore();
+      x.rotate(0.18); // forward lean — charging posture
+      // Helm — conical, faceplate shadowed
+      const helmGrad=x.createLinearGradient(-5,-20,5,-12);
+      helmGrad.addColorStop(0,'#5a4028');
+      helmGrad.addColorStop(0.5,'#8b6914');
+      helmGrad.addColorStop(1,'#5a4028');
+      x.fillStyle=helmGrad;
+      x.shadowColor='#ff6600';x.shadowBlur=6;
+      x.beginPath();
+      x.moveTo(-5,-10);
+      x.quadraticCurveTo(-5,-20,0,-22);
+      x.quadraticCurveTo(5,-20,5,-10);
+      x.closePath();x.fill();
       x.shadowBlur=0;
-      // Fire burst at leading edge
+      // Helm slit — dark eye gap
+      x.fillStyle='#0a0500';
+      x.fillRect(-3,-14,6,2);
+      // Helm glow from slit
+      x.fillStyle='#ff4400';
+      x.shadowColor='#ff4400';x.shadowBlur=3;
+      x.fillRect(-3,-14,6,1);
+      x.shadowBlur=0;
+      // Torso armor — layered plates
+      const torsoGrad=x.createLinearGradient(-7,0,7,0);
+      torsoGrad.addColorStop(0,'#4a2818');
+      torsoGrad.addColorStop(0.5,'#8b4a2a');
+      torsoGrad.addColorStop(1,'#4a2818');
+      x.fillStyle=torsoGrad;
+      x.beginPath();
+      x.moveTo(-6,-10);
+      x.lineTo(6,-10);
+      x.lineTo(7,6);
+      x.lineTo(-7,6);
+      x.closePath();x.fill();
+      // Chest plate central rune — fiery mark
+      x.fillStyle='#ff4400';
+      x.shadowColor='#ff4400';x.shadowBlur=5;
+      x.beginPath();
+      x.moveTo(0,-6);x.lineTo(2,-2);x.lineTo(0,2);x.lineTo(-2,-2);
+      x.closePath();x.fill();
+      x.shadowBlur=0;
+      // Shoulder pauldrons — spiked
+      x.fillStyle='#3a1810';
+      x.beginPath();
+      x.moveTo(-8,-10);x.lineTo(-10,-6);x.lineTo(-6,-4);
+      x.closePath();x.fill();
+      x.beginPath();
+      x.moveTo(8,-10);x.lineTo(10,-6);x.lineTo(6,-4);
+      x.closePath();x.fill();
+      // Sword raised forward — dynamic diagonal
+      x.strokeStyle='#d4c896';x.lineWidth=2.5;
+      x.shadowColor='#fff4a0';x.shadowBlur=5;
+      x.beginPath();
+      x.moveTo(3,-2);
+      x.lineTo(16,-14);
+      x.stroke();
+      // Sword tip flare — bright gold spark
       x.fillStyle='#fff4a0';
-      [[CX+18,CY-10,2],[CX+20,CY-6,1.5],[CX+19,CY-3,2.5]].forEach(([px,py,pr])=>{
+      x.shadowColor='#fff4a0';x.shadowBlur=6;
+      x.beginPath();x.arc(16,-14,2.2,0,Math.PI*2);x.fill();
+      x.shadowBlur=0;
+      // Sword pommel
+      x.fillStyle='#8b6914';
+      x.fillRect(2,-1,2,3);
+      x.restore();
+      // Fire burst at the leading edge — impact ready to explode
+      x.fillStyle='#fff4a0';
+      x.shadowColor='#ffee88';x.shadowBlur=5;
+      [[CX+18,CY-11,2.5],[CX+20,CY-7,2],[CX+19,CY-3,3],[CX+22,CY-9,1.5]].forEach(([px,py,pr])=>{
         x.beginPath();x.arc(px,py,pr,0,Math.PI*2);x.fill();
       });
     },
@@ -1532,7 +1835,8 @@ function findClearPosition(cx,cy,r,maxAttempts=16){
 }
 
 function drawEnvironment(now){
-  const margin=320,vl=camX-W/2-margin,vr=camX+W/2+margin,vt=camY-H/2-margin,vb=camY+H/2+margin;
+  const halfVW = W/(2*WORLD_ZOOM), halfVH = H/(2*WORLD_ZOOM);
+  const margin=320,vl=camX-halfVW-margin,vr=camX+halfVW+margin,vt=camY-halfVH-margin,vb=camY+halfVH+margin;
   envProps.forEach(p=>{if(p.x>vl&&p.x<vr&&p.y>vt&&p.y<vb)drawProp(p,now);});
   // Landmark rendering DISABLED — sprite system paused pending future revisit.
   // When ready to re-enable, uncomment the line below.
@@ -2255,12 +2559,21 @@ function drawWorld(now){
   // Zone-specific sky gradient (background behind everything)
   const sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,z.skyA);sky.addColorStop(.5,z.skyB);sky.addColorStop(1,z.skyC);
   ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
-  ctx.save();ctx.translate(W/2-camX,H/2-camY);
+  ctx.save();
+  // Apply world zoom: scale first, then translate so camera math still works
+  // in world coordinates. Screen center of world origin = (W/2, H/2).
+  // At 1.0 zoom this is identical to the original translate(W/2-camX, H/2-camY).
+  ctx.translate(W/2, H/2);
+  ctx.scale(WORLD_ZOOM, WORLD_ZOOM);
+  ctx.translate(-camX, -camY);
   // Ground base — solid fill in the theme's ground color
   ctx.fillStyle=z.groundBase;ctx.fillRect(0,0,WORLD_W,WORLD_H);
 
-  // Visible culling bounds — only draw what's near the camera for performance
-  const margin=400,vl=camX-W/2-margin,vr=camX+W/2+margin,vt=camY-H/2-margin,vb=camY+H/2+margin;
+  // Visible culling bounds — only draw what's near the camera for performance.
+  // Expand the visible rect by 1/zoom because fewer world-units are visible
+  // when zoomed in.
+  const halfVW = W/(2*WORLD_ZOOM), halfVH = H/(2*WORLD_ZOOM);
+  const margin=400,vl=camX-halfVW-margin,vr=camX+halfVW+margin,vt=camY-halfVH-margin,vb=camY+halfVH+margin;
 
   // ─── Layer 1: LARGE soft patches (the "this area is dirt, that area is stone" feel) ───
   terrainFeatures.patches.forEach(p=>{
@@ -3021,8 +3334,9 @@ function confirmPortalEntry(){
 function drawPortal(now){
   if(!portalState.active)return;
   const p=portalState.active;
-  // Cull offscreen in world space
-  if(p.x<camX-W/2-300||p.x>camX+W/2+300||p.y<camY-H/2-300||p.y>camY+H/2+300)return;
+  // Cull offscreen in world space (account for zoom)
+  const halfVW = W/(2*WORLD_ZOOM), halfVH = H/(2*WORLD_ZOOM);
+  if(p.x<camX-halfVW-300||p.x>camX+halfVW+300||p.y<camY-halfVH-300||p.y>camY+halfVH+300)return;
   const remaining=p.expiresAt-now;
   const dimming=remaining<PORTAL_WARN_MS;
   const age=now-p.spawnAt;
@@ -3906,7 +4220,11 @@ function render(now){
   drawWorld(now);
 
   ctx.save();
-  ctx.translate(W/2-camX+sx,H/2-camY+sy);
+  // Apply zoom to the main entity render pass so enemies, player, props,
+  // and FX all scale up together with the world background.
+  ctx.translate(W/2 + sx, H/2 + sy);
+  ctx.scale(WORLD_ZOOM, WORLD_ZOOM);
+  ctx.translate(-camX, -camY);
 
   // Ground FX — render on the floor BEFORE entities so characters stand on top
   drawGroundFX(now);
@@ -4922,9 +5240,12 @@ let _tapTracker = { active:false, sx:0, sy:0, startTime:0 };
 
 // Convert a screen position (client coords) to world coords using current camera
 function screenToWorld(sx, sy){
+  // Inverse of the render transform: first subtract screen center, then
+  // divide by zoom (because at higher zoom, a screen pixel covers fewer
+  // world units), then add camera offset.
   return {
-    x: camX + (sx - W/2),
-    y: camY + (sy - H/2),
+    x: camX + (sx - W/2) / WORLD_ZOOM,
+    y: camY + (sy - H/2) / WORLD_ZOOM,
   };
 }
 
