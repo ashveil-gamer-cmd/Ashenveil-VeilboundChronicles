@@ -2567,6 +2567,8 @@ function drawEnvironment(now){
   drawWorldChests(now, vl, vr, vt, vb);
   drawWorldAltars(now, vl, vr, vt, vb);
   drawWorldCaches(now, vl, vr, vt, vb);
+  // Necrolord banners — drawn last so they sit on top of everything
+  if(typeof drawNecroBanners === 'function') drawNecroBanners(now);
 }
 
 // Looks up the landmark for the current zone/dungeon and draws it.
@@ -6143,6 +6145,13 @@ function playerCast(idx){
   if(player.classId==='ironwake'){
     return castIronwake(idx, now);
   }
+  // ═══ PRESET OVERRIDES (Hollowcaller) ═══
+  // Check if a preset override should handle this ability instead of default.
+  // Each preset is gated by wearing 4+ pieces of its set. The function
+  // returns true if it handled the ability, false to fall through to default.
+  if(typeof castHollowcallerPresetOverride === 'function'){
+    if(castHollowcallerPresetOverride(idx, now)) return;
+  }
   // Default: Hollowcaller (existing behavior)
   if(idx===0){
     // Raise — summon one spirit, or two with Echoing Call talent
@@ -6675,6 +6684,8 @@ function update(dt,now){
   if(typeof updateWorldAltars === 'function') updateWorldAltars(now);
   if(typeof updateWorldCaches === 'function') updateWorldCaches(now);
   if(typeof updateActiveBuffs === 'function') updateActiveBuffs(now);
+  // Necrolord preset — tick active banners (damage enemies in radius, expire)
+  if(typeof updateNecroBanners === 'function') updateNecroBanners(now);
   let ix=0,iy=0;
   if(keys['ArrowLeft']||keys['a']||keys['A'])ix=-1;
   if(keys['ArrowRight']||keys['d']||keys['D'])ix=1;
@@ -6822,22 +6833,29 @@ function update(dt,now){
     const or=70+Math.sin(s.wobble)*10;
     let haunt=s.hauntTarget&&!s.hauntTarget.dead&&s.hauntTarget.veilmarkStacks>0?s.hauntTarget:null;
     if(!haunt){s.hauntTarget=null;let bd=950;enemies.forEach(e=>{if(e.dead||e.veilmarkStacks<=0)return;const d=dist2(s.x,s.y,e.x,e.y);if(d<bd){bd=d;haunt=e;}});s.hauntTarget=haunt;}
+    // Necrolord preset bonuses
+    const _inBanner = (typeof isSpiritInBanner === 'function') ? isSpiritInBanner(s) : false;
+    const _speedBurst = (s._necroSpeedUntil && s._necroSpeedUntil > now);
+    const _bannerDmgMult = _inBanner ? 1.40 : 1.0;
+    const _speedMult = (_inBanner ? 1.25 : 1.0) * (_speedBurst ? 1.50 : 1.0);
     if(haunt){
-      s.orbitAngle+=dt*3.8;
+      s.orbitAngle+=dt*3.8*_speedMult;
       const tx=haunt.x+Math.cos(s.orbitAngle)*or,ty=haunt.y+Math.sin(s.orbitAngle)*or;
-      s.x+=(tx-s.x)*Math.min(1,dt*4.5);s.y+=(ty-s.y)*Math.min(1,dt*4.5);
-      if(now-s.lastAttack>850){s.lastAttack=now;s.attackCount++;haunt.veilmarkStacks=Math.min(haunt.veilmarkStacks+1,10);hitEnemy(haunt,player.attack*0.32);}
+      s.x+=(tx-s.x)*Math.min(1,dt*4.5*_speedMult);s.y+=(ty-s.y)*Math.min(1,dt*4.5*_speedMult);
+      const atkInterval = _inBanner ? 700 : 850; // banner also boosts attack speed
+      if(now-s.lastAttack>atkInterval){s.lastAttack=now;s.attackCount++;haunt.veilmarkStacks=Math.min(haunt.veilmarkStacks+1,10);hitEnemy(haunt,player.attack*0.32*_bannerDmgMult);}
     } else {
       let ne2=null,nd=720;
       enemies.forEach(e=>{if(e.dead)return;const d=dist2(s.x,s.y,e.x,e.y);if(d<nd){nd=d;ne2=e;}});
       if(ne2&&nd<340){
         const sdx=ne2.x-s.x,sdy=ne2.y-s.y,sd=Math.sqrt(sdx*sdx+sdy*sdy)||1;
-        s.x+=sdx/sd*260*dt;s.y+=sdy/sd*260*dt;
-        if(now-s.lastAttack>950&&sd<70){s.lastAttack=now;s.attackCount++;hitEnemy(ne2,player.attack*1.15*(1+_tb('spiritDmgPct')/100));}
+        s.x+=sdx/sd*260*dt*_speedMult;s.y+=sdy/sd*260*dt*_speedMult;
+        const atkInterval2 = _inBanner ? 800 : 950;
+        if(now-s.lastAttack>atkInterval2&&sd<70){s.lastAttack=now;s.attackCount++;hitEnemy(ne2,player.attack*1.15*(1+_tb('spiritDmgPct')/100)*_bannerDmgMult);}
       } else {
-        s.orbitAngle+=dt*2.4;
+        s.orbitAngle+=dt*2.4*_speedMult;
         const tx=player.x+Math.cos(s.orbitAngle)*or,ty=player.y+Math.sin(s.orbitAngle)*or;
-        s.x+=(tx-s.x)*Math.min(1,dt*3.2);s.y+=(ty-s.y)*Math.min(1,dt*3.2);
+        s.x+=(tx-s.x)*Math.min(1,dt*3.2*_speedMult);s.y+=(ty-s.y)*Math.min(1,dt*3.2*_speedMult);
       }
     }
     if(Math.random()<0.05)particles.push({x:s.x,y:s.y,vx:(Math.random()-0.5)*30,vy:-18-Math.random()*18,life:0.45,maxLife:0.45,color:'#9DC4B0',size:1.8});
