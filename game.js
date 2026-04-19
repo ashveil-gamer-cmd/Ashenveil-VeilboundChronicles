@@ -1596,6 +1596,10 @@ let shakeTimer=0,shakeAmt=0;
 let clusterTimer=0,clusterInterval=9000;
 // Precomputed environment
 let envProps=[];
+// World chests — lootable treasure chests placed deterministically in each zone.
+// Separate from envProps because they have mutable state (opened/closed) and
+// animated glow effects. Structure: {x, y, tier, opened, openTime, seed}.
+let worldChests=[];
 
 
 // ═══════ ENVIRONMENT GENERATION ══════════════════════════
@@ -1608,6 +1612,7 @@ function rngF(s){return((s*16807)%2147483647)/2147483647;}
 const COLLISION_RADIUS={
   realTree:0.28,     // trunk only, canopy is air
   deadTree:0.20,     // skinny gnarled tree
+  tallDeadTree:0.22, // bigger trunk than deadTree
   rockCluster:0.40,  // chunky cluster, tricky to pass through
   boulder:0.50,      // big solid stone
   stoneRuin:0.45,    // wall fragment, wide
@@ -1617,7 +1622,35 @@ const COLLISION_RADIUS={
   sarcophagus:0.40,  // medium chunky
   cryptTomb:0.35,
   ashObelisk:0.35,
+  standingStone:0.26,// tall monolith — thin but blocking
+  brokenStatue:0.38, // chunky statue base
+  ruinWall:0.38,     // standing wall chunk
+  // fireBrazier: no collision — player should be able to walk near the light
   // Everything else (grass, mushroom, water, bones, flecks, arches, torches) = no collision
+};
+
+// Per-type size multiplier applied at spawn time. Base prop size is ~16-58.
+// Large landmark props (tall trees, monoliths, statues, braziers) need to
+// be BIGGER than normal rocks to feel imposing — the zones were bland in
+// part because everything was the same small size.
+const PROP_SIZE_MULT={
+  tallDeadTree: 2.4,  // towering — meant to dominate nearby space
+  standingStone: 2.2, // tall vertical landmark
+  brokenStatue: 2.0,  // large monument
+  fireBrazier: 1.5,   // elevated + light source
+  // Existing props also get a bump so they feel less like pebbles:
+  boulder: 1.4,       // boulders should feel boulder-sized
+  deadTree: 1.6,      // bigger than default
+  realTree: 1.7,      // canopy deserves space
+  stoneRuin: 1.3,
+  cryptPillar: 1.6,   // pillars should be TALL
+  obsidianPillar: 1.7,
+  ashObelisk: 1.7,
+  sarcophagus: 1.3,
+  cryptTomb: 1.35,
+  ruinWall: 1.4,
+  fallenLog: 1.3,
+  // Small clutter stays at 1.0 (grassTuft, mushroom, boneHeap, etc.)
 };
 
 function generateEnvironment(){
@@ -1664,7 +1697,9 @@ function generateEnvironment(){
       const cd=rnd()*rnd()*clusterRadius; // squared gives center bias
       const px=Math.max(40,Math.min(WORLD_W-40,hx+Math.cos(ca)*cd));
       const py=Math.max(40,Math.min(WORLD_H-40,hy+Math.sin(ca)*cd));
-      const sz=16+rnd()*42;
+      // Base size 16-58, then scaled by per-type multiplier
+      const mult=PROP_SIZE_MULT[chosenType]||1;
+      const sz=(16+rnd()*42)*mult;
       envProps.push({
         x:px,y:py,type:chosenType,
         sz,rot:rnd()*Math.PI*2,seed:Math.floor(rnd()*99991)+1,
@@ -1699,7 +1734,8 @@ function generateEnvironment(){
           const perpX=-dy/len, perpY=dx/len;
           const px=Math.max(40,Math.min(WORLD_W-40,pt.x+perpX*offset+(rnd()-0.5)*30));
           const py=Math.max(40,Math.min(WORLD_H-40,pt.y+perpY*offset+(rnd()-0.5)*30));
-          const sz=14+rnd()*26;
+          const mult=PROP_SIZE_MULT[chosenType]||1;
+          const sz=(14+rnd()*26)*mult;
           envProps.push({
             x:px,y:py,type:chosenType,
             sz,rot:rnd()*Math.PI*2,seed:Math.floor(rnd()*99991)+1,
@@ -1717,7 +1753,8 @@ function generateEnvironment(){
       bucket.remaining--;
       const px=(0.06+rnd()*0.88)*WORLD_W;
       const py=(0.06+rnd()*0.88)*WORLD_H;
-      const sz=16+rnd()*42;
+      const mult=PROP_SIZE_MULT[bucket.type]||1;
+      const sz=(16+rnd()*42)*mult;
       envProps.push({
         x:px,y:py,type:bucket.type,
         sz,rot:rnd()*Math.PI*2,seed:Math.floor(rnd()*99991)+1,
@@ -1732,6 +1769,292 @@ function generateEnvironment(){
 
   // Also regenerate terrain features (paths, patches) for the current theme
   if(typeof generateTerrainFeatures==='function')generateTerrainFeatures();
+
+  // Generate world chests for this zone (skip in camp)
+  generateWorldChests(seedBase);
+}
+
+// ═══════ WORLD CHESTS ════════════════════════════════════
+// Lootable treasure chests placed deterministically in each zone.
+// Player walks within 70 units → chest auto-opens → 2-4 items + gold drop.
+// Works in both manual and AFK mode. Chests stay open (opened=true) for the
+// rest of the session so players can't farm the same chest.
+//
+// Tiers: 0=bronze (common/uncommon), 1=silver (rare/epic), 2=gold (epic/legendary/mythic).
+// Each zone gets a mix weighted toward its tier level.
+function generateWorldChests(seedBase){
+  worldChests = [];
+  if(!curZone || curZone.isCamp) return; // no chests in camp
+  const rnd = srand(seedBase + 424242);
+  // 4-6 chests per zone, scaled slightly by zone tier (higher-tier zones get more)
+  const zoneLv = curZone.minLv || 1;
+  const count = 4 + Math.floor(rnd()*3) + Math.floor(zoneLv/20);
+  for(let i=0; i<count; i++){
+    // Deterministic placement — spread roughly but avoid edges and landmark area
+    const px = (0.08 + rnd()*0.84) * WORLD_W;
+    const py = (0.08 + rnd()*0.84) * WORLD_H;
+    // Tier weighting: mostly bronze in early zones, more silver/gold in late zones
+    let tier = 0;
+    const tierRoll = rnd();
+    if(zoneLv >= 30){
+      // Spire: 30% bronze, 45% silver, 25% gold
+      tier = tierRoll < 0.3 ? 0 : tierRoll < 0.75 ? 1 : 2;
+    } else if(zoneLv >= 18){
+      // Mire: 45% bronze, 45% silver, 10% gold
+      tier = tierRoll < 0.45 ? 0 : tierRoll < 0.9 ? 1 : 2;
+    } else if(zoneLv >= 8){
+      // Crypts: 60% bronze, 35% silver, 5% gold
+      tier = tierRoll < 0.6 ? 0 : tierRoll < 0.95 ? 1 : 2;
+    } else {
+      // Ashen: 75% bronze, 22% silver, 3% gold
+      tier = tierRoll < 0.75 ? 0 : tierRoll < 0.97 ? 1 : 2;
+    }
+    worldChests.push({
+      x: px, y: py, tier: tier,
+      opened: false, openTime: 0,
+      seed: Math.floor(rnd()*99991)+1,
+    });
+  }
+}
+
+// Called each frame — checks if player is near an unopened chest and opens it.
+// Separate from prop collision because chests are state-based and don't block movement.
+function updateWorldChests(now){
+  if(!worldChests || worldChests.length === 0) return;
+  for(let i=0; i<worldChests.length; i++){
+    const c = worldChests[i];
+    if(c.opened) continue;
+    const dx = player.x - c.x, dy = player.y - c.y;
+    if(dx*dx + dy*dy < 70*70){
+      openChest(c, now);
+    }
+  }
+}
+
+// Opens a chest — drops loot, plays effects, marks as opened.
+function openChest(chest, now){
+  chest.opened = true;
+  chest.openTime = now;
+  // Determine loot count and quality based on tier
+  // tier 0=bronze: 1-2 items + 20-50 gold
+  // tier 1=silver: 2-3 items + 50-120 gold (min rarity: rare)
+  // tier 2=gold:   3-4 items + 150-400 gold (min rarity: epic)
+  let itemCount, goldMin, goldMax, rarityFloor;
+  if(chest.tier === 0){
+    itemCount = 1 + Math.floor(Math.random() * 2);
+    goldMin = 20; goldMax = 50;
+    rarityFloor = null;
+  } else if(chest.tier === 1){
+    itemCount = 2 + Math.floor(Math.random() * 2);
+    goldMin = 50; goldMax = 120;
+    rarityFloor = 'rare';
+  } else {
+    itemCount = 3 + Math.floor(Math.random() * 2);
+    goldMin = 150; goldMax = 400;
+    rarityFloor = 'epic';
+  }
+  // Scale gold by player level slightly
+  const goldScale = 1 + player.level * 0.05;
+  const gold = Math.floor((goldMin + Math.random()*(goldMax-goldMin)) * goldScale);
+  player.gold += gold;
+  // Drop items — use existing rollLoot, re-roll if tier demands higher rarity
+  const tierNames = ['BRONZE', 'SILVER', 'GOLD'];
+  const tierColors = ['#b8946a', '#c4d0dc', '#f59e0b'];
+  addFeed(`◆ ${tierNames[chest.tier]} CHEST OPENED`, tierColors[chest.tier]);
+  addFeed(`+${gold} gold`, '#f59e0b');
+  for(let j=0; j<itemCount; j++){
+    let item = (typeof rollLoot === 'function') ? rollLoot(player.level) : null;
+    if(!item) continue;
+    // Enforce rarity floor for silver/gold chests — re-roll up to 5 times if too common
+    if(rarityFloor){
+      const rarityOrder = ['common','uncommon','rare','epic','legendary','mythic'];
+      const floorIdx = rarityOrder.indexOf(rarityFloor);
+      let attempts = 0;
+      while(item && rarityOrder.indexOf(item.rarity) < floorIdx && attempts < 5){
+        item = rollLoot(player.level);
+        attempts++;
+      }
+      // Force rarity upgrade if we still failed
+      if(item && rarityOrder.indexOf(item.rarity) < floorIdx){
+        item.rarity = rarityFloor;
+      }
+    }
+    if(item && typeof tryEquip === 'function'){
+      tryEquip(item);
+    }
+  }
+  // Visual effects — beam + shake
+  if(typeof pushGroundFX === 'function'){
+    pushGroundFX({type:'beam', x:chest.x, y:chest.y, r:50, maxR:50, color:tierColors[chest.tier], life:1.8, maxLife:1.8});
+    pushGroundFX({type:'bloom', x:chest.x, y:chest.y, r:120, maxR:120, color:tierColors[chest.tier], life:0.6, maxLife:0.6});
+  }
+  if(typeof screenShake === 'function') screenShake(4 + chest.tier*3, 200);
+  // Sound — play rarity-appropriate pickup
+  const sfxMap = ['pickupUncommon', 'pickupRare', 'pickupLegendary'];
+  const sfxName = sfxMap[chest.tier];
+  if(typeof SFX !== 'undefined' && SFX[sfxName]) SFX[sfxName]();
+}
+
+// Draw all chests currently in view. Called inside drawEnvironment.
+function drawWorldChests(now, vl, vr, vt, vb){
+  if(!worldChests || worldChests.length === 0) return;
+  for(let i=0; i<worldChests.length; i++){
+    const c = worldChests[i];
+    if(c.x < vl || c.x > vr || c.y < vt || c.y > vb) continue;
+    drawChest(c, now);
+  }
+}
+
+// Canvas-drawn chest. 3 tiers with distinct colors, pulsing glow when closed,
+// open-lid animation when first opened, then settled open state.
+function drawChest(chest, now){
+  const S = 40; // chest base size
+  ctx.save();
+  ctx.translate(chest.x, chest.y);
+  // Tier palettes
+  const palettes = [
+    {body:'#6a4a28', trim:'#8a6a48', dark:'#2a1a0c', light:'#a08060', glow:'#d9a558'},  // bronze
+    {body:'#8a96a4', trim:'#b4c0cc', dark:'#3a4250', light:'#d0dce8', glow:'#a0b4c8'},  // silver
+    {body:'#a87820', trim:'#e0a838', dark:'#3a2808', light:'#f8c860', glow:'#ffd060'},  // gold
+  ];
+  const pal = palettes[chest.tier] || palettes[0];
+
+  if(!chest.opened){
+    // ═══ CLOSED CHEST — pulsing glow, enticing ═══
+    const glowPulse = 0.7 + Math.sin(now/500 + chest.seed) * 0.3;
+    // Ground glow halo
+    ctx.shadowColor = pal.glow;
+    ctx.shadowBlur = 22 * glowPulse;
+    const haloGrad = ctx.createRadialGradient(0, S*0.3, 0, 0, S*0.3, S*0.95);
+    haloGrad.addColorStop(0, pal.glow + '55');
+    haloGrad.addColorStop(1, pal.glow + '00');
+    ctx.fillStyle = haloGrad;
+    ctx.beginPath(); ctx.ellipse(0, S*0.3, S*0.95, S*0.35, 0, 0, Math.PI*2); ctx.fill();
+    ctx.shadowBlur = 0;
+    // Shadow under chest
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.beginPath(); ctx.ellipse(S*0.05, S*0.38, S*0.55, S*0.14, 0, 0, Math.PI*2); ctx.fill();
+    // Chest body — box
+    ctx.fillStyle = pal.dark;
+    ctx.fillRect(-S*0.48, -S*0.05, S*0.96, S*0.45);
+    ctx.fillStyle = pal.body;
+    ctx.fillRect(-S*0.44, -S*0.02, S*0.88, S*0.4);
+    // Body highlight on left edge
+    ctx.fillStyle = pal.light;
+    ctx.fillRect(-S*0.43, 0, S*0.04, S*0.35);
+    // Iron bands — two horizontal strips
+    ctx.fillStyle = pal.dark;
+    ctx.fillRect(-S*0.48, S*0.08, S*0.96, S*0.05);
+    ctx.fillRect(-S*0.48, S*0.25, S*0.96, S*0.05);
+    // Corner reinforcements
+    ctx.fillRect(-S*0.48, S*0.3, S*0.1, S*0.08);
+    ctx.fillRect(S*0.38, S*0.3, S*0.1, S*0.08);
+    // LID (closed, slightly domed shape)
+    ctx.fillStyle = pal.dark;
+    ctx.beginPath();
+    ctx.moveTo(-S*0.5, -S*0.05);
+    ctx.quadraticCurveTo(0, -S*0.32, S*0.5, -S*0.05);
+    ctx.lineTo(S*0.48, 0);
+    ctx.quadraticCurveTo(0, -S*0.27, -S*0.48, 0);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = pal.body;
+    ctx.beginPath();
+    ctx.moveTo(-S*0.46, -S*0.05);
+    ctx.quadraticCurveTo(0, -S*0.28, S*0.46, -S*0.05);
+    ctx.lineTo(S*0.44, 0);
+    ctx.quadraticCurveTo(0, -S*0.23, -S*0.44, 0);
+    ctx.closePath(); ctx.fill();
+    // Lid highlight arc
+    ctx.strokeStyle = pal.light;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-S*0.4, -S*0.1);
+    ctx.quadraticCurveTo(0, -S*0.26, S*0.4, -S*0.1);
+    ctx.stroke();
+    // LOCK — central golden lock with glowing keyhole
+    ctx.fillStyle = pal.trim;
+    ctx.fillRect(-S*0.08, S*0.05, S*0.16, S*0.17);
+    ctx.strokeStyle = pal.dark;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(-S*0.08, S*0.05, S*0.16, S*0.17);
+    // Keyhole — glowing
+    ctx.fillStyle = pal.glow;
+    ctx.shadowColor = pal.glow;
+    ctx.shadowBlur = 8 * glowPulse;
+    ctx.beginPath(); ctx.arc(0, S*0.11, S*0.025, 0, Math.PI*2); ctx.fill();
+    ctx.fillRect(-S*0.008, S*0.11, S*0.016, S*0.05);
+    ctx.shadowBlur = 0;
+    // Tier indicator floating above
+    ctx.shadowColor = pal.glow;
+    ctx.shadowBlur = 10 * glowPulse;
+    ctx.fillStyle = pal.glow;
+    ctx.globalAlpha = 0.5 + glowPulse * 0.3;
+    // Small shimmer dots above the chest
+    for(let i=0; i<3; i++){
+      const angle = (now/600 + i*2.09 + chest.seed) % (Math.PI*2);
+      const dist = S*0.5 + Math.sin(now/400 + i)*S*0.08;
+      const sx = Math.cos(angle)*dist*0.4;
+      const sy = -S*0.3 + Math.sin(angle*2)*S*0.12;
+      ctx.beginPath(); ctx.arc(sx, sy, S*0.04, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+  } else {
+    // ═══ OPENED CHEST — lid thrown back, darker hollow interior ═══
+    const timeSinceOpen = Math.min(1, (now - chest.openTime) / 800);
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.beginPath(); ctx.ellipse(S*0.05, S*0.38, S*0.55, S*0.14, 0, 0, Math.PI*2); ctx.fill();
+    // Body (same as closed)
+    ctx.fillStyle = pal.dark;
+    ctx.fillRect(-S*0.48, -S*0.05, S*0.96, S*0.45);
+    ctx.fillStyle = pal.body;
+    ctx.fillRect(-S*0.44, -S*0.02, S*0.88, S*0.4);
+    ctx.fillStyle = pal.dark;
+    ctx.fillRect(-S*0.48, S*0.08, S*0.96, S*0.05);
+    ctx.fillRect(-S*0.48, S*0.25, S*0.96, S*0.05);
+    // DARK INTERIOR — visible through open top
+    ctx.fillStyle = '#080604';
+    ctx.fillRect(-S*0.4, -S*0.08, S*0.8, S*0.15);
+    // Interior shadow gradient
+    const inGrad = ctx.createLinearGradient(0, -S*0.08, 0, S*0.07);
+    inGrad.addColorStop(0, 'rgba(0,0,0,0.9)');
+    inGrad.addColorStop(1, 'rgba(20,10,5,0.7)');
+    ctx.fillStyle = inGrad;
+    ctx.fillRect(-S*0.4, -S*0.08, S*0.8, S*0.15);
+    // LID — thrown back behind the chest
+    const lidAngle = -Math.PI * 0.55 * timeSinceOpen;
+    ctx.save();
+    ctx.translate(0, -S*0.05);
+    ctx.rotate(lidAngle);
+    ctx.fillStyle = pal.dark;
+    ctx.beginPath();
+    ctx.moveTo(-S*0.5, 0);
+    ctx.quadraticCurveTo(0, -S*0.27, S*0.5, 0);
+    ctx.lineTo(S*0.48, S*0.05);
+    ctx.quadraticCurveTo(0, -S*0.22, -S*0.48, S*0.05);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = pal.body;
+    ctx.beginPath();
+    ctx.moveTo(-S*0.46, 0);
+    ctx.quadraticCurveTo(0, -S*0.23, S*0.46, 0);
+    ctx.lineTo(S*0.44, S*0.05);
+    ctx.quadraticCurveTo(0, -S*0.18, -S*0.44, S*0.05);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+    // Lingering glow if recently opened
+    if(timeSinceOpen < 1){
+      const fadeGlow = 1 - timeSinceOpen;
+      ctx.shadowColor = pal.glow;
+      ctx.shadowBlur = 20 * fadeGlow;
+      ctx.fillStyle = pal.glow + Math.floor(fadeGlow*120).toString(16).padStart(2,'0');
+      ctx.globalAlpha = fadeGlow * 0.7;
+      ctx.beginPath(); ctx.ellipse(0, S*0.02, S*0.4, S*0.08, 0, 0, Math.PI*2); ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.shadowBlur = 0;
+    }
+  }
+  ctx.restore();
 }
 
 // ═══════ PROP COLLISION SYSTEM ═══════════════════════════
@@ -1750,16 +2073,17 @@ function buildPropSpatialGrid(){
     if(!propGrid[key])propGrid[key]=[];
     propGrid[key].push(p);
   });
-  // Landmark collision DISABLED — sprite system paused.
-  // When ready to re-enable, uncomment the block below.
-  // const lm = (typeof getActiveLandmark === 'function') ? getActiveLandmark() : null;
-  // if (lm && lm.collRadius > 0) {
-  //   const gx=Math.floor(lm.x/PROP_GRID_SIZE);
-  //   const gy=Math.floor(lm.y/PROP_GRID_SIZE);
-  //   const key=gx+','+gy;
-  //   if(!propGrid[key])propGrid[key]=[];
-  //   propGrid[key].push({x:lm.x, y:lm.y, collRadius:lm.collRadius, type:'landmark'});
-  // }
+  // Landmark collision — add the zone's focal structure to the spatial grid
+  // so the player can't walk through it. Only spans one grid cell (landmarks
+  // are big but still fit in a single PROP_GRID_SIZE cell for lookup).
+  const lm = (typeof getActiveLandmark === 'function') ? getActiveLandmark() : null;
+  if (lm && lm.collRadius > 0) {
+    const gx=Math.floor(lm.x/PROP_GRID_SIZE);
+    const gy=Math.floor(lm.y/PROP_GRID_SIZE);
+    const key=gx+','+gy;
+    if(!propGrid[key])propGrid[key]=[];
+    propGrid[key].push({x:lm.x, y:lm.y, collRadius:lm.collRadius, type:'landmark'});
+  }
 }
 
 // Returns the first prop at (x,y) that collides with a circle of radius r,
@@ -1837,19 +2161,24 @@ function findClearPosition(cx,cy,r,maxAttempts=16){
 function drawEnvironment(now){
   const halfVW = W/(2*WORLD_ZOOM), halfVH = H/(2*WORLD_ZOOM);
   const margin=320,vl=camX-halfVW-margin,vr=camX+halfVW+margin,vt=camY-halfVH-margin,vb=camY+halfVH+margin;
+  // Draw the zone landmark FIRST so other props render in front of it
+  // (the landmark is meant to be a distant anchor, not foreground clutter)
+  drawActiveLandmark(now, vl, vr, vt, vb);
   envProps.forEach(p=>{if(p.x>vl&&p.x<vr&&p.y>vt&&p.y<vb)drawProp(p,now);});
-  // Landmark rendering DISABLED — sprite system paused pending future revisit.
-  // When ready to re-enable, uncomment the line below.
-  // drawActiveLandmark(now, vl, vr, vt, vb);
+  // Chests render AFTER props so they're always visible/on top for clarity
+  drawWorldChests(now, vl, vr, vt, vb);
 }
 
 // Looks up the landmark for the current zone/dungeon and draws it.
-// Landmark appears at the deterministic world position defined in LANDMARKS.
+// Canvas-drawn — no asset dependency. Big focal structures that anchor
+// each zone visually. See drawZoneLandmark for the actual drawing.
 function drawActiveLandmark(now, vl, vr, vt, vb){
   const lm = getActiveLandmark();
   if (!lm) return;
-  if (lm.x < vl || lm.x > vr || lm.y < vt || lm.y > vb) return;
-  drawSpriteProp(lm.spriteKey, lm.x, lm.y, lm.scale || 1);
+  // Landmark bounding check — landmarks are large, expand the view test margin
+  const lmMargin = 500;
+  if (lm.x < vl - lmMargin || lm.x > vr + lmMargin || lm.y < vt - lmMargin || lm.y > vb + lmMargin) return;
+  drawZoneLandmark(lm.drawId, lm.x, lm.y, (lm.scale || 1), now);
 }
 
 // Returns the landmark for the current active zone or dungeon, or null.
@@ -1861,6 +2190,637 @@ function getActiveLandmark(){
     return LANDMARKS[curZone.id] || null;
   }
   return null;
+}
+
+// Dispatches to the correct canvas-drawn landmark function.
+// Each landmark is rendered at ~300 world-unit base size × the scale factor.
+function drawZoneLandmark(drawId, x, y, scale, now){
+  ctx.save();
+  ctx.translate(x, y);
+  switch(drawId){
+    case 'shatteredTower': drawLandmarkShatteredTower(scale, now); break;
+    case 'giantSkull':     drawLandmarkGiantSkull(scale, now); break;
+    case 'sunkenAltar':    drawLandmarkSunkenAltar(scale, now); break;
+    case 'obsidianMonolith': drawLandmarkObsidianMonolith(scale, now); break;
+  }
+  ctx.restore();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// LANDMARK DRAW FUNCTIONS — massive focal structures per zone
+// Each draws in world-local coordinates (translated to landmark's x,y)
+// Base size ~300 world units so they're visible from far away.
+// ═══════════════════════════════════════════════════════════════
+
+// ─── ASHEN WASTES: Shattered Tower ───
+// Half-collapsed stone spire reaching toward the purple sky, rubble at base,
+// broken top with rebar-like exposed structure, cracked facade.
+function drawLandmarkShatteredTower(scale, now){
+  const S = 300 * scale; // base size
+  const stone = '#1a1230';
+  const stoneDark = '#0a0518';
+  const stoneMid = '#130c24';
+  const stoneLight = '#2d1f52';
+  const stoneCrack = '#050210';
+  // Rubble-shadow on ground
+  ctx.fillStyle='rgba(0,0,0,0.65)';
+  ctx.beginPath();ctx.ellipse(S*0.08, S*0.48, S*0.95, S*0.22, 0, 0, Math.PI*2);ctx.fill();
+  // ─── RUBBLE PILE around base ───
+  for(let i=0;i<8;i++){
+    const rngA = (i*2.137)%1;
+    const rngB = (i*3.561)%1;
+    const rngC = (i*5.891)%1;
+    const rx = (rngA-0.5)*S*1.5;
+    const ry = S*0.38 + rngB*S*0.1;
+    const rs = S*(0.05+rngC*0.07);
+    // Rubble chunk — irregular polygon
+    ctx.fillStyle = stoneDark;
+    ctx.beginPath();
+    for(let v=0;v<6;v++){
+      const va=(v/6)*Math.PI*2;
+      const vr=rs*(0.7+((i+v)*0.7)%1*0.5);
+      const vx=rx+Math.cos(va)*vr, vy=ry+Math.sin(va)*vr*0.6;
+      if(v===0) ctx.moveTo(vx,vy); else ctx.lineTo(vx,vy);
+    }
+    ctx.closePath();ctx.fill();
+    ctx.fillStyle = stone;
+    ctx.beginPath();
+    for(let v=0;v<6;v++){
+      const va=(v/6)*Math.PI*2;
+      const vr=rs*(0.6+((i+v)*0.7)%1*0.4);
+      const vx=rx+Math.cos(va)*vr-rs*0.08, vy=ry+Math.sin(va)*vr*0.55-rs*0.04;
+      if(v===0) ctx.moveTo(vx,vy); else ctx.lineTo(vx,vy);
+    }
+    ctx.closePath();ctx.fill();
+  }
+  // ─── TOWER BASE (wide) ───
+  const baseY = S*0.38;
+  const baseTopY = S*0.18;
+  const baseHalfW = S*0.4;
+  const baseTopHalfW = S*0.32;
+  // Base shadow offset
+  ctx.fillStyle = stoneDark;
+  ctx.beginPath();
+  ctx.moveTo(-baseHalfW+S*0.06, baseY+S*0.04);
+  ctx.lineTo(baseHalfW+S*0.06, baseY+S*0.04);
+  ctx.lineTo(baseTopHalfW+S*0.06, baseTopY+S*0.04);
+  ctx.lineTo(-baseTopHalfW+S*0.06, baseTopY+S*0.04);
+  ctx.closePath();ctx.fill();
+  // Base body
+  ctx.fillStyle = stone;
+  ctx.beginPath();
+  ctx.moveTo(-baseHalfW, baseY);
+  ctx.lineTo(baseHalfW, baseY);
+  ctx.lineTo(baseTopHalfW, baseTopY);
+  ctx.lineTo(-baseTopHalfW, baseTopY);
+  ctx.closePath();ctx.fill();
+  // ─── TOWER SHAFT (tall, tapered, leaning slightly, broken top) ───
+  const shaftBotY = baseTopY;
+  const shaftTopY = -S*1.4; // very tall
+  const shaftBotHalfW = S*0.24;
+  const shaftTopHalfW = S*0.16;
+  const leanX = -S*0.06; // slight lean to left
+  // Jagged broken top — irregular edge
+  const topJags = [];
+  const topY = shaftTopY;
+  for(let j=0;j<=6;j++){
+    const t = j/6;
+    const jagX = -shaftTopHalfW + t*shaftTopHalfW*2 + leanX;
+    const jagY = topY + ((j*3.7+0.2)%1)*S*0.18 - S*0.02;
+    topJags.push({x: jagX, y: jagY});
+  }
+  // Build shaft path
+  const shaftPath = [
+    {x: -shaftBotHalfW, y: shaftBotY},
+    {x: -shaftTopHalfW+leanX, y: topY+S*0.15},
+    ...topJags,
+    {x: shaftTopHalfW+leanX, y: topY+S*0.15},
+    {x: shaftBotHalfW, y: shaftBotY},
+  ];
+  // Shaft shadow
+  ctx.fillStyle = stoneDark;
+  ctx.beginPath();
+  shaftPath.forEach((p,i)=>{
+    const x=p.x+S*0.04, y=p.y+S*0.02;
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  });
+  ctx.closePath();ctx.fill();
+  // Shaft mid
+  ctx.fillStyle = stoneMid;
+  ctx.beginPath();
+  shaftPath.forEach((p,i)=>{
+    if(i===0) ctx.moveTo(p.x,p.y); else ctx.lineTo(p.x,p.y);
+  });
+  ctx.closePath();ctx.fill();
+  // Shaft main (slightly inset for bevel)
+  ctx.fillStyle = stone;
+  ctx.beginPath();
+  shaftPath.forEach((p,i)=>{
+    const x = p.x*0.93, y = p.y;
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  });
+  ctx.closePath();ctx.fill();
+  // Lit left edge — vertical band suggesting light from upper-left
+  ctx.fillStyle = stoneLight;
+  ctx.fillRect(-shaftBotHalfW*0.88+leanX*0.2, shaftTopY+S*0.18, S*0.03, shaftBotY - (shaftTopY+S*0.18));
+  // ─── WINDOWS (dark rectangular openings going up the shaft) ───
+  const windowCount = 5;
+  for(let w=0;w<windowCount;w++){
+    const wy = shaftTopY + S*0.3 + w*(S*0.28);
+    const ww = S*0.05;
+    const wh = S*0.09;
+    const wxOffset = leanX * ((wy - shaftBotY)/(shaftTopY - shaftBotY));
+    ctx.fillStyle = stoneCrack;
+    ctx.fillRect(-ww/2 + wxOffset, wy, ww, wh);
+    // Window sill
+    ctx.fillStyle = stoneDark;
+    ctx.fillRect(-ww/2 - 1 + wxOffset, wy+wh, ww+2, 2);
+  }
+  // ─── DIAGONAL CRACKS across the shaft ───
+  ctx.strokeStyle = stoneCrack;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-shaftBotHalfW*0.8, shaftTopY+S*0.55);
+  ctx.lineTo(shaftBotHalfW*0.3, shaftTopY+S*0.85);
+  ctx.lineTo(-shaftBotHalfW*0.4, shaftBotY-S*0.15);
+  ctx.stroke();
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(shaftBotHalfW*0.7, shaftTopY+S*0.4);
+  ctx.lineTo(shaftBotHalfW*0.2, shaftBotY-S*0.3);
+  ctx.stroke();
+  // ─── EXPOSED REBAR at broken top ───
+  ctx.strokeStyle = '#3a2818';
+  ctx.lineWidth = 2;
+  for(let r=0;r<3;r++){
+    const rx = leanX + (r-1)*S*0.06;
+    const ry = topY - S*0.08 + ((r*2.17)%1)*S*0.05;
+    ctx.beginPath();
+    ctx.moveTo(rx, topY+S*0.1);
+    ctx.lineTo(rx + ((r*1.3)%1-0.5)*S*0.04, ry);
+    ctx.stroke();
+  }
+  // ─── AURA at the peak (tower still haunted by residual magic) ───
+  const auraPulse = 0.6 + Math.sin(now/1800) * 0.3;
+  ctx.shadowColor = '#c084fc';
+  ctx.shadowBlur = 40 * auraPulse;
+  ctx.fillStyle = `rgba(192,132,252,${0.15 * auraPulse})`;
+  ctx.beginPath();
+  ctx.arc(leanX, topY + S*0.05, S*0.08, 0, Math.PI*2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+}
+
+// ─── BONE CRYPTS: Giant Half-Buried Skull ───
+// Massive cracked skull the size of 20 players, partially sunk into the earth,
+// eye sockets glowing amber with ancient fire, jaw mostly buried.
+function drawLandmarkGiantSkull(scale, now){
+  const S = 320 * scale;
+  const bone = '#c8b890';
+  const boneDark = '#6a5c40';
+  const boneShadow = '#2a2218';
+  const boneMid = '#a08060';
+  const earthColor = '#1a0f08';
+  // Ground disturbance — dark patch around where it emerges
+  ctx.fillStyle='rgba(0,0,0,0.5)';
+  ctx.beginPath();ctx.ellipse(0, S*0.4, S*1.2, S*0.25, 0, 0, Math.PI*2);ctx.fill();
+  // Earth mound surrounding the skull — suggests buried
+  ctx.fillStyle = earthColor;
+  ctx.beginPath();
+  ctx.ellipse(0, S*0.32, S*1.1, S*0.18, 0, 0, Math.PI*2);
+  ctx.fill();
+  // Scattered bone fragments around the base
+  for(let i=0;i<6;i++){
+    const ang = (i*1.37)%1 * Math.PI*2;
+    const dist = S*0.8 + ((i*2.3)%1)*S*0.2;
+    const fx = Math.cos(ang)*dist;
+    const fy = S*0.3 + Math.sin(ang)*dist*0.3;
+    const flen = S*(0.06+((i*3.7)%1)*0.05);
+    ctx.strokeStyle = boneShadow;
+    ctx.lineWidth = S*0.018;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(fx-flen/2+2, fy+2);
+    ctx.lineTo(fx+flen/2+2, fy+2);
+    ctx.stroke();
+    ctx.strokeStyle = bone;
+    ctx.lineWidth = S*0.012;
+    ctx.beginPath();
+    ctx.moveTo(fx-flen/2, fy);
+    ctx.lineTo(fx+flen/2, fy);
+    ctx.stroke();
+  }
+  // ─── SKULL DOME (upper half — mostly exposed) ───
+  // Main skull outline — huge
+  const skullR = S*0.55;
+  // Cast shadow of skull
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.beginPath();
+  ctx.ellipse(S*0.1, S*0.3, skullR*1.08, skullR*0.4, 0, 0, Math.PI*2);
+  ctx.fill();
+  // Deep shadow layer of skull
+  ctx.fillStyle = boneShadow;
+  ctx.beginPath();
+  ctx.ellipse(S*0.04, S*0.04, skullR*1.02, skullR*0.88, 0, 0, Math.PI*2);
+  ctx.fill();
+  // Dark mid layer
+  ctx.fillStyle = boneDark;
+  ctx.beginPath();
+  ctx.ellipse(S*0.02, S*0.02, skullR*0.99, skullR*0.86, 0, 0, Math.PI*2);
+  ctx.fill();
+  // Main skull body
+  ctx.fillStyle = bone;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, skullR, skullR*0.85, 0, 0, Math.PI*2);
+  ctx.fill();
+  // Darker half for dimensional shading
+  ctx.fillStyle = boneMid;
+  ctx.globalAlpha = 0.4;
+  ctx.beginPath();
+  ctx.ellipse(skullR*0.15, skullR*0.05, skullR*0.75, skullR*0.65, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  // ─── EYE SOCKETS — huge, deep, glowing ───
+  const eyeR = skullR*0.22;
+  const eyeY = -skullR*0.1;
+  const eyeOffX = skullR*0.32;
+  // Deep dark interior
+  ctx.fillStyle = '#030201';
+  ctx.beginPath();ctx.ellipse(-eyeOffX, eyeY, eyeR, eyeR*1.2, 0, 0, Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.ellipse(eyeOffX, eyeY, eyeR, eyeR*1.2, 0, 0, Math.PI*2);ctx.fill();
+  // Ember glow in sockets — pulsing
+  const emberPulse = 0.7 + Math.sin(now/600) * 0.25;
+  ctx.shadowColor = '#d97706';
+  ctx.shadowBlur = 25 * emberPulse;
+  ctx.fillStyle = `rgba(255,140,40,${0.35*emberPulse})`;
+  ctx.beginPath();ctx.ellipse(-eyeOffX, eyeY+eyeR*0.3, eyeR*0.5, eyeR*0.6, 0, 0, Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.ellipse(eyeOffX, eyeY+eyeR*0.3, eyeR*0.5, eyeR*0.6, 0, 0, Math.PI*2);ctx.fill();
+  // Hot core
+  ctx.fillStyle = `rgba(255,220,120,${0.6*emberPulse})`;
+  ctx.beginPath();ctx.arc(-eyeOffX, eyeY+eyeR*0.3, eyeR*0.18, 0, Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(eyeOffX, eyeY+eyeR*0.3, eyeR*0.18, 0, Math.PI*2);ctx.fill();
+  ctx.shadowBlur = 0;
+  // ─── NASAL CAVITY — large downward triangle ───
+  ctx.fillStyle = '#050403';
+  ctx.beginPath();
+  ctx.moveTo(0, skullR*0.05);
+  ctx.lineTo(-skullR*0.12, skullR*0.32);
+  ctx.quadraticCurveTo(0, skullR*0.38, skullR*0.12, skullR*0.32);
+  ctx.closePath();
+  ctx.fill();
+  // ─── CRANIAL SUTURE — curved line across the top ───
+  ctx.strokeStyle = boneDark;
+  ctx.lineWidth = 2;
+  ctx.globalAlpha = 0.7;
+  ctx.beginPath();
+  ctx.moveTo(-skullR*0.75, -skullR*0.55);
+  ctx.quadraticCurveTo(0, -skullR*0.82, skullR*0.75, -skullR*0.55);
+  ctx.stroke();
+  // Vertical suture down the middle
+  ctx.beginPath();
+  ctx.moveTo(0, -skullR*0.82);
+  ctx.lineTo(-skullR*0.02, -skullR*0.1);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  // ─── MAJOR CRACKS across the skull ───
+  ctx.strokeStyle = boneShadow;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(-skullR*0.5, -skullR*0.6);
+  ctx.lineTo(-skullR*0.3, -skullR*0.2);
+  ctx.lineTo(-skullR*0.45, skullR*0.1);
+  ctx.stroke();
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(skullR*0.5, -skullR*0.4);
+  ctx.lineTo(skullR*0.7, -skullR*0.1);
+  ctx.lineTo(skullR*0.45, skullR*0.2);
+  ctx.stroke();
+  // Sub-cracks
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(-skullR*0.3, -skullR*0.2);
+  ctx.lineTo(-skullR*0.15, -skullR*0.5);
+  ctx.stroke();
+  // ─── UPPER TEETH (partial — most is buried) ───
+  ctx.strokeStyle = boneDark;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-skullR*0.35, skullR*0.45);
+  ctx.lineTo(skullR*0.35, skullR*0.45);
+  ctx.stroke();
+  // Tooth gaps
+  ctx.lineWidth = 1;
+  for(let t=-3;t<=3;t++){
+    const tx = t * skullR*0.1;
+    ctx.beginPath();
+    ctx.moveTo(tx, skullR*0.42);
+    ctx.lineTo(tx, skullR*0.48);
+    ctx.stroke();
+  }
+}
+
+// ─── ABYSSAL MIRE: Sunken Altar ───
+// Circle of runed stones partially submerged in dark water, chains rising
+// from the depths, central altar slab with glowing green runes.
+function drawLandmarkSunkenAltar(scale, now){
+  const S = 280 * scale;
+  const stone = '#1a2410';
+  const stoneDark = '#0a1005';
+  const stoneLight = '#2a3a1a';
+  const waterColor = '#040a05';
+  const runeGreen = '#34d399';
+  // ─── DARK WATER POOL surrounding the altar ───
+  ctx.fillStyle = waterColor;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, S*0.95, S*0.55, 0, 0, Math.PI*2);
+  ctx.fill();
+  // Water highlight ring
+  ctx.strokeStyle = 'rgba(100,180,130,0.15)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, S*0.9, S*0.5, 0, 0, Math.PI*2);
+  ctx.stroke();
+  // Ripples — animated
+  for(let i=0;i<3;i++){
+    const rippleT = ((now/4000 + i*0.33)%1);
+    ctx.strokeStyle = `rgba(100,200,140,${(1-rippleT)*0.12})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, S*(0.2 + rippleT*0.6), S*(0.11 + rippleT*0.35), 0, 0, Math.PI*2);
+    ctx.stroke();
+  }
+  // ─── STONE CIRCLE — 5 runed standing stones partially in water ───
+  const stoneCount = 5;
+  for(let i=0;i<stoneCount;i++){
+    const ang = (i/stoneCount)*Math.PI*2 - Math.PI/2;
+    const dist = S*0.75;
+    const sx = Math.cos(ang)*dist;
+    const sy = Math.sin(ang)*dist*0.45; // flatten elliptically for perspective
+    // Stone height
+    const sh = S*0.28;
+    // Shadow on water
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.beginPath();
+    ctx.ellipse(sx+4, sy+sh-4, S*0.065, S*0.02, 0, 0, Math.PI*2);
+    ctx.fill();
+    // Stone body
+    ctx.fillStyle = stoneDark;
+    ctx.beginPath();
+    ctx.moveTo(sx-S*0.055, sy+sh);
+    ctx.lineTo(sx-S*0.045, sy-sh*0.2);
+    ctx.lineTo(sx-S*0.02, sy-sh);
+    ctx.lineTo(sx+S*0.04, sy-sh*0.95);
+    ctx.lineTo(sx+S*0.05, sy+sh);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = stone;
+    ctx.beginPath();
+    ctx.moveTo(sx-S*0.045, sy+sh);
+    ctx.lineTo(sx-S*0.04, sy-sh*0.2);
+    ctx.lineTo(sx-S*0.015, sy-sh);
+    ctx.lineTo(sx+S*0.035, sy-sh*0.95);
+    ctx.lineTo(sx+S*0.045, sy+sh);
+    ctx.closePath();
+    ctx.fill();
+    // Rune on stone — pulsing green
+    const runePulse = 0.6 + Math.sin(now/900 + i*0.7) * 0.3;
+    ctx.shadowColor = runeGreen;
+    ctx.shadowBlur = 12 * runePulse;
+    ctx.strokeStyle = `rgba(52,211,153,${0.5 + runePulse*0.4})`;
+    ctx.lineWidth = 1.2;
+    // Simple rune symbol
+    ctx.beginPath();
+    ctx.arc(sx, sy-sh*0.3, S*0.015, 0, Math.PI*2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(sx, sy-sh*0.3 - S*0.02);
+    ctx.lineTo(sx, sy-sh*0.3 + S*0.02);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(sx-S*0.02, sy-sh*0.3);
+    ctx.lineTo(sx+S*0.02, sy-sh*0.3);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+  // ─── CENTRAL ALTAR SLAB ───
+  // Lower shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.beginPath();
+  ctx.ellipse(S*0.03, S*0.08, S*0.3, S*0.08, 0, 0, Math.PI*2);
+  ctx.fill();
+  // Stepped base
+  ctx.fillStyle = stoneDark;
+  ctx.fillRect(-S*0.26, -S*0.04, S*0.52, S*0.12);
+  ctx.fillStyle = stone;
+  ctx.fillRect(-S*0.24, -S*0.08, S*0.48, S*0.1);
+  // Top slab — the altar table
+  ctx.fillStyle = stoneLight;
+  ctx.fillRect(-S*0.28, -S*0.11, S*0.56, S*0.04);
+  ctx.fillStyle = stoneDark;
+  ctx.fillRect(-S*0.28, -S*0.07, S*0.56, S*0.005);
+  // Blood / stain / rune pattern on altar top
+  const altarPulse = 0.5 + Math.sin(now/800) * 0.3;
+  ctx.shadowColor = runeGreen;
+  ctx.shadowBlur = 20 * altarPulse;
+  ctx.strokeStyle = `rgba(52,211,153,${0.6 * altarPulse})`;
+  ctx.lineWidth = 2;
+  // Central circle
+  ctx.beginPath();
+  ctx.ellipse(0, -S*0.09, S*0.08, S*0.02, 0, 0, Math.PI*2);
+  ctx.stroke();
+  // Inscribed triangle
+  ctx.beginPath();
+  ctx.moveTo(-S*0.06, -S*0.09);
+  ctx.lineTo(S*0.06, -S*0.09);
+  ctx.lineTo(0, -S*0.07);
+  ctx.closePath();
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  // ─── CHAINS rising from water around the altar ───
+  ctx.strokeStyle = '#2a2418';
+  ctx.lineWidth = 3;
+  for(let c=0;c<3;c++){
+    const cang = -Math.PI/2 + (c-1)*0.8;
+    const cr = S*0.45;
+    const sway = Math.sin(now/1500 + c) * 5;
+    const sx = Math.cos(cang) * cr + sway;
+    const sy = Math.sin(cang) * cr * 0.5 + S*0.05;
+    const ex = sx + Math.sin(cang + now/3000)*S*0.04;
+    const ey = sy - S*0.3 - c*S*0.04;
+    // Chain link pattern — alternating ovals
+    const segments = 8;
+    for(let seg=0; seg<segments; seg++){
+      const t = seg/segments;
+      const lx = sx + (ex-sx)*t + Math.sin(now/800 + c + seg*0.3)*2;
+      const ly = sy + (ey-sy)*t;
+      const ls = S*0.012;
+      ctx.fillStyle = seg%2===0 ? '#3a3428' : '#1a1408';
+      ctx.beginPath();
+      ctx.ellipse(lx, ly, ls, ls*1.3, t*Math.PI, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+}
+
+// ─── VEIL'S SPIRE: Obsidian Monolith ───
+// Jagged black glass spire crackling with red veil energy, surrounded by
+// cracked ground with molten fissures, towering above the landscape.
+function drawLandmarkObsidianMonolith(scale, now){
+  const S = 290 * scale;
+  const obsidian = '#0a0206';
+  const obsidianMid = '#15040a';
+  const obsidianHighlight = '#2a0a14';
+  const veilRed = '#ff2020';
+  const veilGlow = 'rgba(255,40,40,';
+  // ─── CRACKED GROUND with molten fissures around the base ───
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.beginPath();ctx.ellipse(0, S*0.4, S*0.95, S*0.2, 0, 0, Math.PI*2);ctx.fill();
+  // Molten fissures radiating from base — glowing red cracks
+  const cracksPulse = 0.6 + Math.sin(now/1200)*0.3;
+  for(let f=0;f<6;f++){
+    const fang = (f/6)*Math.PI*2 + 0.3;
+    const fLen = S*(0.5 + (f*0.37)%1 * 0.3);
+    ctx.save();
+    ctx.rotate(fang);
+    // Outer glow
+    ctx.shadowColor = veilRed;
+    ctx.shadowBlur = 15 * cracksPulse;
+    ctx.strokeStyle = veilGlow + (0.3*cracksPulse) + ')';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(S*0.3, S*0.4);
+    ctx.lineTo(S*0.3 + fLen*0.4, S*0.38);
+    ctx.lineTo(S*0.3 + fLen*0.7, S*0.45);
+    ctx.lineTo(S*0.3 + fLen, S*0.42);
+    ctx.stroke();
+    // Inner bright line
+    ctx.shadowBlur = 8;
+    ctx.strokeStyle = '#ffaa60';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.restore();
+  }
+  // ─── MONOLITH SHAFT — jagged obsidian spire ───
+  const monoBotY = S*0.4;
+  const monoTopY = -S*1.3; // very tall
+  // Build irregular angular silhouette
+  const leftPath = [];
+  const rightPath = [];
+  const baseHalfW = S*0.22;
+  const topHalfW = S*0.08;
+  const segments = 8;
+  for(let i=0;i<=segments;i++){
+    const t = i/segments;
+    const y = monoBotY + (monoTopY - monoBotY) * t;
+    // Taper
+    const taperW = baseHalfW * (1-t) + topHalfW * t;
+    // Jagged irregularity
+    const jaggyL = ((i*3.7+0.2)%1 - 0.5) * S*0.04;
+    const jaggyR = ((i*4.3+0.6)%1 - 0.5) * S*0.04;
+    leftPath.push({x: -taperW + jaggyL, y: y});
+    rightPath.push({x: taperW + jaggyR, y: y});
+  }
+  // Shadow offset
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  leftPath.forEach((p,i)=>{
+    const x=p.x+S*0.05, y=p.y+S*0.02;
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  });
+  for(let i=rightPath.length-1;i>=0;i--){
+    const p=rightPath[i];
+    ctx.lineTo(p.x+S*0.05, p.y+S*0.02);
+  }
+  ctx.closePath();ctx.fill();
+  // Main body
+  ctx.fillStyle = obsidian;
+  ctx.beginPath();
+  leftPath.forEach((p,i)=>{
+    if(i===0) ctx.moveTo(p.x,p.y); else ctx.lineTo(p.x,p.y);
+  });
+  for(let i=rightPath.length-1;i>=0;i--){
+    const p=rightPath[i];
+    ctx.lineTo(p.x, p.y);
+  }
+  ctx.closePath();ctx.fill();
+  // Left lit edge — obsidian catches light along one side
+  ctx.strokeStyle = obsidianHighlight;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  leftPath.forEach((p,i)=>{
+    if(i===0) ctx.moveTo(p.x,p.y); else ctx.lineTo(p.x,p.y);
+  });
+  ctx.stroke();
+  // ─── RED VEIL VEINS — glowing cracks pulsing up the shaft ───
+  ctx.save();
+  const veinPulse = 0.55 + Math.sin(now/600)*0.35;
+  ctx.shadowColor = veilRed;
+  ctx.shadowBlur = 20 * veinPulse;
+  // Main vertical vein — zigzag up the monolith
+  ctx.strokeStyle = veilGlow + (0.7*veinPulse) + ')';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(0, monoBotY - S*0.05);
+  ctx.lineTo(S*0.04, monoBotY - S*0.3);
+  ctx.lineTo(-S*0.03, monoBotY - S*0.6);
+  ctx.lineTo(S*0.02, monoBotY - S*0.9);
+  ctx.lineTo(-S*0.02, monoTopY + S*0.15);
+  ctx.stroke();
+  // Bright inner core
+  ctx.strokeStyle = '#ffccdd';
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+  // Branch veins
+  ctx.strokeStyle = veilGlow + (0.5*veinPulse) + ')';
+  ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.moveTo(S*0.04, monoBotY - S*0.3);
+  ctx.lineTo(S*0.12, monoBotY - S*0.4);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(-S*0.03, monoBotY - S*0.6);
+  ctx.lineTo(-S*0.12, monoBotY - S*0.75);
+  ctx.stroke();
+  ctx.restore();
+  // ─── PEAK GLOW — pulsing aura at the top ───
+  const peakPulse = 0.7 + Math.sin(now/400)*0.3;
+  ctx.shadowColor = veilRed;
+  ctx.shadowBlur = 50 * peakPulse;
+  ctx.fillStyle = `rgba(255,80,80,${0.3 * peakPulse})`;
+  ctx.beginPath();
+  ctx.arc(0, monoTopY + S*0.1, S*0.12, 0, Math.PI*2);
+  ctx.fill();
+  // Hot core
+  ctx.fillStyle = `rgba(255,220,200,${0.7 * peakPulse})`;
+  ctx.beginPath();
+  ctx.arc(0, monoTopY + S*0.1, S*0.04, 0, Math.PI*2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  // ─── OBSIDIAN SHARDS around the base ───
+  for(let s2=0; s2<5; s2++){
+    const sang = (s2/5)*Math.PI*2 + 0.4;
+    const sdist = S*0.35 + ((s2*1.37)%1)*S*0.1;
+    const sx = Math.cos(sang)*sdist;
+    const sy = Math.sin(sang)*sdist*0.4 + S*0.35;
+    const ss = S*(0.06+((s2*2.13)%1)*0.04);
+    ctx.fillStyle = obsidian;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy-ss);
+    ctx.lineTo(sx+ss*0.5, sy);
+    ctx.lineTo(sx, sy+ss*0.3);
+    ctx.lineTo(sx-ss*0.5, sy);
+    ctx.closePath();
+    ctx.fill();
+    // Highlight edge
+    ctx.strokeStyle = obsidianHighlight;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy-ss);
+    ctx.lineTo(sx-ss*0.5, sy);
+    ctx.stroke();
+  }
 }
 
 function drawProp(p,now){
@@ -2920,6 +3880,372 @@ function drawProp(p,now){
       ctx.globalAlpha=1;
       break;
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    // NEW PROP TYPES — added for zone density/variety overhaul
+    // ═══════════════════════════════════════════════════════════════
+
+    case 'tallDeadTree':{
+      // Towering withered tree — 2x taller than deadTree, more branching,
+      // gnarled limbs reaching up like skeleton fingers against the sky.
+      // Adds vertical variety the zones desperately need.
+      const trunk='#1a0f06';
+      const trunkLight='#3a2818';
+      const branch='#2a1a0c';
+      ctx.fillStyle='rgba(0,0,0,0.55)';
+      ctx.beginPath();ctx.ellipse(s*.08,s*.9,s*.45,s*.15,0,0,Math.PI*2);ctx.fill();
+      const sway=Math.sin(now/2200+seed*0.008)*3;
+      // TRUNK — tall, slightly crooked, tapers toward top
+      const trunkBot=s*0.85, trunkMid=-s*0.2, trunkTop=-s*1.4;
+      ctx.strokeStyle=trunk;ctx.lineWidth=s*.14;ctx.lineCap='round';
+      ctx.beginPath();
+      ctx.moveTo(0, trunkBot);
+      ctx.bezierCurveTo(sway*0.6, s*0.1, sway*-0.4, trunkMid, sway*0.3, trunkTop);
+      ctx.stroke();
+      // Trunk lit highlight
+      ctx.strokeStyle=trunkLight;ctx.lineWidth=s*.04;
+      ctx.beginPath();
+      ctx.moveTo(-s*0.05, trunkBot-s*0.1);
+      ctx.bezierCurveTo(sway*0.6-s*0.05, s*0.1, sway*-0.4-s*0.06, trunkMid, sway*0.3-s*0.06, trunkTop);
+      ctx.stroke();
+      // MAJOR BRANCHES — 4-5 large branches reaching up and outward
+      const bbCount=4+Math.floor(rngF(seed)*2);
+      for(let i=0;i<bbCount;i++){
+        const bt=rngF(seed+i*11); // branching point: 0=top, 1=middle
+        const by=trunkTop + bt*(trunkMid-trunkTop);
+        const bside=i%2===0?1:-1;
+        const bAngle=bside*(0.4+rngF(seed+i*13)*0.5);
+        const bLen=s*(0.45+rngF(seed+i*17)*0.3);
+        const bx1=sway*0.3 + (bt*0.3)*sway*0.5; // branch origin on trunk
+        const bx2=bx1 + Math.sin(bAngle)*bLen;
+        const by2=by - Math.cos(bAngle)*bLen*0.8; // branches go UP
+        ctx.strokeStyle=branch;ctx.lineWidth=s*0.06;
+        ctx.beginPath();
+        ctx.moveTo(bx1, by);
+        ctx.quadraticCurveTo((bx1+bx2)/2 + bside*s*0.08, (by+by2)/2, bx2, by2);
+        ctx.stroke();
+        // Sub-branches (twigs)
+        for(let j=0;j<3;j++){
+          const tt=0.5+rngF(seed+i*19+j*7)*0.5;
+          const tx=bx1 + (bx2-bx1)*tt;
+          const ty=by + (by2-by)*tt;
+          const tAng=bAngle + (rngF(seed+i*23+j*11)-0.5)*0.8;
+          const tLen=s*(0.12+rngF(seed+i*29+j)*0.15);
+          const tx2=tx + Math.sin(tAng)*tLen;
+          const ty2=ty - Math.cos(tAng)*tLen*0.7;
+          ctx.strokeStyle=branch;ctx.lineWidth=s*0.025;
+          ctx.beginPath();
+          ctx.moveTo(tx, ty);
+          ctx.lineTo(tx2, ty2);
+          ctx.stroke();
+        }
+      }
+      // Top crown — a cluster of bare finger-like twigs
+      for(let i=0;i<5;i++){
+        const a=-Math.PI/2 + (i-2)*0.25 + rngF(seed+i*31)*0.2;
+        const l=s*(0.2+rngF(seed+i*37)*0.2);
+        const tx=sway*0.3;
+        const ty=trunkTop;
+        ctx.strokeStyle=branch;ctx.lineWidth=s*0.022;
+        ctx.beginPath();
+        ctx.moveTo(tx, ty);
+        ctx.lineTo(tx + Math.cos(a)*l, ty + Math.sin(a)*l*0.9);
+        ctx.stroke();
+      }
+      break;
+    }
+
+    case 'standingStone':{
+      // Tall monolith with glowing runes — mysterious, atmospheric,
+      // zone-agnostic landmark. Taller than the character, should draw the eye.
+      const stone='#2a2418';
+      const stoneShadow='#0e0a06';
+      const stoneMid='#1f1a10';
+      const stoneLight='#42362a';
+      // Pick rune glow color per zone
+      let runeColor='#c084fc', runeGlow='rgba(192,132,252,';
+      if(curZone && curZone.id==='spire'){runeColor='#ff4444'; runeGlow='rgba(255,70,70,';}
+      else if(curZone && curZone.id==='mire'){runeColor='#34d399'; runeGlow='rgba(52,211,153,';}
+      else if(curZone && curZone.id==='crypts'){runeColor='#d97706'; runeGlow='rgba(217,119,6,';}
+      // Ground shadow
+      ctx.fillStyle='rgba(0,0,0,0.6)';
+      ctx.beginPath();ctx.ellipse(s*.05,s*.92,s*.4,s*.14,0,0,Math.PI*2);ctx.fill();
+      // Monolith silhouette — vertical rectangle with tapered irregular top
+      const w=s*0.28, halfW=w/2;
+      const topY=-s*1.2, botY=s*0.88;
+      const tapeAmt=rngF(seed)*s*0.08;
+      const topJag1=topY+rngF(seed+1)*s*0.1;
+      const topJag2=topY+rngF(seed+2)*s*0.08;
+      const pathPts=[
+        {x:-halfW, y:botY},
+        {x:-halfW, y:topY+s*0.4},
+        {x:-halfW+tapeAmt, y:topJag1},
+        {x:halfW-tapeAmt, y:topJag2},
+        {x:halfW, y:topY+s*0.5},
+        {x:halfW, y:botY},
+      ];
+      // Shadow offset layer
+      ctx.fillStyle=stoneShadow;
+      ctx.beginPath();
+      pathPts.forEach((pt,idx)=>{
+        const x=pt.x+s*0.05, y=pt.y+s*0.04;
+        if(idx===0)ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      });
+      ctx.closePath();ctx.fill();
+      // Mid body
+      ctx.fillStyle=stoneMid;
+      ctx.beginPath();
+      pathPts.forEach((pt,idx)=>{
+        if(idx===0)ctx.moveTo(pt.x,pt.y); else ctx.lineTo(pt.x,pt.y);
+      });
+      ctx.closePath();ctx.fill();
+      // Main
+      ctx.fillStyle=stone;
+      ctx.beginPath();
+      pathPts.forEach((pt,idx)=>{
+        const x=pt.x*0.9, y=pt.y;
+        if(idx===0)ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      });
+      ctx.closePath();ctx.fill();
+      // Lit left edge
+      ctx.fillStyle=stoneLight;
+      ctx.fillRect(-halfW*0.82, topY+s*0.5, s*0.04, botY-(topY+s*0.5));
+      // Outline
+      ctx.strokeStyle=stoneShadow;
+      ctx.lineWidth=1.1;
+      ctx.beginPath();
+      pathPts.forEach((pt,idx)=>{
+        if(idx===0)ctx.moveTo(pt.x,pt.y); else ctx.lineTo(pt.x,pt.y);
+      });
+      ctx.closePath();ctx.stroke();
+      // RUNES — glowing etched symbols pulsing softly
+      const runePulse=0.6+Math.sin(now/900+seed)*0.4;
+      ctx.shadowColor=runeColor;
+      ctx.shadowBlur=10*runePulse;
+      ctx.strokeStyle=runeGlow+(0.5+runePulse*0.4)+')';
+      ctx.lineWidth=1.3;
+      // Rune 1: triangle with inscribed line
+      const r1y=topY+s*0.85;
+      ctx.beginPath();
+      ctx.moveTo(-s*0.06, r1y-s*0.06);
+      ctx.lineTo(s*0.06, r1y-s*0.06);
+      ctx.lineTo(0, r1y+s*0.04);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.beginPath();ctx.moveTo(0, r1y-s*0.06); ctx.lineTo(0, r1y+s*0.04);ctx.stroke();
+      // Rune 2: circle with cross
+      const r2y=r1y+s*0.3;
+      ctx.beginPath();ctx.arc(0, r2y, s*0.05, 0, Math.PI*2);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(-s*0.05, r2y);ctx.lineTo(s*0.05, r2y);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(0, r2y-s*0.05);ctx.lineTo(0, r2y+s*0.05);ctx.stroke();
+      // Rune 3: angular zigzag
+      const r3y=r2y+s*0.28;
+      ctx.beginPath();
+      ctx.moveTo(-s*0.05, r3y-s*0.04);
+      ctx.lineTo(0, r3y);
+      ctx.lineTo(-s*0.02, r3y+s*0.04);
+      ctx.lineTo(s*0.05, r3y+s*0.02);
+      ctx.stroke();
+      ctx.shadowBlur=0;
+      break;
+    }
+
+    case 'brokenStatue':{
+      // Ruined angel/warrior statue — headless, wings broken, kneeling on plinth.
+      // Vertical element that reads as narrative — "once revered, now fallen."
+      const stone='#242018';
+      const stoneShadow='#0e0b06';
+      const stoneMid='#1a1710';
+      const stoneLight='#3a342a';
+      // Ground shadow
+      ctx.fillStyle='rgba(0,0,0,0.55)';
+      ctx.beginPath();ctx.ellipse(s*.06,s*.85,s*.55,s*.18,0,0,Math.PI*2);ctx.fill();
+      // PLINTH (stepped base)
+      ctx.fillStyle=stoneShadow;
+      ctx.fillRect(-s*0.42, s*0.62, s*0.84, s*0.28);
+      ctx.fillStyle=stone;
+      ctx.fillRect(-s*0.38, s*0.55, s*0.76, s*0.22);
+      ctx.fillStyle=stoneLight;
+      ctx.fillRect(-s*0.36, s*0.54, s*0.72, s*0.03);
+      // TORSO — chunky, robed silhouette
+      const torsoTop=-s*0.3;
+      const torsoBot=s*0.55;
+      // Shadow
+      ctx.fillStyle=stoneShadow;
+      ctx.beginPath();
+      ctx.moveTo(-s*0.22, torsoBot);
+      ctx.lineTo(-s*0.26, torsoTop+s*0.2);
+      ctx.bezierCurveTo(-s*0.2, torsoTop, -s*0.08, torsoTop-s*0.05, 0, torsoTop-s*0.08);
+      ctx.bezierCurveTo(s*0.08, torsoTop-s*0.05, s*0.2, torsoTop, s*0.26, torsoTop+s*0.2);
+      ctx.lineTo(s*0.22, torsoBot);
+      ctx.closePath();
+      ctx.translate(s*0.04, s*0.03); ctx.fill(); ctx.translate(-s*0.04, -s*0.03);
+      // Main torso
+      ctx.fillStyle=stone;
+      ctx.beginPath();
+      ctx.moveTo(-s*0.22, torsoBot);
+      ctx.lineTo(-s*0.26, torsoTop+s*0.2);
+      ctx.bezierCurveTo(-s*0.2, torsoTop, -s*0.08, torsoTop-s*0.05, 0, torsoTop-s*0.08);
+      ctx.bezierCurveTo(s*0.08, torsoTop-s*0.05, s*0.2, torsoTop, s*0.26, torsoTop+s*0.2);
+      ctx.lineTo(s*0.22, torsoBot);
+      ctx.closePath();
+      ctx.fill();
+      // Lit left edge of torso
+      ctx.strokeStyle=stoneLight;
+      ctx.lineWidth=1;
+      ctx.beginPath();
+      ctx.moveTo(-s*0.22, torsoBot);
+      ctx.lineTo(-s*0.26, torsoTop+s*0.2);
+      ctx.bezierCurveTo(-s*0.2, torsoTop, -s*0.08, torsoTop-s*0.05, 0, torsoTop-s*0.08);
+      ctx.stroke();
+      // Robe folds
+      ctx.strokeStyle=stoneShadow;
+      ctx.lineWidth=0.8;
+      ctx.beginPath();ctx.moveTo(-s*0.08, torsoTop+s*0.1);ctx.lineTo(-s*0.06, torsoBot-s*0.05);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(s*0.08, torsoTop+s*0.1);ctx.lineTo(s*0.06, torsoBot-s*0.05);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(0, torsoTop);ctx.lineTo(0, torsoBot);ctx.stroke();
+      // NECK STUMP (head broken off) — jagged break
+      ctx.fillStyle=stoneShadow;
+      ctx.beginPath();
+      ctx.moveTo(-s*0.06, torsoTop-s*0.06);
+      ctx.lineTo(-s*0.04, torsoTop-s*0.1);
+      ctx.lineTo(0, torsoTop-s*0.08);
+      ctx.lineTo(s*0.03, torsoTop-s*0.12);
+      ctx.lineTo(s*0.06, torsoTop-s*0.07);
+      ctx.lineTo(s*0.07, torsoTop);
+      ctx.lineTo(-s*0.07, torsoTop);
+      ctx.closePath();
+      ctx.fill();
+      // BROKEN WING — one wing remains, partially shattered
+      ctx.fillStyle=stone;
+      ctx.beginPath();
+      ctx.moveTo(-s*0.18, torsoTop+s*0.18);
+      ctx.quadraticCurveTo(-s*0.45, torsoTop-s*0.1, -s*0.38, torsoTop-s*0.3);
+      ctx.lineTo(-s*0.32, torsoTop-s*0.22);
+      ctx.lineTo(-s*0.3, torsoTop-s*0.05);
+      ctx.quadraticCurveTo(-s*0.38, torsoTop+s*0.1, -s*0.22, torsoTop+s*0.2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle=stoneShadow;
+      ctx.lineWidth=1;
+      ctx.stroke();
+      // Feather detail lines on wing
+      ctx.strokeStyle=stoneShadow;
+      ctx.lineWidth=0.6;
+      for(let f=0;f<4;f++){
+        ctx.beginPath();
+        ctx.moveTo(-s*0.2-f*s*0.04, torsoTop+s*0.12);
+        ctx.lineTo(-s*0.32-f*s*0.03, torsoTop-s*0.12+f*s*0.05);
+        ctx.stroke();
+      }
+      // Small rubble at the base (head fragment?)
+      ctx.fillStyle=stoneMid;
+      ctx.beginPath();ctx.ellipse(s*0.3, s*0.7, s*0.08, s*0.05, 0.3, 0, Math.PI*2);ctx.fill();
+      ctx.fillStyle=stoneShadow;
+      ctx.beginPath();ctx.arc(s*0.3, s*0.7, s*0.02, 0, Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.arc(s*0.34, s*0.69, s*0.018, 0, Math.PI*2);ctx.fill();
+      break;
+    }
+
+    case 'fireBrazier':{
+      // Bronze/iron brazier with burning pyre — animated flames, heat haze,
+      // light halo. Provides a light source and dynamic element to static zones.
+      const metal='#2a1810';
+      const metalLight='#5a3820';
+      const metalDark='#100804';
+      const fireInner='#fff5c0';
+      const fireMid='#ffa020';
+      const fireOuter='#ff5010';
+      // Ground shadow
+      ctx.fillStyle='rgba(0,0,0,0.6)';
+      ctx.beginPath();ctx.ellipse(0,s*.42,s*.35,s*.14,0,0,Math.PI*2);ctx.fill();
+      // Light halo on ground — big glow radiating from brazier
+      const flicker=0.85+Math.sin(now/90+seed)*0.12+Math.sin(now/47+seed*2)*0.06;
+      const haloGrad=ctx.createRadialGradient(0,s*0.05,0,0,s*0.05,s*0.8);
+      haloGrad.addColorStop(0, `rgba(255,180,80,${0.28*flicker})`);
+      haloGrad.addColorStop(0.5, `rgba(255,120,40,${0.14*flicker})`);
+      haloGrad.addColorStop(1, 'rgba(255,80,20,0)');
+      ctx.fillStyle=haloGrad;
+      ctx.beginPath();ctx.ellipse(0, s*0.1, s*0.8, s*0.35, 0, 0, Math.PI*2);ctx.fill();
+      // TRIPOD LEGS — 3 iron legs
+      ctx.strokeStyle=metal;
+      ctx.lineWidth=s*0.045;
+      ctx.lineCap='round';
+      for(let leg=0;leg<3;leg++){
+        const la = -Math.PI/2 + (leg-1)*0.7;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(la)*s*0.25, s*0.38);
+        ctx.lineTo(Math.cos(la)*s*0.12, -s*0.05);
+        ctx.stroke();
+      }
+      // BOWL — wide iron basin
+      ctx.fillStyle=metalDark;
+      ctx.beginPath();
+      ctx.ellipse(0, s*0.05, s*0.32, s*0.13, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle=metal;
+      ctx.beginPath();
+      ctx.ellipse(0, s*0.02, s*0.3, s*0.12, 0, 0, Math.PI*2);
+      ctx.fill();
+      // Bowl rim highlight
+      ctx.strokeStyle=metalLight;
+      ctx.lineWidth=1.3;
+      ctx.beginPath();ctx.ellipse(0, s*0.02, s*0.3, s*0.12, 0, 0, Math.PI, true);ctx.stroke();
+      // FLAMES — layered, animated
+      ctx.shadowColor=fireOuter;
+      ctx.shadowBlur=20*flicker;
+      // Outer flame (biggest)
+      ctx.fillStyle=fireOuter;
+      ctx.globalAlpha=0.75*flicker;
+      ctx.beginPath();
+      const fh=s*0.45*flicker;
+      ctx.moveTo(-s*0.2, s*0.02);
+      ctx.quadraticCurveTo(-s*0.22+Math.sin(now/180+seed)*4, -s*0.15, -s*0.1, -s*0.25);
+      ctx.quadraticCurveTo(-s*0.04+Math.sin(now/120)*3, -fh*0.7, 0, -fh);
+      ctx.quadraticCurveTo(s*0.04+Math.cos(now/140)*3, -fh*0.7, s*0.1, -s*0.25);
+      ctx.quadraticCurveTo(s*0.22+Math.cos(now/180+seed)*4, -s*0.15, s*0.2, s*0.02);
+      ctx.closePath();
+      ctx.fill();
+      // Middle flame
+      ctx.fillStyle=fireMid;
+      ctx.globalAlpha=0.85*flicker;
+      const fh2=fh*0.75;
+      ctx.beginPath();
+      ctx.moveTo(-s*0.14, s*0.02);
+      ctx.quadraticCurveTo(-s*0.12+Math.sin(now/140)*2, -s*0.1, -s*0.06, -s*0.18);
+      ctx.quadraticCurveTo(-s*0.02+Math.sin(now/100)*2, -fh2*0.7, 0, -fh2);
+      ctx.quadraticCurveTo(s*0.02+Math.cos(now/110)*2, -fh2*0.7, s*0.06, -s*0.18);
+      ctx.quadraticCurveTo(s*0.12+Math.cos(now/140)*2, -s*0.1, s*0.14, s*0.02);
+      ctx.closePath();
+      ctx.fill();
+      // Inner hot core
+      ctx.fillStyle=fireInner;
+      ctx.globalAlpha=0.9*flicker;
+      const fh3=fh*0.5;
+      ctx.beginPath();
+      ctx.moveTo(-s*0.08, s*0.02);
+      ctx.quadraticCurveTo(-s*0.05, -s*0.08, -s*0.02, -s*0.12);
+      ctx.quadraticCurveTo(0, -fh3, 0, -fh3);
+      ctx.quadraticCurveTo(s*0.02, -s*0.12, s*0.05, -s*0.08);
+      ctx.quadraticCurveTo(s*0.08, s*0, s*0.08, s*0.02);
+      ctx.closePath();
+      ctx.fill();
+      ctx.globalAlpha=1;
+      ctx.shadowBlur=0;
+      // Embers rising (simple particles)
+      ctx.fillStyle=fireMid;
+      for(let e=0;e<3;e++){
+        const et=(now/30+seed+e*137) % 100 / 100;
+        const ey=-s*0.2 - et*s*0.8;
+        const ex=Math.sin(now/200+e*2+seed)*s*0.1;
+        const ea=(1-et)*0.7;
+        ctx.globalAlpha=ea;
+        ctx.beginPath();ctx.arc(ex, ey, s*0.025*(1-et*0.5), 0, Math.PI*2);ctx.fill();
+      }
+      ctx.globalAlpha=1;
+      break;
+    }
+
   }
   ctx.restore();
 }
@@ -3443,10 +4769,150 @@ function drawWorld(now){
     fg.addColorStop(0,z.fogC+(.04+Math.sin(now/2200+i)*.022)+')');fg.addColorStop(1,z.fogC+'0)');
     ctx.fillStyle=fg;ctx.beginPath();ctx.ellipse(fx,fy,fw,fw*.28,0,0,Math.PI*2);ctx.fill();
   }
-  // Zone ambient FX
-  if(z.ashFx){for(let i=0;i<8;i++){ctx.globalAlpha=.14+Math.sin(now/1500+i)*.07;ctx.fillStyle='rgba(200,150,255,0.5)';ctx.beginPath();ctx.arc((camX+Math.sin(now/4000+i*1.7)*(W*.4)+WORLD_W)%WORLD_W,(camY-H*.3+Math.sin(now/3500+i)*(H*.4)+WORLD_H)%WORLD_H,1.2+Math.sin(now/800+i)*.5,0,Math.PI*2);ctx.fill();}ctx.globalAlpha=1;}
-  if(z.lavaFx){for(let i=0;i<4;i++){ctx.globalAlpha=(.5+Math.sin(now/300+i)*.3)*.055;const hg=ctx.createRadialGradient((camX+(-2+i)*W*.28+WORLD_W)%WORLD_W,camY+H*.3,0,(camX+(-2+i)*W*.28+WORLD_W)%WORLD_W,camY+H*.3,150);hg.addColorStop(0,'rgba(255,80,0,0.5)');hg.addColorStop(1,'rgba(255,80,0,0)');ctx.fillStyle=hg;ctx.beginPath();ctx.arc((camX+(-2+i)*W*.28+WORLD_W)%WORLD_W,camY+H*.3,150,0,Math.PI*2);ctx.fill();}ctx.globalAlpha=1;}
-  if(z.toxicFx){for(let i=0;i<6;i++){ctx.globalAlpha=.2+Math.sin(now/600+i)*.1;ctx.fillStyle='rgba(52,211,153,0.5)';ctx.beginPath();ctx.arc((camX+(i-.5)*W*.3+WORLD_W)%WORLD_W,((camY+H*.3-((now/2000+i)%1)*H*.8)+WORLD_H)%WORLD_H,2+Math.sin(now/400+i),0,Math.PI*2);ctx.fill();}ctx.globalAlpha=1;}
+  // Zone ambient FX — beefed up for atmospheric density
+  // ASHEN WASTES: drifting ash motes + god-ray shafts through the purple haze
+  if(z.ashFx){
+    // Drifting ash motes — tripled count and slower drift for more atmosphere
+    for(let i=0;i<28;i++){
+      const px=(camX+Math.sin(now/4000+i*1.7)*(W*.5)+WORLD_W)%WORLD_W;
+      const py=(camY-H*.4+Math.sin(now/3500+i*0.9)*(H*.5)+WORLD_H)%WORLD_H;
+      ctx.globalAlpha=.18+Math.sin(now/1500+i)*.1;
+      ctx.fillStyle='rgba(200,150,255,0.55)';
+      ctx.beginPath();ctx.arc(px,py,1.4+Math.sin(now/800+i)*.6,0,Math.PI*2);ctx.fill();
+    }
+    // Larger slower dust particles closer to ground
+    for(let i=0;i<12;i++){
+      const px=(camX+Math.sin(now/6000+i*2.3)*(W*.6)+WORLD_W)%WORLD_W;
+      const py=(camY+Math.cos(now/5500+i*1.4)*(H*.45)+WORLD_H)%WORLD_H;
+      ctx.globalAlpha=.08+Math.sin(now/2200+i)*.04;
+      ctx.fillStyle='rgba(180,140,220,0.5)';
+      ctx.beginPath();ctx.arc(px,py,2.8+Math.sin(now/1200+i)*1,0,Math.PI*2);ctx.fill();
+    }
+    // God-ray light shafts — diagonal atmospheric beams
+    ctx.globalAlpha=0.035;
+    for(let r=0;r<3;r++){
+      const rx=(camX - W*0.4 + r*W*0.35 + WORLD_W)%WORLD_W;
+      const ry=camY - H*0.6;
+      const rg=ctx.createLinearGradient(rx, ry, rx+W*0.3, ry+H*1.3);
+      rg.addColorStop(0, 'rgba(230,200,255,0.35)');
+      rg.addColorStop(0.5, 'rgba(200,160,255,0.18)');
+      rg.addColorStop(1, 'rgba(180,140,250,0)');
+      ctx.fillStyle=rg;
+      ctx.beginPath();
+      ctx.moveTo(rx, ry);
+      ctx.lineTo(rx+W*0.08, ry);
+      ctx.lineTo(rx+W*0.38, ry+H*1.3);
+      ctx.lineTo(rx+W*0.3, ry+H*1.3);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.globalAlpha=1;
+  }
+  // BONE CRYPTS: drifting bone dust motes + amber haze shafts
+  if(z.boneDust){
+    // Amber/gold dust particles — drifting bone powder
+    for(let i=0;i<30;i++){
+      const px=(camX+Math.sin(now/3800+i*1.8)*(W*.5)+WORLD_W)%WORLD_W;
+      const py=(camY-H*.35+Math.sin(now/3200+i*1.1)*(H*.5)+WORLD_H)%WORLD_H;
+      ctx.globalAlpha=.2+Math.sin(now/1400+i)*.1;
+      ctx.fillStyle='rgba(255,210,140,0.6)';
+      ctx.beginPath();ctx.arc(px,py,1.3+Math.sin(now/700+i)*.5,0,Math.PI*2);ctx.fill();
+    }
+    // Larger settling dust
+    for(let i=0;i<14;i++){
+      const px=(camX+Math.sin(now/5500+i*2.1)*(W*.55)+WORLD_W)%WORLD_W;
+      const py=(camY+Math.cos(now/5000+i*1.3)*(H*.45)+WORLD_H)%WORLD_H;
+      ctx.globalAlpha=.09+Math.sin(now/2000+i)*.04;
+      ctx.fillStyle='rgba(220,170,90,0.5)';
+      ctx.beginPath();ctx.arc(px,py,2.5+Math.sin(now/1100+i)*1,0,Math.PI*2);ctx.fill();
+    }
+    // Warm amber god-rays
+    ctx.globalAlpha=0.045;
+    for(let r=0;r<3;r++){
+      const rx=(camX - W*0.3 + r*W*0.4 + WORLD_W)%WORLD_W;
+      const ry=camY - H*0.6;
+      const rg=ctx.createLinearGradient(rx, ry, rx+W*0.3, ry+H*1.3);
+      rg.addColorStop(0, 'rgba(255,210,140,0.4)');
+      rg.addColorStop(0.5, 'rgba(230,170,100,0.2)');
+      rg.addColorStop(1, 'rgba(200,140,60,0)');
+      ctx.fillStyle=rg;
+      ctx.beginPath();
+      ctx.moveTo(rx, ry);
+      ctx.lineTo(rx+W*0.08, ry);
+      ctx.lineTo(rx+W*0.38, ry+H*1.3);
+      ctx.lineTo(rx+W*0.3, ry+H*1.3);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.globalAlpha=1;
+  }
+  // VEIL'S SPIRE: heat haze + larger ember glows
+  if(z.lavaFx){
+    // More heat glow pools — doubled from 4 to 8
+    for(let i=0;i<8;i++){
+      ctx.globalAlpha=(.5+Math.sin(now/300+i)*.3)*.06;
+      const px=(camX+(-3.5+i)*W*.22+WORLD_W)%WORLD_W;
+      const py=camY+Math.sin(i+now/800)*H*0.35;
+      const hg=ctx.createRadialGradient(px,py,0,px,py,170);
+      hg.addColorStop(0,'rgba(255,80,0,0.55)');
+      hg.addColorStop(0.6,'rgba(220,50,0,0.25)');
+      hg.addColorStop(1,'rgba(255,80,0,0)');
+      ctx.fillStyle=hg;
+      ctx.beginPath();ctx.arc(px,py,170,0,Math.PI*2);ctx.fill();
+    }
+    // Rising embers — orange sparks floating upward
+    for(let i=0;i<24;i++){
+      const lifeT=(now/40+i*157)%100/100;
+      const px=(camX+Math.sin(i*3.1+now/4000)*(W*.5)+WORLD_W)%WORLD_W;
+      const baseY=camY+H*0.4;
+      const py=(baseY - lifeT*H*0.9 + WORLD_H)%WORLD_H;
+      ctx.globalAlpha=(1-lifeT)*0.6;
+      ctx.fillStyle=i%3===0 ? 'rgba(255,240,180,0.8)' : 'rgba(255,120,40,0.7)';
+      ctx.beginPath();ctx.arc(px,py,1.5+(1-lifeT)*1.2,0,Math.PI*2);ctx.fill();
+    }
+    ctx.globalAlpha=1;
+  }
+  // ABYSSAL MIRE: more toxic spores + green glow haze
+  if(z.toxicFx){
+    // Rising spores — tripled from 6 to 20
+    for(let i=0;i<20;i++){
+      ctx.globalAlpha=.24+Math.sin(now/600+i)*.12;
+      ctx.fillStyle='rgba(52,211,153,0.6)';
+      const px=(camX+(i-9.5)*W*.12+WORLD_W)%WORLD_W;
+      const py=((camY+H*.3-((now/2000+i*0.3)%1)*H*.9)+WORLD_H)%WORLD_H;
+      ctx.beginPath();ctx.arc(px,py,2.2+Math.sin(now/400+i)*0.8,0,Math.PI*2);ctx.fill();
+    }
+    // Swamp fog patches — low-lying mist
+    for(let i=0;i<6;i++){
+      ctx.globalAlpha=0.08+Math.sin(now/3000+i)*0.03;
+      const px=(camX+(i-2.5)*W*.25+WORLD_W)%WORLD_W;
+      const py=camY+H*0.2+Math.sin(now/2500+i)*H*0.1;
+      const fg=ctx.createRadialGradient(px,py,0,px,py,220);
+      fg.addColorStop(0,'rgba(140,220,160,0.5)');
+      fg.addColorStop(1,'rgba(100,180,130,0)');
+      ctx.fillStyle=fg;
+      ctx.beginPath();ctx.ellipse(px,py,220,110,0,0,Math.PI*2);ctx.fill();
+    }
+    // Green god-rays (sunlight filtered through canopy)
+    ctx.globalAlpha=0.04;
+    for(let r=0;r<3;r++){
+      const rx=(camX - W*0.3 + r*W*0.4 + WORLD_W)%WORLD_W;
+      const ry=camY - H*0.6;
+      const rg=ctx.createLinearGradient(rx, ry, rx+W*0.3, ry+H*1.3);
+      rg.addColorStop(0, 'rgba(180,255,200,0.35)');
+      rg.addColorStop(0.5, 'rgba(100,220,150,0.2)');
+      rg.addColorStop(1, 'rgba(60,180,120,0)');
+      ctx.fillStyle=rg;
+      ctx.beginPath();
+      ctx.moveTo(rx, ry);
+      ctx.lineTo(rx+W*0.08, ry);
+      ctx.lineTo(rx+W*0.38, ry+H*1.3);
+      ctx.lineTo(rx+W*0.3, ry+H*1.3);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.globalAlpha=1;
+  }
   // Edge vignette — darkens the world edges for depth
   const ev=ctx.createRadialGradient(WORLD_W/2,WORLD_H/2,WORLD_W*.32,WORLD_W/2,WORLD_H/2,WORLD_W*.76);ev.addColorStop(0,'rgba(0,0,0,0)');ev.addColorStop(1,z.edgeC);ctx.fillStyle=ev;ctx.fillRect(0,0,WORLD_W,WORLD_H);
   // Props (trees, rocks, pillars, etc) drawn last so they're on top of ground
@@ -4778,6 +6244,8 @@ function respawn(){player.hp=player.maxHp;player.isDead=false;player.iframes=300
 // ═══════ UPDATE ═════════════════════════════════════════
 function update(dt,now){
   if(player.isDead)return;
+  // Check for chest auto-loot (works in AFK and manual play)
+  if(typeof updateWorldChests === 'function') updateWorldChests(now);
   let ix=0,iy=0;
   if(keys['ArrowLeft']||keys['a']||keys['A'])ix=-1;
   if(keys['ArrowRight']||keys['d']||keys['D'])ix=1;
