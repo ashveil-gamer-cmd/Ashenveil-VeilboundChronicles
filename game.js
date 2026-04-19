@@ -1867,10 +1867,73 @@ function drawProp(p,now){
   const z=getActiveTheme(),s=p.sz,seed=p.seed;
   ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.rot);
   switch(p.type){
-    case 'ashStone':
-      ctx.fillStyle='#1a1030';ctx.strokeStyle='#2d1a50';ctx.lineWidth=1;
-      ctx.beginPath();ctx.ellipse(0,0,s*.65,s*.38,0,0,Math.PI*2);ctx.fill();ctx.stroke();
-      ctx.fillStyle='#110820';ctx.beginPath();ctx.ellipse(-s*.14,-s*.05,s*.32,s*.19,0.4,0,Math.PI*2);ctx.fill();break;
+    case 'ashStone':{
+      // Purple-gray ashen stone — angular silhouette with layered tones
+      const stone='#2a1f3a';
+      const stoneDark='#120a22';
+      const stoneMid='#1f1530';
+      const stoneLight='#3d2a52';
+      const stoneCrack='#080416';
+      // Ground shadow
+      ctx.fillStyle='rgba(0,0,0,0.5)';
+      ctx.beginPath();ctx.ellipse(s*.06,s*.2,s*.62,s*.14,0,0,Math.PI*2);ctx.fill();
+      // 6-8 vertex irregular silhouette
+      const verts=6+Math.floor(rngF(seed+5)*3);
+      const pts=[];
+      for(let v=0;v<verts;v++){
+        const a=(v/verts)*Math.PI*2+rngF(seed+v*11)*0.3;
+        const r=s*(0.5+rngF(seed+v*17)*0.26);
+        // Squashed flat — ashen stones are lower profile
+        pts.push({x:Math.cos(a)*r, y:Math.sin(a)*r*0.52});
+      }
+      // Layer 1: deep shadow
+      ctx.fillStyle=stoneDark;
+      ctx.beginPath();
+      pts.forEach((pt,idx)=>{
+        const x=pt.x+s*0.08, y=pt.y+s*0.12;
+        if(idx===0)ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      });
+      ctx.closePath();
+      ctx.fill();
+      // Layer 2: mid body
+      ctx.fillStyle=stoneMid;
+      ctx.beginPath();
+      pts.forEach((pt,idx)=>{
+        if(idx===0)ctx.moveTo(pt.x,pt.y); else ctx.lineTo(pt.x,pt.y);
+      });
+      ctx.closePath();
+      ctx.fill();
+      // Layer 3: main stone body
+      ctx.fillStyle=stone;
+      ctx.beginPath();
+      pts.forEach((pt,idx)=>{
+        const x=pt.x*0.94, y=pt.y*0.94 - s*0.02;
+        if(idx===0)ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      });
+      ctx.closePath();
+      ctx.fill();
+      // Layer 4: dark outline
+      ctx.strokeStyle=stoneCrack;
+      ctx.lineWidth=0.9;
+      ctx.stroke();
+      // Lit upper facet
+      const litPts=[];
+      pts.forEach(pt=>{
+        if(pt.y < 0 && pt.x < s*0.15){
+          litPts.push({x:pt.x*0.7 - s*0.06, y:pt.y*0.7 - s*0.04});
+        }
+      });
+      if(litPts.length >= 3){
+        ctx.fillStyle=stoneLight;
+        ctx.beginPath();
+        litPts.forEach((pt,idx)=>{
+          if(idx===0)ctx.moveTo(pt.x,pt.y); else ctx.lineTo(pt.x,pt.y);
+        });
+        ctx.closePath();
+        ctx.fill();
+      }
+      break;
+    }
     case 'ashArch':
       ctx.shadowColor='#c084fc';ctx.shadowBlur=8;ctx.strokeStyle='#2d1a5a';ctx.lineWidth=3.5;
       ctx.beginPath();ctx.arc(0,8,s*.42,Math.PI,0);ctx.stroke();ctx.lineWidth=5;
@@ -1910,10 +1973,91 @@ function drawProp(p,now){
       ctx.fillStyle='#140c2a';ctx.strokeStyle='#2a1545';ctx.lineWidth=1.5;
       ctx.fillRect(-s*.08,-s*.8,s*.16,s*1.6);ctx.strokeRect(-s*.08,-s*.8,s*.16,s*1.6);
       ctx.fillStyle='#0e0820';ctx.fillRect(-s*.12,-s*.85,s*.06,s*.12);ctx.fillRect(s*.04,-s*.82,s*.08,s*.1);break;
-    case 'bonePile':
-      ctx.strokeStyle='#3a3020';ctx.lineWidth=2;ctx.lineCap='round';
-      for(let i=0;i<5;i++){const a=rngF(seed+i)*Math.PI*2,bl=s*(.2+rngF(seed+i*3)*.32);ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(Math.cos(a)*bl,Math.sin(a)*bl);ctx.stroke();}
-      ctx.fillStyle='#2a2218';ctx.beginPath();ctx.arc(0,0,s*.12,0,Math.PI*2);ctx.fill();break;
+    case 'bonePile':{
+      // A pile of bones — long bones (with knobbed ends), skull, ribs.
+      // Reads as a real pile, not a spider silhouette.
+      const boneCol='#c8bca0';     // bleached bone
+      const boneDark='#7a6c4a';    // shadow side
+      const boneShadow='#3a3020';  // cast shadow
+      // Ground shadow
+      ctx.fillStyle='rgba(0,0,0,0.4)';
+      ctx.beginPath();ctx.ellipse(0,s*.15,s*.55,s*.18,0,0,Math.PI*2);ctx.fill();
+      // 2-3 long bones, each with knobbed ends (femur-style)
+      const boneCount=2+Math.floor(rngF(seed+1)%1*2);
+      for(let i=0;i<boneCount;i++){
+        const angle=rngF(seed+i*11)*Math.PI*2;
+        const len=s*(0.55+rngF(seed+i*13)*0.25);
+        const cx=Math.cos(angle+Math.PI/2)*s*0.1*(i-boneCount/2);
+        const cy=Math.sin(angle+Math.PI/2)*s*0.1*(i-boneCount/2) + s*0.05;
+        const x1=cx-Math.cos(angle)*len*0.5;
+        const y1=cy-Math.sin(angle)*len*0.5;
+        const x2=cx+Math.cos(angle)*len*0.5;
+        const y2=cy+Math.sin(angle)*len*0.5;
+        // Shaft shadow
+        ctx.strokeStyle=boneShadow;
+        ctx.lineWidth=s*0.11;
+        ctx.lineCap='round';
+        ctx.beginPath();
+        ctx.moveTo(x1+1,y1+1.5);
+        ctx.lineTo(x2+1,y2+1.5);
+        ctx.stroke();
+        // Shaft main body
+        ctx.strokeStyle=boneCol;
+        ctx.lineWidth=s*0.085;
+        ctx.beginPath();
+        ctx.moveTo(x1,y1);
+        ctx.lineTo(x2,y2);
+        ctx.stroke();
+        // Knobbed ends (epiphyses)
+        ctx.fillStyle=boneShadow;
+        ctx.beginPath();ctx.arc(x1+0.5,y1+0.8,s*0.085,0,Math.PI*2);ctx.fill();
+        ctx.beginPath();ctx.arc(x2+0.5,y2+0.8,s*0.085,0,Math.PI*2);ctx.fill();
+        ctx.fillStyle=boneCol;
+        ctx.beginPath();ctx.arc(x1,y1,s*0.07,0,Math.PI*2);ctx.fill();
+        ctx.beginPath();ctx.arc(x2,y2,s*0.07,0,Math.PI*2);ctx.fill();
+        // Darker socket detail on one end
+        ctx.fillStyle=boneDark;
+        ctx.beginPath();ctx.arc(x1,y1,s*0.025,0,Math.PI*2);ctx.fill();
+      }
+      // Skull — small, centered, partially buried
+      const skullX=rngF(seed+7)*s*0.12;
+      const skullY=s*0.02+rngF(seed+3)*s*0.05;
+      const skullR=s*0.15;
+      // Skull shadow
+      ctx.fillStyle=boneShadow;
+      ctx.beginPath();ctx.ellipse(skullX+1,skullY+1.5,skullR*1.05,skullR*0.82,0,0,Math.PI*2);ctx.fill();
+      // Skull dome
+      ctx.fillStyle=boneCol;
+      ctx.beginPath();ctx.ellipse(skullX,skullY,skullR,skullR*0.78,0,0,Math.PI*2);ctx.fill();
+      // Eye sockets
+      ctx.fillStyle='#0c0805';
+      ctx.beginPath();ctx.ellipse(skullX-skullR*0.34,skullY-skullR*0.05,skullR*0.22,skullR*0.28,0,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.ellipse(skullX+skullR*0.34,skullY-skullR*0.05,skullR*0.22,skullR*0.28,0,0,Math.PI*2);ctx.fill();
+      // Nasal cavity — small triangle
+      ctx.beginPath();
+      ctx.moveTo(skullX,skullY+skullR*0.1);
+      ctx.lineTo(skullX-skullR*0.1,skullY+skullR*0.28);
+      ctx.lineTo(skullX+skullR*0.1,skullY+skullR*0.28);
+      ctx.closePath();ctx.fill();
+      // Teeth line
+      ctx.strokeStyle=boneDark;
+      ctx.lineWidth=0.8;
+      ctx.beginPath();ctx.moveTo(skullX-skullR*0.3,skullY+skullR*0.42);ctx.lineTo(skullX+skullR*0.3,skullY+skullR*0.42);ctx.stroke();
+      // Rib fragments scattered — small curves
+      ctx.strokeStyle=boneCol;
+      ctx.lineWidth=s*0.03;
+      ctx.lineCap='round';
+      for(let r=0;r<2;r++){
+        const ra=rngF(seed+r*19+101)*Math.PI*2;
+        const rd=s*(0.32+rngF(seed+r*23)*0.15);
+        const rx=Math.cos(ra)*rd;
+        const ry=Math.sin(ra)*rd*0.5+s*0.08;
+        ctx.beginPath();
+        ctx.arc(rx,ry,s*0.11,ra-0.4,ra+0.4);
+        ctx.stroke();
+      }
+      break;
+    }
     case 'cryptPillar':
       ctx.fillStyle='#14100a';ctx.strokeStyle='#2a2010';ctx.lineWidth=1.5;
       ctx.fillRect(-s*.2,-s*.85,s*.4,s*1.7);ctx.strokeRect(-s*.2,-s*.85,s*.4,s*1.7);
@@ -2079,30 +2223,87 @@ function drawProp(p,now){
       break;
     }
     case 'rockCluster':{
-      // 3-5 gray stones clustered with shadows and highlights
+      // 3-5 angular stone clusters with proper rock silhouettes, not circles
+      // Each rock is a jagged polygon (6-8 vertices) with deterministic
+      // per-vertex variance giving natural stone shape.
       const baseGray='#4a4a52';
-      const shadowGray='#2a2a32';
-      const highlightGray='#6a6a72';
+      const shadowGray='#25252c';
+      const midGray='#3a3a42';
+      const highlightGray='#6a6a74';
+      const crackGray='#18181e';
       // Ground shadow pool
-      ctx.fillStyle='rgba(0,0,0,0.4)';
-      ctx.beginPath();ctx.ellipse(0,s*.05,s*.55,s*.18,0,0,Math.PI*2);ctx.fill();
-      // 3-5 rocks of varying sizes, deterministic by seed
+      ctx.fillStyle='rgba(0,0,0,0.45)';
+      ctx.beginPath();ctx.ellipse(0,s*.08,s*.58,s*.2,0,0,Math.PI*2);ctx.fill();
       const rockCount=3+Math.floor(rngF(seed)*3);
       for(let i=0;i<rockCount;i++){
         const ra=rngF(seed+i*17)*Math.PI*2;
-        const rd=rngF(seed+i*23)*s*.3;
+        const rd=rngF(seed+i*23)*s*.28;
         const rx=Math.cos(ra)*rd;
-        const ry=Math.sin(ra)*rd*0.5; // flatter vertical distribution
-        const rs=s*(.15+rngF(seed+i*41)*.22);
-        // Dark base
+        const ry=Math.sin(ra)*rd*0.55; // flatter vertical distribution
+        const rs=s*(.16+rngF(seed+i*41)*.22);
+        // Build the rock's jagged silhouette — 6-8 vertices around center
+        const verts=6+Math.floor(rngF(seed+i*53)%1*3);
+        const pts=[];
+        for(let v=0;v<verts;v++){
+          const a=(v/verts)*Math.PI*2+rngF(seed+i*61+v*7)*0.4;
+          // Radius varies per-vertex for irregular silhouette
+          const r=rs*(0.78+rngF(seed+i*83+v*11)*0.32);
+          // Squash vertically so rocks look grounded, not round
+          pts.push({x:Math.cos(a)*r, y:Math.sin(a)*r*0.78});
+        }
+        // Layer 1: deep shadow body (offset down-right, darker)
         ctx.fillStyle=shadowGray;
-        ctx.beginPath();ctx.ellipse(rx,ry+rs*0.3,rs*1.05,rs*0.55,0,0,Math.PI*2);ctx.fill();
-        // Main stone body
+        ctx.beginPath();
+        pts.forEach((pt,idx)=>{
+          const x=rx+pt.x+rs*0.15, y=ry+pt.y+rs*0.25;
+          if(idx===0)ctx.moveTo(x,y); else ctx.lineTo(x,y);
+        });
+        ctx.closePath();
+        ctx.fill();
+        // Layer 2: main rock body (base color)
         ctx.fillStyle=baseGray;
-        ctx.beginPath();ctx.ellipse(rx,ry,rs,rs*0.7,0,0,Math.PI*2);ctx.fill();
-        // Highlight
+        ctx.beginPath();
+        pts.forEach((pt,idx)=>{
+          const x=rx+pt.x, y=ry+pt.y;
+          if(idx===0)ctx.moveTo(x,y); else ctx.lineTo(x,y);
+        });
+        ctx.closePath();
+        ctx.fill();
+        // Layer 3: dark edge outline for definition
+        ctx.strokeStyle=crackGray;
+        ctx.lineWidth=1;
+        ctx.stroke();
+        // Layer 4: top-left lit facet (lighter polygon in upper quadrant)
+        // Build a smaller polygon using only upper vertices, gives the impression of a lit face
         ctx.fillStyle=highlightGray;
-        ctx.beginPath();ctx.ellipse(rx-rs*0.25,ry-rs*0.3,rs*0.5,rs*0.3,0,0,Math.PI*2);ctx.fill();
+        ctx.beginPath();
+        const upperPts=[];
+        pts.forEach(pt=>{
+          if(pt.y < rs*0.1){ // upper half
+            // Pull slightly toward center for lit facet size
+            upperPts.push({x:pt.x*0.75 - rs*0.05, y:pt.y*0.75 - rs*0.1});
+          }
+        });
+        if(upperPts.length >= 3){
+          upperPts.forEach((pt,idx)=>{
+            const x=rx+pt.x, y=ry+pt.y;
+            if(idx===0)ctx.moveTo(x,y); else ctx.lineTo(x,y);
+          });
+          ctx.closePath();
+          ctx.fill();
+        }
+        // Layer 5: crack detail (thin line across the stone)
+        if(rs > s*0.2){  // only on larger rocks
+          ctx.strokeStyle=crackGray;
+          ctx.lineWidth=0.8;
+          const ca=rngF(seed+i*71)*Math.PI*2;
+          const cl=rs*0.5;
+          ctx.beginPath();
+          ctx.moveTo(rx+Math.cos(ca)*cl*-0.4, ry+Math.sin(ca)*cl*-0.4);
+          ctx.lineTo(rx+Math.cos(ca+0.3)*cl*0.2, ry+Math.sin(ca+0.3)*cl*0.2);
+          ctx.lineTo(rx+Math.cos(ca)*cl*0.5, ry+Math.sin(ca)*cl*0.5);
+          ctx.stroke();
+        }
       }
       break;
     }
@@ -2305,44 +2506,94 @@ function drawProp(p,now){
       break;
     }
     case 'boulder':{
-      // Single large gray boulder — bigger, more detailed than rockCluster's rocks
-      const stone='#545458';
-      const stoneDark='#2a2a30';
-      const stoneLight='#70707a';
+      // Single large angular stone — proper polygonal silhouette with
+      // multiple tonal layers and crack details. Reads as a sculpted rock.
+      const stone='#555560';
+      const stoneDark='#25252c';
+      const stoneMid='#3c3c44';
+      const stoneLight='#72727c';
+      const stoneCrack='#15151a';
       const stoneMoss=z.mossColor||'#3a5a2a';
       // Ground shadow
-      ctx.fillStyle='rgba(0,0,0,0.55)';
-      ctx.beginPath();ctx.ellipse(s*.08,s*.5,s*.7,s*.18,0,0,Math.PI*2);ctx.fill();
-      // Base dark shadow
+      ctx.fillStyle='rgba(0,0,0,0.6)';
+      ctx.beginPath();ctx.ellipse(s*.1,s*.55,s*.7,s*.2,0,0,Math.PI*2);ctx.fill();
+      // Build boulder silhouette — 8-10 vertices, more asymmetric than rock cluster
+      const verts=8+Math.floor(rngF(seed+3)*3);
+      const pts=[];
+      for(let v=0;v<verts;v++){
+        const a=(v/verts)*Math.PI*2+rngF(seed+v*13)*0.35;
+        const r=s*(0.6+rngF(seed+v*19)*0.28);
+        // Squash vertically so boulder sits on ground
+        pts.push({x:Math.cos(a)*r, y:Math.sin(a)*r*0.72});
+      }
+      // Layer 1: deep shadow body (offset, darker — gives weight)
       ctx.fillStyle=stoneDark;
       ctx.beginPath();
-      ctx.ellipse(0,s*.15,s*.75,s*.55,0,0,Math.PI*2);
+      pts.forEach((pt,idx)=>{
+        const x=pt.x+s*0.12, y=pt.y+s*0.18;
+        if(idx===0)ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      });
+      ctx.closePath();
       ctx.fill();
-      // Main stone body
+      // Layer 2: mid-tone transition
+      ctx.fillStyle=stoneMid;
+      ctx.beginPath();
+      pts.forEach((pt,idx)=>{
+        const x=pt.x+s*0.05, y=pt.y+s*0.06;
+        if(idx===0)ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      });
+      ctx.closePath();
+      ctx.fill();
+      // Layer 3: main stone body
       ctx.fillStyle=stone;
       ctx.beginPath();
-      ctx.ellipse(0,0,s*.65,s*.48,0,0,Math.PI*2);
+      pts.forEach((pt,idx)=>{
+        if(idx===0)ctx.moveTo(pt.x,pt.y); else ctx.lineTo(pt.x,pt.y);
+      });
+      ctx.closePath();
       ctx.fill();
-      // Top highlight face
-      ctx.fillStyle=stoneLight;
-      ctx.beginPath();
-      ctx.ellipse(-s*.12,-s*.18,s*.38,s*.25,0,0,Math.PI*2);
-      ctx.fill();
-      // Crack details
-      ctx.strokeStyle=stoneDark;ctx.lineWidth=1.2;
-      ctx.beginPath();
-      ctx.moveTo(-s*.3,-s*.1);
-      ctx.lineTo(-s*.1,s*.1);
-      ctx.lineTo(s*.15,s*.05);
+      // Layer 4: dark outline
+      ctx.strokeStyle=stoneCrack;
+      ctx.lineWidth=1.2;
       ctx.stroke();
+      // Layer 5: lit top-left facet — polygon of upper vertices pulled inward
+      const litPts=[];
+      pts.forEach(pt=>{
+        if(pt.y < s*0.08 && pt.x < s*0.2){ // upper-left quadrant
+          litPts.push({x:pt.x*0.72 - s*0.08, y:pt.y*0.72 - s*0.04});
+        }
+      });
+      if(litPts.length >= 3){
+        ctx.fillStyle=stoneLight;
+        ctx.beginPath();
+        litPts.forEach((pt,idx)=>{
+          if(idx===0)ctx.moveTo(pt.x,pt.y); else ctx.lineTo(pt.x,pt.y);
+        });
+        ctx.closePath();
+        ctx.fill();
+      }
+      // Layer 6: crack details — branching fissure across the main face
+      ctx.strokeStyle=stoneCrack;
+      ctx.lineWidth=1.4;
+      ctx.lineCap='round';
       ctx.beginPath();
-      ctx.moveTo(s*.2,-s*.15);
-      ctx.lineTo(s*.35,-s*.02);
+      ctx.moveTo(-s*.32,-s*.08);
+      ctx.lineTo(-s*.08,s*.1);
+      ctx.lineTo(s*.18,s*.04);
+      ctx.lineTo(s*.3,s*.12);
       ctx.stroke();
-      // Moss patch on top
+      // Branch crack
+      ctx.lineWidth=0.9;
+      ctx.beginPath();
+      ctx.moveTo(-s*.08,s*.1);
+      ctx.lineTo(-s*.04,s*.28);
+      ctx.stroke();
+      // Layer 7: moss patches — zone-themed accent color on upper surface
       ctx.fillStyle=stoneMoss;
-      ctx.globalAlpha=0.7;
-      ctx.beginPath();ctx.ellipse(s*.15,-s*.25,s*.22,s*.08,0.3,0,Math.PI*2);ctx.fill();
+      ctx.globalAlpha=0.75;
+      ctx.beginPath();ctx.ellipse(s*.13,-s*.28,s*.2,s*.08,0.3,0,Math.PI*2);ctx.fill();
+      ctx.globalAlpha=0.55;
+      ctx.beginPath();ctx.ellipse(-s*.22,-s*.22,s*.12,s*.05,-0.2,0,Math.PI*2);ctx.fill();
       ctx.globalAlpha=1;
       break;
     }
