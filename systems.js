@@ -3783,3 +3783,310 @@ function drawVoidweaverEntities(now){
 
 // Voidweaver dispatcher is routed through castHollowcallerPresetOverride
 // which was defined earlier with voidweaver support.
+
+// ═══════════════════════════════════════════════════════════════════════
+// REAVER-SAINT ABILITIES — Hollow yourself, wear death as armor
+// ═══════════════════════════════════════════════════════════════════════
+// Theme: crimson-red aura, blood trails, aggressive melee hybrid.
+// Still uses spirits (2 guardians instead of an army), but the player is the
+// primary damage dealer. Lifesteal ties everything together.
+//
+// Q — Bind Guardian: summons one empowered guardian spirit (max 2)
+// W — Soul Lance: melee thrust that marks target + drains HP
+// E — Crimson Harvest: detonate marks, heal for 30% of damage dealt
+// R — Bloodvow: next 5 hits are guaranteed crits + massive lifesteal
+// Ult — Carnage Bloom: AOE that converts enemies' current HP to yours
+//
+// PASSIVE (Reaver-Saint only, any set count): 5% lifesteal on autoattacks
+
+// Called on every autoattack + ability hit when Reaver-Saint is active.
+// Heals the player for a portion of damage dealt. Applied in hitEnemy
+// via the activePresetOnHit hook (below).
+function reaverSaintOnHit(dmg){
+  if(!player || player.isDead) return;
+  const setCount = getEquippedSetPieceCount('Carmine Reaver\'s Panoply');
+  if(setCount < 4) return;
+  const leechPct = setCount >= 8 ? 0.08 : 0.05; // 8pc: +60% lifesteal effectiveness
+  const heal = Math.floor(dmg * leechPct);
+  if(heal <= 0) return;
+  const actual = Math.min(heal, player.maxHp - player.hp);
+  if(actual > 0){
+    player.hp += actual;
+    // Small red pulse on player so lifesteal is visible
+    if(typeof particles !== 'undefined' && Math.random() < 0.3){
+      particles.push({
+        x: player.x + (Math.random()-0.5)*20,
+        y: player.y + (Math.random()-0.5)*20,
+        vx: (Math.random()-0.5)*30, vy: -30 - Math.random()*40,
+        life: 0.5, maxLife: 0.5,
+        color: '#ef4444', size: 2 + Math.random()*2, soul: true,
+      });
+    }
+  }
+}
+
+// Reaver-Saint bloodvow state: tracks the "next N hits are guaranteed crits" window
+// and damage reflection. Hooks into combat via applyBloodvowBonuses.
+function applyBloodvowBonusToHit(dmg){
+  if(!window.__bloodvowState) return {dmg, isCrit: false, healPct: 0};
+  const now = performance.now();
+  if(window.__bloodvowState.hitsRemaining > 0 && now < window.__bloodvowState.expires){
+    window.__bloodvowState.hitsRemaining--;
+    return {dmg: dmg * 2.5, isCrit: true, healPct: 0.50}; // 50% lifesteal during bloodvow
+  }
+  return {dmg, isCrit: false, healPct: 0};
+}
+
+function castReaverSaint(idx, now){
+  const setCount = getEquippedSetPieceCount('Carmine Reaver\'s Panoply');
+  const is8pc = setCount >= 8;
+
+  if(idx === 0){
+    // ═══ BIND GUARDIAN — summon 1 guardian (max 2) ═══
+    // Reaver-Saint caps spirits at 2 instead of the normal max. These
+    // guardians get a subtle red tint via _reaverGuardian flag.
+    const existingGuardians = spirits.filter(s => !s.dead && s._reaverGuardian).length;
+    const maxGuardians = is8pc ? 3 : 2;
+    if(existingGuardians >= maxGuardians){
+      addFeed('Guardian limit reached', '#ef4444');
+      return true;
+    }
+    const summoned = spawnSpirit();
+    if(summoned){
+      // Tag the newest spirit as a guardian
+      const newest = spirits[spirits.length - 1];
+      if(newest) newest._reaverGuardian = true;
+      abilityCDs[0] = now + effectiveCD(0);
+      if(typeof SFX !== 'undefined' && SFX.spiritSummon) SFX.spiritSummon();
+      addFeed(`⚔ BIND GUARDIAN — ${existingGuardians + 1}/${maxGuardians}`, '#ef4444');
+      // Crimson summoning visual
+      pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:140, r:10, color:'#ef4444', life:0.6, maxLife:0.6, expand:true});
+      pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:90, r:10, color:'#dc2626', life:0.5, maxLife:0.5, expand:true});
+      pushGroundFX({type:'scorch', x:player.x, y:player.y, r:100, maxR:100, color:'#7f1d1d', life:1.0, maxLife:1.0});
+      // Blood spatter particles
+      if(typeof particles !== 'undefined'){
+        for(let i = 0; i < 20; i++){
+          const a = (i/20)*Math.PI*2;
+          particles.push({
+            x: player.x + Math.cos(a)*30,
+            y: player.y + Math.sin(a)*30,
+            vx: Math.cos(a) * 150,
+            vy: Math.sin(a) * 150 - 50,
+            life: 0.8, maxLife: 0.8,
+            color: i % 3 === 0 ? '#7f1d1d' : '#ef4444',
+            size: 2 + Math.random()*3, soul: true,
+          });
+        }
+      }
+    }
+    return true;
+  }
+
+  if(idx === 1){
+    // ═══ SOUL LANCE — melee thrust that marks + drains HP ═══
+    // Short-range (250u) directional stab. Applies Veilmark stacks AND
+    // heals player for 30% of damage dealt. Works at longer range than
+    // a true melee class but shorter than a caster.
+    const range = 280;
+    let best = null, bestDist = range*range;
+    const fx = Math.cos(player.facing), fy = Math.sin(player.facing);
+    enemies.forEach(e=>{
+      if(e.dead) return;
+      const dx = e.x - player.x, dy = e.y - player.y;
+      const distSq = dx*dx + dy*dy;
+      if(distSq > bestDist) return;
+      // Prefer enemies in facing direction (dot product)
+      const dot = (dx * fx + dy * fy) / (Math.sqrt(distSq) || 1);
+      if(dot < 0.3) return; // not in front
+      if(distSq < bestDist){ bestDist = distSq; best = e; }
+    });
+    if(!best){
+      addFeed('No target in range', '#6b7280');
+      return true;
+    }
+    const dmg = player.attack * 2.8 * damageMult();
+    hitEnemy(best, dmg, false, player.x, player.y);
+    // Apply veilmark stacks so Crimson Harvest (E) has something to detonate
+    const vmMax = 10 + _tb('veilmarkMax');
+    best.veilmarkStacks = Math.min(best.veilmarkStacks + (is8pc ? 3 : 2), vmMax);
+    best.veilmarkExpiry = now + 8000;
+    // 30% lifesteal on this hit
+    const leech = Math.floor(dmg * 0.30);
+    const actual = Math.min(leech, player.maxHp - player.hp);
+    if(actual > 0){
+      player.hp += actual;
+      spawnDmgText(player.x, player.y - 30, `+${actual}`, '#ef4444', false);
+    }
+    abilityCDs[1] = now + effectiveCD(1);
+    if(typeof SFX !== 'undefined' && SFX.veilmark) SFX.veilmark();
+    // Lance visual — thick red line from player to target
+    pushGroundFX({type:'ring', x:best.x, y:best.y, maxR:60, r:5, color:'#ef4444', life:0.3, maxLife:0.3, expand:true});
+    pushGroundFX({type:'bloom', x:best.x, y:best.y, r:80, maxR:80, color:'#7f1d1d', life:0.4, maxLife:0.4});
+    // Blood streak between them
+    if(typeof particles !== 'undefined'){
+      const steps = 14;
+      for(let i = 0; i < steps; i++){
+        const t = i/steps;
+        particles.push({
+          x: player.x + (best.x - player.x)*t,
+          y: player.y + (best.y - player.y)*t,
+          vx: (Math.random()-0.5)*60,
+          vy: -30 - Math.random()*60,
+          life: 0.5, maxLife: 0.5,
+          color: '#ef4444',
+          size: 2.5, soul: true,
+        });
+      }
+    }
+    screenShake(4, 150);
+    addFeed(`⚔ SOUL LANCE — ${Math.round(dmg)} · +${actual} HP · ${best.veilmarkStacks} marks`, '#ef4444');
+    return true;
+  }
+
+  if(idx === 2){
+    // ═══ CRIMSON HARVEST — detonate veilmarks, heal for 30% of damage ═══
+    // Finds the nearest marked enemy. Detonates with a wider-than-normal
+    // radius and heals the player for 30% of total damage dealt.
+    const t = (typeof getNearestMarkedEnemy === 'function') ? getNearestMarkedEnemy() : null;
+    if(!t || t.veilmarkStacks < 3){
+      addFeed('Need 3+ Veilmark stacks on a target', '#6b7280');
+      return true;
+    }
+    const detoDmgMult = 1 + _tb('detoDmgPct')/100;
+    const radius = (is8pc ? 320 : 260) + _tb('detoRadius');
+    const dmg = player.attack * 2.4 * t.veilmarkStacks * damageMult() * detoDmgMult;
+    let hits = 0;
+    let totalDmg = 0;
+    enemies.forEach(e=>{
+      if(!e.dead && dist2(t.x, t.y, e.x, e.y) < radius){
+        hitEnemy(e, dmg, false, t.x, t.y);
+        hits++;
+        totalDmg += dmg;
+      }
+    });
+    t.veilmarkStacks = 0;
+    // Heal for 30% of total damage dealt
+    const healAmt = Math.floor(totalDmg * 0.30);
+    const actualHeal = Math.min(healAmt, player.maxHp - player.hp);
+    if(actualHeal > 0){
+      player.hp += actualHeal;
+      spawnDmgText(player.x, player.y - 30, `+${actualHeal}`, '#ef4444', true);
+    }
+    abilityCDs[2] = now + effectiveCD(2);
+    if(typeof SFX !== 'undefined' && SFX.detonate) SFX.detonate();
+    screenShake(14, 340);
+    // Red bloom instead of orange fire
+    pushGroundFX({type:'ring', x:t.x, y:t.y, maxR:radius, r:25, color:'#ef4444', life:0.6, maxLife:0.6, expand:true});
+    pushGroundFX({type:'ring', x:t.x, y:t.y, maxR:radius*0.7, r:20, color:'#dc2626', life:0.5, maxLife:0.5, expand:true});
+    pushGroundFX({type:'scorch', x:t.x, y:t.y, r:radius-30, maxR:radius-30, color:'#7f1d1d', life:2.0, maxLife:2.0});
+    pushGroundFX({type:'bloom', x:t.x, y:t.y, r:radius-60, maxR:radius-60, color:'#ef4444', life:0.3, maxLife:0.3});
+    addFeed(`✦ CRIMSON HARVEST — ${hits} struck · +${actualHeal} HP`, '#ef4444');
+    return true;
+  }
+
+  if(idx === 3){
+    // ═══ BLOODVOW — next 5 hits are guaranteed crits with 50% lifesteal ═══
+    // Activates a 6-second window where all player attacks are amplified.
+    // Stored in window.__bloodvowState; consumed by applyBloodvowBonusToHit.
+    const hitCount = is8pc ? 8 : 5;
+    const duration = 6000;
+    window.__bloodvowState = {
+      hitsRemaining: hitCount,
+      expires: now + duration,
+      activatedAt: now,
+    };
+    abilityCDs[3] = now + effectiveCD(3);
+    if(typeof SFX !== 'undefined' && SFX.wrathTide) SFX.wrathTide();
+    // Red aura burst around player
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:220, r:25, color:'#ef4444', life:0.7, maxLife:0.7, expand:true});
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:160, r:20, color:'#dc2626', life:0.5, maxLife:0.5, expand:true});
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:180, maxR:180, color:'#ef4444', life:0.5, maxLife:0.5});
+    screenShake(8, 250);
+    if(typeof particles !== 'undefined'){
+      for(let i = 0; i < 25; i++){
+        const a = (i/25)*Math.PI*2;
+        particles.push({
+          x: player.x, y: player.y,
+          vx: Math.cos(a) * 200,
+          vy: Math.sin(a) * 200 - 30,
+          life: 0.9, maxLife: 0.9,
+          color: '#ef4444', size: 3, soul: true,
+        });
+      }
+    }
+    addFeed(`⊗ BLOODVOW — next ${hitCount} hits guaranteed crit`, '#ef4444');
+    return true;
+  }
+
+  if(idx === 4){
+    // ═══ CARNAGE BLOOM (Ult) — convert enemies' HP to yours ═══
+    // AOE that hits everyone nearby. Heals player for 25% of enemies' CURRENT HP
+    // (not damage dealt, but their current HP bar). This is devastating against
+    // full-HP bosses but also great cleanup.
+    const radius = is8pc ? 520 : 460;
+    const dmg = player.attack * 4.0 * damageMult();
+    let hits = 0;
+    let healAccum = 0;
+    enemies.forEach(e=>{
+      if(!e.dead && dist2(player.x, player.y, e.x, e.y) < radius){
+        // Snapshot their HP before damage
+        const snapshot = e.hp;
+        hitEnemy(e, dmg, false, player.x, player.y);
+        // Heal for 25% of their current HP (pre-damage snapshot)
+        healAccum += snapshot * 0.25;
+        hits++;
+      }
+    });
+    const totalHeal = Math.floor(healAccum);
+    const actualHeal = Math.min(totalHeal, player.maxHp - player.hp);
+    if(actualHeal > 0){
+      player.hp += actualHeal;
+      spawnDmgText(player.x, player.y - 30, `+${actualHeal}`, '#ef4444', true);
+    }
+    abilityCDs[4] = now + effectiveCD(4);
+    if(typeof SFX !== 'undefined' && SFX.eliteDeath) SFX.eliteDeath();
+    screenShake(26, 600);
+    // Massive red bloom + blood wave
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:300, maxR:300, color:'#ef4444', life:0.7, maxLife:0.7});
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:radius, r:50, color:'#ef4444', life:0.9, maxLife:0.9, expand:true});
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:radius*0.7, r:40, color:'#dc2626', life:0.7, maxLife:0.7, expand:true});
+    pushGroundFX({type:'scorch', x:player.x, y:player.y, r:radius-20, maxR:radius-20, color:'#7f1d1d', life:3.0, maxLife:3.0});
+    // Blood explosion particles
+    if(typeof particles !== 'undefined'){
+      for(let i = 0; i < 50; i++){
+        const a = Math.random() * Math.PI * 2;
+        particles.push({
+          x: player.x, y: player.y,
+          vx: Math.cos(a) * (220 + Math.random() * 180),
+          vy: Math.sin(a) * (220 + Math.random() * 180) - 60,
+          life: 1.4, maxLife: 1.4,
+          color: Math.random() < 0.4 ? '#7f1d1d' : '#ef4444',
+          size: 3 + Math.random() * 4, soul: true,
+        });
+      }
+    }
+    addFeed(`★ CARNAGE BLOOM — ${hits} struck · +${actualHeal} HP`, '#ef4444');
+    return true;
+  }
+
+  return false;
+}
+
+// Update the main dispatcher to route Reaver-Saint. This is a redefine
+// and JavaScript will use the latest definition since they're hoisted.
+function castHollowcallerPresetOverride(idx, now){
+  const activePreset = getActivePresetId();
+  if(!activePreset) return false;
+  const preset = BUILD_PRESETS[activePreset];
+  if(!preset || preset.classId !== 'hollowcaller') return false;
+  if(activePreset === 'necrolord'){
+    return (typeof castNecrolord === 'function') ? castNecrolord(idx, now) : false;
+  }
+  if(activePreset === 'voidweaver'){
+    return (typeof castVoidweaver === 'function') ? castVoidweaver(idx, now) : false;
+  }
+  if(activePreset === 'reaverSaint'){
+    return (typeof castReaverSaint === 'function') ? castReaverSaint(idx, now) : false;
+  }
+  return false;
+}
