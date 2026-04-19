@@ -4982,6 +4982,28 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden)emergencySa
 window.addEventListener('pagehide',emergencySave);
 // Fires when the browser loses focus (desktop)
 window.addEventListener('blur',emergencySave);
+
+// ═══════ UI SOUND WIRING ═══════════════════════════════════════
+// Global click handler — plays a subtle click for menu buttons and panel
+// close buttons. Keeps SFX calls out of every individual open/close function.
+// Tap-to-dismiss respects mute (via the sfx bus).
+document.addEventListener('click', (e) => {
+  try {
+    const t = e.target;
+    if(!t || !t.classList) return;
+    // Menu bar buttons (GEAR, BAG, SHOP, etc.)
+    if(t.classList.contains('menu-btn')){
+      if(typeof SFX !== 'undefined' && SFX.uiClick) SFX.uiClick();
+      return;
+    }
+    // Panel close buttons (← BACK)
+    if(t.classList.contains('panel-close')){
+      if(typeof SFX !== 'undefined' && SFX.uiClose) SFX.uiClose();
+      return;
+    }
+  } catch(err){}
+}, true); // capture phase so we fire before panel-hide animations
+
 // Start flow: if starting a new game (no continue), show class-select first.
 // Continue-from-save goes straight into the game with the saved class.
 // ─── VOLUME CONTROL HANDLERS ───────────────────────────────
