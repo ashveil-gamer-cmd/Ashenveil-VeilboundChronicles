@@ -1777,3 +1777,193 @@ canvas#c{display:block;position:fixed;top:0;left:0}
     font-size:9px !important;
   }
 }
+
+/* ─── BUILD PRESET SYSTEM ─── */
+
+/* Bag tabs (switches between main bag and set stash) */
+.bag-tabs{
+  display:flex;
+  gap:6px;
+  padding:0 16px 8px;
+  border-bottom:1px solid rgba(192,132,252,0.15);
+  margin-bottom:12px;
+}
+.bag-tab{
+  background:rgba(20,15,40,0.4);
+  color:#9ca3af;
+  border:1px solid rgba(192,132,252,0.15);
+  padding:8px 14px;
+  font-size:12px;
+  font-family:inherit;
+  letter-spacing:0.5px;
+  cursor:pointer;
+  border-radius:4px 4px 0 0;
+  transition:all 0.15s;
+}
+.bag-tab:hover{
+  background:rgba(40,30,70,0.6);
+  color:#c4b8dd;
+}
+.bag-tab.active{
+  background:rgba(60,40,100,0.5);
+  color:#e9d5ff;
+  border-color:rgba(192,132,252,0.4);
+  border-bottom-color:transparent;
+}
+.bag-count-small{
+  color:#f59e0b;
+  font-size:10px;
+  margin-left:4px;
+  padding:1px 5px;
+  background:rgba(245,158,11,0.12);
+  border-radius:3px;
+}
+
+/* Set stash layout */
+#setStashLayout{
+  display:flex;
+  gap:16px;
+  padding:0 16px 16px;
+  overflow:auto;
+  max-height:calc(100vh - 160px);
+}
+#setStashGrid{
+  flex:1;
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+}
+
+.stash-set-section{
+  background:rgba(15,10,30,0.45);
+  border-left:3px solid rgba(245,158,11,0.4);
+  padding:10px 12px;
+  border-radius:4px;
+}
+.stash-set-header{
+  color:#f59e0b;
+  font-size:12px;
+  letter-spacing:1px;
+  font-weight:600;
+  margin-bottom:8px;
+  text-transform:uppercase;
+}
+.stash-piece-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill, minmax(68px, 1fr));
+  gap:6px;
+}
+
+#setStashTooltip{
+  flex:0 0 280px;
+  background:rgba(10,5,20,0.92);
+  border:1px solid rgba(192,132,252,0.2);
+  border-radius:6px;
+  padding:14px;
+  font-size:12px;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  height:fit-content;
+  max-height:calc(100vh - 200px);
+  overflow:auto;
+}
+
+/* Preset selector (in talents panel) */
+#presetSelectorWrap{
+  padding:12px 16px;
+  background:rgba(15,10,30,0.35);
+  border-bottom:1px solid rgba(192,132,252,0.15);
+  margin-bottom:12px;
+}
+.preset-section-label{
+  color:#f59e0b;
+  font-size:12px;
+  letter-spacing:2px;
+  font-weight:600;
+  margin-bottom:4px;
+  text-transform:uppercase;
+}
+.preset-section-hint{
+  color:#9ca3af;
+  font-size:11px;
+  margin-bottom:12px;
+  font-style:italic;
+}
+
+#presetSelector{
+  display:grid;
+  grid-template-columns:repeat(auto-fill, minmax(260px, 1fr));
+  gap:10px;
+}
+.preset-card{
+  background:rgba(15,10,30,0.55);
+  border:1px solid rgba(192,132,252,0.15);
+  border-left-width:4px;
+  border-radius:4px;
+  padding:10px 12px;
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  transition:all 0.15s;
+}
+.preset-card:hover{
+  background:rgba(30,20,60,0.55);
+  border-color:rgba(192,132,252,0.35);
+}
+.preset-card-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+.preset-name{
+  font-size:14px;
+  font-weight:600;
+  letter-spacing:1px;
+  text-shadow:0 0 10px currentColor;
+}
+.preset-set-count{
+  font-size:10px;
+  color:#9ca3af;
+  padding:2px 6px;
+  background:rgba(0,0,0,0.3);
+  border-radius:3px;
+}
+.preset-tagline{
+  color:#c4b8dd;
+  font-size:11px;
+  font-style:italic;
+  opacity:0.8;
+}
+.preset-desc{
+  color:#9ca3af;
+  font-size:11px;
+  line-height:1.4;
+}
+.preset-actions{
+  margin-top:4px;
+}
+.preset-apply-btn{
+  width:100%;
+  padding:7px 12px;
+  font-size:11px;
+  letter-spacing:1px;
+  font-weight:600;
+  background:rgba(192,132,252,0.15);
+  color:#c084fc;
+  border:1px solid rgba(192,132,252,0.4);
+  border-radius:3px;
+  cursor:pointer;
+  font-family:inherit;
+  transition:all 0.15s;
+}
+.preset-apply-btn:hover{
+  background:rgba(192,132,252,0.3);
+  box-shadow:0 0 10px currentColor;
+}
+.preset-empty{
+  color:#6b7280;
+  font-style:italic;
+  font-size:11px;
+  padding:10px;
+}
