@@ -229,17 +229,121 @@ function computeAttack(lv){
   }
   return base;
 }
-// XP curve — classic-WoW-style slow progression. Shape:
-//   Levels 1-10: fast hook (<30 min)
-//   Levels 10-30: moderate grind (~5 hours)
-//   Levels 30-50: commitment (~15 hours) — the classic WoW "wall"
-//   Levels 50-100: long haul (~100 hours)
-// Total time to level 50 at ~5s per kill: ~20 hours.
-// Total time to level 100: ~125 hours.
-// Shape: xp_for_level(lv) = 85 * lv^1.75
-// Steepened from 60*lv^1.6 based on player feedback — leveling was too fast
-// (reaching lv15 in minutes). New curve is ~2.4x slower at mid-game.
-function xpForLevel(lv){return Math.floor(85*Math.pow(lv,1.75));}
+// ═══════ XP PROGRESSION TABLE ═══════════════════════════════════════
+// Hardcoded XP-to-next table per official progression spec.
+// Philosophy: PoE 2 / Classic WoW hybrid.
+//  - Early levels (1-10) feel quick and exciting (~80-120 kills per level)
+//  - Midgame (20-50) slows satisfyingly (~125-170 kills)
+//  - Late game (70-100) is a real commitment (~220-300 kills)
+//  - Quests should provide 55-70% of XP at intended pace (TBD — quest
+//    system not yet implemented. Until then, combat is primary source.)
+//
+// GLOBAL_XP_MULTIPLIER: single knob for retuning the whole curve without
+// rebuilding the table. Default 1.0 means "XP table as written."
+//
+// CURRENT VALUE: 0.5 — TEMPORARY BUFF WHILE QUEST SYSTEM IS MISSING.
+// The base table assumes quests provide ~55-70% of leveling XP. Since
+// quests don't exist yet, combat alone can't hit that pace. We halve the
+// requirement to compensate so combat-only leveling feels reasonable.
+//
+// ROLLBACK TO 1.0 WHEN THE QUEST SYSTEM SHIPS so the intended pacing
+// (quest-driven 60% + combat 40%) takes effect.
+const GLOBAL_XP_MULTIPLIER = 0.5;
+
+// XP_TO_NEXT[level] = XP needed to advance FROM that level to the next.
+// Level 100 is the cap; stored as 0 to indicate no further progression.
+const XP_TO_NEXT_TABLE = [
+  /* 0 unused */ 0,
+  /*  1 */ 300,   /*  2 */ 342,   /*  3 */ 390,   /*  4 */ 444,   /*  5 */ 507,
+  /*  6 */ 578,   /*  7 */ 659,   /*  8 */ 751,   /*  9 */ 856,   /* 10 */ 976,
+  /* 11 */ 1112,  /* 12 */ 1268,  /* 13 */ 1446,  /* 14 */ 1649,  /* 15 */ 1880,
+  /* 16 */ 2143,  /* 17 */ 2443,  /* 18 */ 2785,  /* 19 */ 3175,  /* 20 */ 3620,
+  /* 21 */ 4127,  /* 22 */ 4540,  /* 23 */ 4994,  /* 24 */ 5493,  /* 25 */ 6042,
+  /* 26 */ 6646,  /* 27 */ 7311,  /* 28 */ 8042,  /* 29 */ 8846,  /* 30 */ 9722,
+  /* 31 */ 10694, /* 32 */ 11763, /* 33 */ 12939, /* 34 */ 14233, /* 35 */ 15656,
+  /* 36 */ 17221, /* 37 */ 18943, /* 38 */ 20837, /* 39 */ 22921, /* 40 */ 25213,
+  /* 41 */ 27734, /* 42 */ 29952, /* 43 */ 32348, /* 44 */ 34936, /* 45 */ 37731,
+  /* 46 */ 40749, /* 47 */ 44009, /* 48 */ 47530, /* 49 */ 51333, /* 50 */ 55440,
+  /* 51 */ 59875, /* 52 */ 64665, /* 53 */ 69838, /* 54 */ 75426, /* 55 */ 81460,
+  /* 56 */ 87977, /* 57 */ 95015, /* 58 */ 102616,/* 59 */ 110826,/* 60 */ 119692,
+  /* 61 */ 129267,/* 62 */ 137023,/* 63 */ 145245,/* 64 */ 153959,/* 65 */ 163196,
+  /* 66 */ 172988,/* 67 */ 183367,/* 68 */ 194369,/* 69 */ 206031,/* 70 */ 218393,
+  /* 71 */ 231497,/* 72 */ 245387,/* 73 */ 260110,/* 74 */ 275717,/* 75 */ 292260,
+  /* 76 */ 309796,/* 77 */ 328384,/* 78 */ 348087,/* 79 */ 368972,/* 80 */ 391111,
+  /* 81 */ 414578,/* 82 */ 435307,/* 83 */ 457072,/* 84 */ 479926,/* 85 */ 503922,
+  /* 86 */ 529118,/* 87 */ 555574,/* 88 */ 583353,/* 89 */ 612521,/* 90 */ 643147,
+  /* 91 */ 675304,/* 92 */ 709069,/* 93 */ 744522,/* 94 */ 781748,/* 95 */ 820835,
+  /* 96 */ 861877,/* 97 */ 904971,/* 98 */ 950219,/* 99 */ 997730,/* 100 */ 0,
+];
+
+function xpForLevel(lv){
+  if(lv < 1) return XP_TO_NEXT_TABLE[1];
+  if(lv > 100) return 0;
+  return Math.round(XP_TO_NEXT_TABLE[lv] * GLOBAL_XP_MULTIPLIER);
+}
+
+// ═══════ XP REWARD FORMULAS ═══════════════════════════════════════
+// Activity XP = xp_to_next_level × band_rate × activity_multiplier × delta_multiplier
+//
+// Band rate: normal mob XP as % of xpToNext, drops gradually across levels.
+// Activity multiplier: 1x mob, 4x elite, 10x minor boss, 20x major boss,
+//                      35x final boss, 10x small quest, 20x standard quest,
+//                      40x major quest, 100x story milestone.
+// Delta multiplier: scales by enemy-level vs player-level difference to
+//                    prevent farming low-level content forever.
+
+function xpBandRate(playerLevel){
+  if(playerLevel <= 20) return 0.010;
+  if(playerLevel <= 40) return 0.008;
+  if(playerLevel <= 60) return 0.006;
+  if(playerLevel <= 80) return 0.0045;
+  return 0.0035;
+}
+
+// Given a player level, returns the baseline XP for a same-level normal mob.
+function baselineMobXp(playerLevel){
+  const xpNext = xpForLevel(playerLevel) || 1;
+  const rate = xpBandRate(playerLevel);
+  return Math.max(1, Math.round(xpNext * rate));
+}
+
+// Level-difference multiplier table (enemy vs player).
+// Prevents farming low-level content but doesn't make high-level content absurd.
+function xpDeltaMultiplier(enemyLevel, playerLevel){
+  const delta = enemyLevel - playerLevel;
+  if(delta >= 3)  return 1.15;
+  if(delta === 2) return 1.10;
+  if(delta === 1) return 1.05;
+  if(delta === 0) return 1.00;
+  if(delta === -1) return 0.95;
+  if(delta === -2) return 0.85;
+  if(delta === -3) return 0.70;
+  if(delta === -4) return 0.50;
+  if(delta === -5) return 0.30;
+  return 0.10; // -6 or lower
+}
+
+// Activity multipliers — applied on top of baseline mob XP
+const XP_ACTIVITY_MULT = {
+  normalMob:   1,
+  eliteMob:    4,
+  minorBoss:   10,
+  majorBoss:   20,
+  finalBoss:   45,  // story/act boss average of 35-60x range
+  smallQuest:  10,
+  stdQuest:    20,
+  majorQuest:  40,
+  storyQuest:  100,
+};
+
+// Compute the XP reward for a kill, applying band rate + activity mult + delta scaling.
+// Used by combat code to replace the old xpG values.
+function computeKillXP(playerLevel, enemyLevel, activity){
+  const base = baselineMobXp(playerLevel);
+  const mult = XP_ACTIVITY_MULT[activity] || 1;
+  const delta = xpDeltaMultiplier(enemyLevel, playerLevel);
+  return Math.max(1, Math.round(base * mult * delta));
+}
 // ═══════ ENEMY SCALING (player-relative) ═══════════════════════════
 // Design philosophy: This is an AFK-friendly idle ARPG, not classic WoW.
 // Enemies should always feel appropriate to the player's level — not
@@ -251,19 +355,20 @@ function xpForLevel(lv){return Math.floor(85*Math.pow(lv,1.75));}
 // right ballpark. Breakthrough difficulty comes from gear, not level gaps.
 
 // Enemy HP scale — grows with player level.
-// At level 1: base HP. At level 50: ~3.5x. At level 100: ~6x.
-// Tuned so a same-level enemy takes 3-5 seconds of basic attacks to kill.
+// INCREASED so basic enemies take 4-6 seconds to kill instead of ~2s.
+// At lv1: base HP. At lv50: ~4.5x. At lv100: ~7.5x.
+// Kill pace should feel deliberate, not mindless cleave.
 function enemyHpScale(lv){
-  // Base curve: 1.0 + 0.065 per level, flattening slightly at high levels
-  return 1.0 + 0.065 * lv - 0.0003 * lv * lv;
+  return 1.3 + 0.085 * lv - 0.0004 * lv * lv;
 }
 
 // Enemy damage scale — grows with player level.
-// INCREASED from (0.85 + 0.035*lv) based on player feedback that combat felt
-// too passive — enemies barely dented the player. Now enemies are a real
-// threat that the player must actively manage (especially in AFK).
+// INCREASED AGAIN based on continued feedback that combat is too passive.
+// Previous (1.3 + 0.055*lv) wasn't enough — now scales harder so every
+// enemy engagement has genuine risk. Tanks can still soak; squishies must
+// kite or die.
 function enemyDmgScale(lv){
-  return 1.3 + 0.055 * lv - 0.0002 * lv * lv;
+  return 2.0 + 0.09 * lv - 0.0003 * lv * lv;
 }
 
 // ═══════ PLAYER PASSIVE LEVEL BONUSES ══════════════════════════════
@@ -675,24 +780,29 @@ const DUNGEONS=[
       counts:[8,12,6,18,10,14,12],
     },
     waves:[
-      {count:10,elites:1,types:['skeleton','crawler']},
-      {count:14,elites:2,types:['skeleton','wraith']},
-      {count:16,elites:3,types:['crawler','wraith','skeleton']},
-      {count:12,elites:3,types:['skeleton','wraith','crawler']},
+      // Wave 1 — THE SWARM: meaningful density but not overwhelming
+      {count:20, elites:0, types:['skeleton','crawler']},
+      // Wave 2 — THE VETERANS: all elites, forces positioning
+      {count:8, elites:8, types:['skeleton','wraith']},
+      // Wave 3 — MIXED ASSAULT
+      {count:12, elites:4, types:['crawler','wraith','skeleton']},
+      // Wave 4 — THE GUARDIANS
+      {count:5, elites:5, types:['wraith','skeleton']},
     ],
     boss:{
       name:'Bone Revenant',
       baseType:'skeleton',
       hpMult:120,
-      atkMult:2.4,
+      atkMult:3.0,
       sizeMult:2.2,
+      bossTier:'minorBoss', // Tier 1 dungeon — minor boss (10x mob XP)
       // Signature ability: summons skeleton thralls to swarm the player
       ability:{type:'summonThralls',cooldown:8000,warmup:1500,count:2},
     },
     reward:{
       minRarity:'rare',
       bonusGold:200,
-      bonusXP:60,
+      bonusXP:180,
     },
   },
   {
@@ -725,24 +835,29 @@ const DUNGEONS=[
       counts:[14,16,18,18,10,12],
     },
     waves:[
-      {count:10,elites:1,types:['wraith','shade']},
-      {count:14,elites:2,types:['wraith','shade','specter']},
-      {count:16,elites:3,types:['shade','specter']},
-      {count:12,elites:4,types:['shade','specter']},
+      // Wave 1 — THE SWARM
+      {count:22, elites:0, types:['wraith','shade']},
+      // Wave 2 — THE VETERANS
+      {count:10, elites:10, types:['wraith','shade','specter']},
+      // Wave 3 — MIXED ASSAULT
+      {count:14, elites:5, types:['wraith','shade','specter']},
+      // Wave 4 — THE GUARDIANS
+      {count:6, elites:6, types:['specter','shade']},
     ],
     boss:{
       name:'Sorrowed Specter',
       baseType:'specter',
       hpMult:150,
-      atkMult:2.7,
+      atkMult:3.5,
       sizeMult:2.4,
+      bossTier:'majorBoss', // Tier 2 dungeon — major boss (20x mob XP)
       // Signature ability: phase shift — become invulnerable, teleport, leave a shade echo
       ability:{type:'phaseShift',cooldown:6000,warmup:800,invulnMs:1500,teleportDist:320},
     },
     reward:{
       minRarity:'epic',
       bonusGold:500,
-      bonusXP:120,
+      bonusXP:400,
     },
   },
   {
@@ -775,10 +890,14 @@ const DUNGEONS=[
       counts:[12,14,14,16,18,18,8],
     },
     waves:[
-      {count:10,elites:1,types:['golem','abomination']},
-      {count:14,elites:3,types:['golem','specter']},
-      {count:16,elites:4,types:['golem','abomination','specter']},
-      {count:12,elites:5,types:['golem','abomination','specter']},
+      // Wave 1 — THE SWARM
+      {count:24, elites:0, types:['golem','abomination']},
+      // Wave 2 — THE VETERANS
+      {count:12, elites:12, types:['golem','specter']},
+      // Wave 3 — MIXED ASSAULT
+      {count:16, elites:6, types:['golem','abomination','specter']},
+      // Wave 4 — THE GUARDIANS
+      {count:7, elites:7, types:['abomination','golem']},
     ],
     boss:{
       name:'Cathedral Warden',
@@ -786,13 +905,14 @@ const DUNGEONS=[
       hpMult:220,
       atkMult:3.0,
       sizeMult:2.8,
+      bossTier:'majorBoss', // Tier 3 dungeon — major boss (20x mob XP)
       // Signature ability: fire cross — 4 lines of fire shoot out in +-pattern
       ability:{type:'fireCross',cooldown:10000,warmup:1800,lineLength:520,lineWidth:80,damageMult:1.6,lingerMs:2000},
     },
     reward:{
       minRarity:'legendary',
       bonusGold:1200,
-      bonusXP:200,
+      bonusXP:800,
     },
   },
 ];
