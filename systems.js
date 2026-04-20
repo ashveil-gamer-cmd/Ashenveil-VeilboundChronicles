@@ -4270,16 +4270,16 @@ function castHollowcallerPresetOverride(idx, now){
   if(!activePreset) return false;
   const preset = BUILD_PRESETS[activePreset];
   if(!preset || preset.classId !== 'hollowcaller') return false;
+  let handled = false;
   if(activePreset === 'necrolord'){
-    return (typeof castNecrolord === 'function') ? castNecrolord(idx, now) : false;
+    handled = (typeof castNecrolord === 'function') ? castNecrolord(idx, now) : false;
+  } else if(activePreset === 'voidweaver'){
+    handled = (typeof castVoidweaver === 'function') ? castVoidweaver(idx, now) : false;
+  } else if(activePreset === 'reaverSaint'){
+    handled = (typeof castReaverSaint === 'function') ? castReaverSaint(idx, now) : false;
   }
-  if(activePreset === 'voidweaver'){
-    return (typeof castVoidweaver === 'function') ? castVoidweaver(idx, now) : false;
-  }
-  if(activePreset === 'reaverSaint'){
-    return (typeof castReaverSaint === 'function') ? castReaverSaint(idx, now) : false;
-  }
-  return false;
+  if(handled) _applyPresetEchoCdrAdjust(idx, now);
+  return handled;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -4294,21 +4294,60 @@ function castHollowcallerPresetOverride(idx, now){
 // Activation: wearing 4+ pieces of the preset's set. 8-piece amplifies.
 // castIronwakePresetOverride dispatches to the preset-specific handler.
 
+// Helper: returns the base ability ID for this class + idx. This is used
+// by preset abilities to look up echo modifiers on the SAME slots that
+// base abilities use. E.g. Ironguard's Q (Steel Call) reads echoes from
+// slot 'anchor' since that's what the Q ability is in the base Ironwake class.
+function _getBaseAbilityIdForIdx(idx){
+  const cls = CLASS_DEFS[player.classId];
+  if(!cls || !cls.abilities || !cls.abilities[idx]) return null;
+  return cls.abilities[idx].id;
+}
+// Shorthand — returns the merged echo modifiers for a given ability slot.
+// Returns a safe default if the veilforge module isn't loaded.
+function _presetEchoMods(idx){
+  const id = _getBaseAbilityIdForIdx(idx);
+  if(!id || typeof getAbilityEchoModifiers !== 'function') {
+    return { dmgMult:1, radiusMult:1, cdrMult:1, countMult:1 };
+  }
+  return getAbilityEchoModifiers(id);
+}
+
 function castIronwakePresetOverride(idx, now){
   const activePreset = (typeof getActivePresetId === 'function') ? getActivePresetId() : null;
   if(!activePreset) return false;
   const preset = BUILD_PRESETS[activePreset];
   if(!preset || preset.classId !== 'ironwake') return false;
   if(activePreset === 'ironguard'){
-    return (typeof castIronguard === 'function') ? castIronguard(idx, now) : false;
+    const handled = (typeof castIronguard === 'function') ? castIronguard(idx, now) : false;
+    if(handled) _applyPresetEchoCdrAdjust(idx, now);
+    return handled;
   }
   if(activePreset === 'juggernaut'){
-    return (typeof castJuggernaut === 'function') ? castJuggernaut(idx, now) : false;
+    const handled = (typeof castJuggernaut === 'function') ? castJuggernaut(idx, now) : false;
+    if(handled) _applyPresetEchoCdrAdjust(idx, now);
+    return handled;
   }
   if(activePreset === 'bloodforged'){
-    return (typeof castBloodforged === 'function') ? castBloodforged(idx, now) : false;
+    const handled = (typeof castBloodforged === 'function') ? castBloodforged(idx, now) : false;
+    if(handled) _applyPresetEchoCdrAdjust(idx, now);
+    return handled;
   }
   return false;
+}
+
+// After a preset ability runs, adjust its cooldown to respect echo CDR modifiers.
+// Preset abilities set abilityCDs[idx] to a future timestamp; we pull that timestamp
+// closer to now if echoes want a shorter cooldown. This is the minimum-invasive
+// way to apply echoes to preset abilities without patching 30+ individual ability bodies.
+function _applyPresetEchoCdrAdjust(idx, now){
+  const mods = _presetEchoMods(idx);
+  const cdrMult = mods?.cdrMult || 1.0;
+  if(cdrMult === 1.0) return; // no adjustment needed
+  const current = abilityCDs[idx];
+  if(current <= now) return;
+  const remaining = current - now;
+  abilityCDs[idx] = now + remaining * cdrMult;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
