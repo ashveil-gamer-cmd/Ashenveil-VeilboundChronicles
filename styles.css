@@ -3321,3 +3321,63 @@ canvas#c{display:block;position:fixed;top:0;left:0}
   .vg-tier-enter-btn{width:100%;}
   .vg-stat-val{font-size:22px;}
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   VEILGATE UNLOCK BANNER — shown once when player hits L40
+   ═══════════════════════════════════════════════════════════════════ */
+#veilgateUnlockBanner{
+  position:fixed;
+  top:50%;
+  left:50%;
+  transform:translate(-50%,-50%);
+  z-index:999;
+  pointer-events:none;
+  opacity:1;
+  transition:opacity 1.5s ease-out;
+  animation:vg-banner-pulse 3s ease-in-out infinite;
+}
+#veilgateUnlockBanner.vg-banner-fade{
+  opacity:0;
+}
+.vg-banner-inner{
+  background:
+    radial-gradient(ellipse at center,rgba(251,191,36,0.25),transparent 70%),
+    linear-gradient(140deg,rgba(24,18,38,0.96),rgba(40,28,8,0.96));
+  border:2px solid rgba(251,191,36,0.7);
+  border-radius:14px;
+  padding:26px 40px;
+  text-align:center;
+  box-shadow:
+    0 0 80px rgba(251,191,36,0.5),
+    0 20px 60px rgba(0,0,0,0.85);
+  font-family:'Cinzel',serif;
+}
+.vg-banner-title{
+  font-size:22px;
+  font-weight:600;
+  color:#fbbf24;
+  letter-spacing:4px;
+  text-shadow:0 0 18px rgba(251,191,36,0.9);
+  margin-bottom:10px;
+}
+.vg-banner-sub{
+  font-size:13px;
+  color:#e9d5ff;
+  letter-spacing:2px;
+  font-style:italic;
+  margin-bottom:6px;
+}
+.vg-banner-hint{
+  font-size:11px;
+  color:#c4b5fd;
+  letter-spacing:2px;
+}
+@keyframes vg-banner-pulse{
+  0%,100%{transform:translate(-50%,-50%) scale(1);}
+  50%{transform:translate(-50%,-50%) scale(1.02);}
+}
+@media (max-width:640px){
+  .vg-banner-inner{padding:18px 22px;}
+  .vg-banner-title{font-size:16px;letter-spacing:2.5px;}
+  .vg-banner-sub{font-size:11px;}
+}
