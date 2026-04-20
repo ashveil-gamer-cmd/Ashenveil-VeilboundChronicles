@@ -3478,3 +3478,19 @@ canvas#c{display:block;position:fixed;top:0;left:0}
   display:inline-block;
   text-align:center;
 }
+
+/* ═══ UNIQUE EFFECT TOOLTIP LINE ═══ */
+/* Shown on unique items that have a mechanical uniqueEffect wired.
+   Visually distinct from the italic flavor line — this is the "what it DOES". */
+.gear-unique-effect{
+  margin-top:4px;
+  padding:5px 10px;
+  background:linear-gradient(90deg,rgba(251,191,36,0.14),rgba(251,191,36,0.06));
+  border-left:3px solid #fbbf24;
+  color:#fde68a;
+  font-family:'Cinzel',serif;
+  font-size:10px;
+  letter-spacing:0.8px;
+  line-height:1.4;
+  border-radius:3px;
+}
