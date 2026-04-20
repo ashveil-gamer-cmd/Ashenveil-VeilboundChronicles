@@ -2207,3 +2207,72 @@ canvas#c{display:block;position:fixed;top:0;left:0}
 .stash-debug-wrap .stash-debug-btn{
   min-width:180px;
 }
+
+/* AFK TOGGLE BUTTON ─────────────────────────────────────────────
+   Lives in the top-right HUD area near volume control. Three visual states:
+   - OFF (idle default): gray outline, hollow circle ◯
+   - ON: amber fill, solid circle ●, glowing
+   - DISABLED (in camp): dimmed, shows "SAFE" label */
+#afkToggle{
+  position:fixed;
+  top:12px;
+  right:72px; /* sits left of volume button */
+  z-index:850;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  padding:7px 12px;
+  background:rgba(18,14,32,0.78);
+  border:1px solid rgba(180,160,200,0.25);
+  border-radius:8px;
+  color:#b4a6c8;
+  font-family:'Cinzel',serif;
+  font-size:11px;
+  letter-spacing:1.5px;
+  cursor:pointer;
+  user-select:none;
+  transition:all 0.2s ease;
+  backdrop-filter:blur(6px);
+}
+#afkToggle:hover{
+  background:rgba(28,22,48,0.88);
+  border-color:rgba(200,180,230,0.45);
+  color:#e4d6f8;
+}
+#afkToggle #afkIndicator{
+  font-size:13px;
+  line-height:1;
+  font-weight:bold;
+}
+#afkToggle.afk-on{
+  background:rgba(60,36,0,0.72);
+  border-color:rgba(245,158,11,0.7);
+  color:#fbbf24;
+  box-shadow:0 0 12px rgba(245,158,11,0.35);
+}
+#afkToggle.afk-on #afkIndicator{
+  color:#fbbf24;
+  text-shadow:0 0 8px rgba(251,191,36,0.8);
+}
+#afkToggle.afk-on:hover{
+  background:rgba(75,44,0,0.85);
+  border-color:rgba(245,158,11,0.9);
+}
+#afkToggle.afk-disabled{
+  background:rgba(18,28,24,0.65);
+  border-color:rgba(157,196,176,0.35);
+  color:#7a9c8a;
+  cursor:default;
+  opacity:0.72;
+}
+#afkToggle.afk-disabled:hover{
+  background:rgba(18,28,24,0.65); /* no hover change when disabled */
+}
+@media (max-width:640px){
+  #afkToggle{
+    right:64px;
+    padding:6px 10px;
+    font-size:10px;
+    gap:4px;
+  }
+}
