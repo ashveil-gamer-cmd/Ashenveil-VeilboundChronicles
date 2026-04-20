@@ -1672,13 +1672,44 @@ const PROP_SIZE_MULT={
 function generateEnvironment(){
   envProps=[];
   const z=getActiveTheme();
+  // Generate terrain features FIRST so prop placement can avoid path corridors.
+  // Previously this was called at the end, which meant path-exclusion during
+  // prop gen always read an empty path array.
+  if(typeof generateTerrainFeatures==='function') generateTerrainFeatures();
   // Seed so it's deterministic per zone/dungeon
   const seedBase=(z.id||'').split('').reduce((a,c)=>a*31+c.charCodeAt(0),7919);
   const rnd=srand(seedBase+1);
   const propTypes=z.props||[];
   const counts=z.counts||[];
+  // World is now 6500×6500 (was 5000×5000) — 1.69x area. To keep natural
+  // density, scale prop count targets by 1.3x so density drops slightly
+  // (walkable corridors feel more open) but the world doesn't feel empty.
+  const WORLD_PROP_MULT = 1.3;
   // Combine into a list of (type, targetCount) pairs
-  const typeBuckets=propTypes.map((t,i)=>({type:t,remaining:counts[i]||30}));
+  const typeBuckets=propTypes.map((t,i)=>({type:t,remaining:Math.round((counts[i]||30) * WORLD_PROP_MULT)}));
+
+  // ─── PATH EXCLUSION ZONES ───
+  // Prop-dense hotspots should avoid the generated paths so there's a
+  // walkable corridor through the world. Distance-to-nearest-path-point
+  // must exceed this radius or we skip that hotspot position.
+  const PATH_CLEARANCE = 130;
+  const pathPoints = [];
+  if(terrainFeatures && terrainFeatures.paths){
+    terrainFeatures.paths.forEach(path => {
+      if(path.points){
+        path.points.forEach(pt => pathPoints.push(pt));
+      }
+    });
+  }
+  // Helper: true if (x,y) is inside any path's clearance band
+  function _isOnPath(x, y){
+    for(let i = 0; i < pathPoints.length; i++){
+      const pt = pathPoints[i];
+      const dx = x - pt.x, dy = y - pt.y;
+      if(dx*dx + dy*dy < PATH_CLEARANCE*PATH_CLEARANCE) return true;
+    }
+    return false;
+  }
 
   // ─── PHASE 1: CLUSTERED HOTSPOTS ───
   // Generate 18-25 hotspot centers. Each spawns a dense cluster of 6-14 props.
@@ -1686,8 +1717,15 @@ function generateEnvironment(){
   // smaller props (grass, mushrooms) around them.
   const hotspotCount=18+Math.floor(rnd()*7);
   for(let h=0;h<hotspotCount;h++){
-    const hx=(0.08+rnd()*0.84)*WORLD_W;
-    const hy=(0.08+rnd()*0.84)*WORLD_H;
+    let hx, hy;
+    // Try up to 12 times to place this hotspot off the paths
+    let placed = false;
+    for(let tries = 0; tries < 12; tries++){
+      hx = (0.08+rnd()*0.84)*WORLD_W;
+      hy = (0.08+rnd()*0.84)*WORLD_H;
+      if(!_isOnPath(hx, hy)){ placed = true; break; }
+    }
+    if(!placed) continue; // skip this hotspot — too close to paths
     const clusterSize=6+Math.floor(rnd()*9); // 6-14 props per cluster
     const clusterRadius=90+rnd()*130; // tight to medium spread
     // Pick a "theme" prop type for this cluster — biases which props appear
@@ -1713,6 +1751,8 @@ function generateEnvironment(){
       const cd=rnd()*rnd()*clusterRadius; // squared gives center bias
       const px=Math.max(40,Math.min(WORLD_W-40,hx+Math.cos(ca)*cd));
       const py=Math.max(40,Math.min(WORLD_H-40,hy+Math.sin(ca)*cd));
+      // Also skip individual props that landed on a path
+      if(_isOnPath(px, py)) continue;
       // Base size 16-58, then scaled by per-type multiplier
       const mult=PROP_SIZE_MULT[chosenType]||1;
       const sz=(16+rnd()*42)*mult;
@@ -1763,12 +1803,18 @@ function generateEnvironment(){
   }
 
   // ─── PHASE 3: DRAIN REMAINING BUDGET as random scatter ───
-  // Any leftover count goes into random uniform scatter to fill gaps
+  // Any leftover count goes into random uniform scatter to fill gaps.
+  // Also respects path clearance — leftover scatter avoids path corridors.
   typeBuckets.forEach(bucket=>{
     while(bucket.remaining>0){
       bucket.remaining--;
-      const px=(0.06+rnd()*0.88)*WORLD_W;
-      const py=(0.06+rnd()*0.88)*WORLD_H;
+      let px, py, placed = false;
+      for(let tries = 0; tries < 6; tries++){
+        px = (0.06+rnd()*0.88)*WORLD_W;
+        py = (0.06+rnd()*0.88)*WORLD_H;
+        if(!_isOnPath(px, py)){ placed = true; break; }
+      }
+      if(!placed) continue; // skip props that can't find a path-clear spot
       const mult=PROP_SIZE_MULT[bucket.type]||1;
       const sz=(16+rnd()*42)*mult;
       envProps.push({
@@ -1783,8 +1829,8 @@ function generateEnvironment(){
   // are indexed — the rest are purely decorative.
   buildPropSpatialGrid();
 
-  // Also regenerate terrain features (paths, patches) for the current theme
-  if(typeof generateTerrainFeatures==='function')generateTerrainFeatures();
+  // Terrain features (paths, patches) were already regenerated at the start
+  // of this function so prop placement could avoid the path corridors.
 
   // Generate world chests for this zone (skip in camp)
   generateWorldChests(seedBase);
@@ -2531,7 +2577,24 @@ function resolvePlayerMovement(fromX,fromY,toX,toY,radius){
   if(!getPropCollisionAt(fromX,toY,radius)){
     return {x:fromX,y:toY};
   }
-  // Blocked both ways — stay put
+  // Blocked both ways. Check if we're ALREADY inside a prop (stuck).
+  // If so, eject the player outward along the prop→player vector.
+  const stuckProp = getPropCollisionAt(fromX,fromY,radius);
+  if(stuckProp){
+    const edx = fromX - stuckProp.x, edy = fromY - stuckProp.y;
+    const ed = Math.max(0.01, Math.sqrt(edx*edx + edy*edy));
+    const ejectDist = radius + stuckProp.collRadius + 2;
+    const ex = stuckProp.x + (edx/ed) * ejectDist;
+    const ey = stuckProp.y + (edy/ed) * ejectDist;
+    // Clamp to world bounds
+    const cx = Math.max(30, Math.min(WORLD_W-30, ex));
+    const cy = Math.max(30, Math.min(WORLD_H-30, ey));
+    // Only eject if the ejection point itself is clear
+    if(!getPropCollisionAt(cx,cy,radius)){
+      return {x:cx, y:cy};
+    }
+  }
+  // Last resort — stay put
   return {x:fromX,y:fromY};
 }
 
@@ -6552,14 +6615,19 @@ function setAfkWaypoint(){
   if(next===-1){player.visitedSectors.fill(false);next=Math.floor(Math.random()*9);}
   player.sector=next;
   const col=next%3,row=Math.floor(next/3),sw=WORLD_W/3,sh=WORLD_H/3;
-  // Try up to 8 points within the chosen sector until we find a clear one.
-  // Falls back to the last attempt if nothing clear was found — avoids infinite loops.
+  // Try up to 16 points within the chosen sector for a clear one
   let wx=col*sw+100+Math.random()*(sw-200);
   let wy=row*sh+100+Math.random()*(sh-200);
-  for(let tries=0;tries<8;tries++){
-    if(!getPropCollisionAt(wx,wy,18))break;
+  let found = false;
+  for(let tries=0;tries<16;tries++){
+    if(!getPropCollisionAt(wx,wy,18)){ found = true; break; }
     wx=col*sw+100+Math.random()*(sw-200);
     wy=row*sh+100+Math.random()*(sh-200);
+  }
+  // Last resort — use findClearPosition to guarantee a clear point
+  if(!found){
+    const safe = findClearPosition(wx, wy, 18);
+    wx = safe.x; wy = safe.y;
   }
   player.afkWpX=wx;
   player.afkWpY=wy;
@@ -9761,9 +9829,9 @@ refreshTitleButtons();
 //    less than TAP_MAX_HOLD_MS, it's a tap
 //  - Tap world coords are checked against all camp NPCs; nearest within
 //    TAP_INTERACT_RADIUS triggers that NPC's interaction
-const TAP_MAX_DRIFT = 18;      // px — finger movement above this = drag, not tap
-const TAP_MAX_HOLD_MS = 350;   // ms — hold time above this = drag, not tap
-const TAP_INTERACT_RADIUS = 80; // world-units radius around tap point to find NPC
+const TAP_MAX_DRIFT = 35;      // px — finger movement above this = drag, not tap
+const TAP_MAX_HOLD_MS = 600;   // ms — hold time above this = drag, not tap
+const TAP_INTERACT_RADIUS = 120; // world-units radius around tap point to find NPC
 let _tapTracker = { active:false, sx:0, sy:0, startTime:0 };
 
 // Convert a screen position (client coords) to world coords using current camera
