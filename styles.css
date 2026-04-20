@@ -3079,3 +3079,245 @@ canvas#c{display:block;position:fixed;top:0;left:0}
   0%,100%{opacity:0.85;transform:scale(1);}
   50%{opacity:1;transform:scale(1.15);}
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   VEILGATE PANEL — Endgame tier selection
+   ═══════════════════════════════════════════════════════════════════ */
+#veilgatePanel{
+  display:none;
+  position:fixed;
+  inset:40px;
+  z-index:900;
+  background:
+    radial-gradient(ellipse at top,rgba(251,191,36,0.12),transparent 60%),
+    linear-gradient(140deg,rgba(14,10,24,0.97),rgba(22,16,36,0.97));
+  border:1px solid rgba(251,191,36,0.4);
+  border-radius:14px;
+  box-shadow:0 20px 60px rgba(0,0,0,0.85), 0 0 100px rgba(251,191,36,0.15) inset;
+  padding:18px 22px;
+  overflow-y:auto;
+  font-family:'Cinzel',serif;
+  color:#d4c8e8;
+}
+.vg-intro{
+  text-align:center;
+  padding:14px 10px;
+  margin:12px 0 16px;
+  font-size:12px;
+  color:#fbbf24;
+  letter-spacing:0.5px;
+  line-height:1.6;
+  border-top:1px solid rgba(251,191,36,0.25);
+  border-bottom:1px solid rgba(251,191,36,0.25);
+  font-style:italic;
+}
+
+.vg-unlock-banner{
+  text-align:center;
+  padding:30px 20px;
+  background:rgba(0,0,0,0.4);
+  border:1px dashed rgba(156,163,175,0.4);
+  border-radius:10px;
+  margin-bottom:20px;
+}
+.vg-unlock-text{
+  font-family:'Cinzel',serif;
+  font-size:16px;
+  color:#c4b5fd;
+  letter-spacing:2px;
+  margin-bottom:8px;
+}
+.vg-unlock-text span{color:#fbbf24;}
+.vg-unlock-sub{
+  font-size:12px;
+  color:#9ca3af;
+  letter-spacing:1.5px;
+}
+
+.vg-stats-banner{
+  display:flex;
+  justify-content:space-around;
+  padding:14px;
+  background:linear-gradient(135deg,rgba(251,191,36,0.08),rgba(251,191,36,0.15),rgba(251,191,36,0.08));
+  border:1px solid rgba(251,191,36,0.3);
+  border-radius:10px;
+  margin-bottom:18px;
+}
+.vg-stat{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:4px;
+}
+.vg-stat-label{
+  font-family:'Cinzel',serif;
+  font-size:9px;
+  letter-spacing:2.5px;
+  color:#c4b5fd;
+}
+.vg-stat-val{
+  font-family:'Cinzel',serif;
+  font-size:28px;
+  font-weight:600;
+  color:#fbbf24;
+  text-shadow:0 0 12px rgba(251,191,36,0.55);
+  letter-spacing:1px;
+}
+
+.vg-tier-list{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  margin-bottom:18px;
+}
+.vg-tier-card{
+  background:linear-gradient(150deg,rgba(28,22,44,0.9),rgba(22,18,36,0.9));
+  border:1px solid rgba(139,92,246,0.25);
+  border-radius:10px;
+  padding:12px 14px;
+  transition:all 0.2s ease;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:12px;
+}
+.vg-tier-card.available{
+  border-color:rgba(196,181,253,0.5);
+}
+.vg-tier-card.available:hover{
+  border-color:#c4b5fd;
+  background:linear-gradient(150deg,rgba(36,28,54,0.95),rgba(28,22,44,0.95));
+}
+.vg-tier-card.completed{
+  border-left:3px solid #22c55e;
+}
+.vg-tier-card.locked{
+  opacity:0.5;
+  border-style:dashed;
+}
+.vg-tier-card.endless{
+  border-left:3px solid #fbbf24;
+  background:linear-gradient(150deg,rgba(60,40,0,0.5),rgba(40,25,0,0.5));
+}
+.vg-tier-info{
+  flex:1;
+  min-width:0;
+}
+.vg-tier-hdr{
+  display:flex;
+  align-items:baseline;
+  gap:8px;
+  margin-bottom:4px;
+}
+.vg-tier-num{
+  font-family:'Cinzel',serif;
+  font-size:14px;
+  font-weight:600;
+  color:#fbbf24;
+  letter-spacing:2px;
+}
+.vg-tier-name{
+  font-family:'Cinzel',serif;
+  font-size:13px;
+  color:#e9d5ff;
+  letter-spacing:1px;
+}
+.vg-tier-flavor{
+  font-size:10px;
+  color:#a89dc4;
+  font-style:italic;
+  line-height:1.4;
+  margin-bottom:4px;
+}
+.vg-tier-stats{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  font-size:10px;
+  color:#c4b5fd;
+  letter-spacing:1px;
+}
+.vg-tier-stat-chip{
+  padding:2px 7px;
+  background:rgba(139,92,246,0.15);
+  border-radius:4px;
+}
+.vg-tier-stat-chip.cleared{background:rgba(34,197,94,0.18);color:#4ade80;}
+.vg-tier-stat-chip.deaths{background:rgba(239,68,68,0.14);color:#fca5a5;}
+.vg-tier-enter-btn{
+  background:linear-gradient(135deg,rgba(251,191,36,0.3),rgba(251,191,36,0.18));
+  border:1px solid rgba(251,191,36,0.7);
+  color:#fbbf24;
+  padding:8px 16px;
+  border-radius:6px;
+  font-family:'Cinzel',serif;
+  font-size:11px;
+  letter-spacing:2px;
+  cursor:pointer;
+  transition:all 0.15s ease;
+  white-space:nowrap;
+}
+.vg-tier-enter-btn:hover{
+  background:linear-gradient(135deg,rgba(251,191,36,0.5),rgba(251,191,36,0.3));
+  box-shadow:0 0 15px rgba(251,191,36,0.45);
+}
+.vg-tier-enter-btn:disabled{
+  opacity:0.3;
+  cursor:not-allowed;
+  background:rgba(100,100,100,0.2);
+  border-color:rgba(150,150,150,0.3);
+  color:#9ca3af;
+}
+.vg-tier-enter-btn:disabled:hover{
+  box-shadow:none;
+}
+
+.vg-endless-section{
+  margin-top:20px;
+  padding-top:14px;
+  border-top:1px dashed rgba(251,191,36,0.4);
+}
+.vg-endless-hdr{
+  font-family:'Cinzel',serif;
+  font-size:12px;
+  letter-spacing:3px;
+  color:#fbbf24;
+  margin-bottom:10px;
+  text-align:center;
+}
+
+.vg-dev-panel{
+  margin-top:16px;
+  padding-top:12px;
+  border-top:1px dashed rgba(251,191,36,0.3);
+  display:flex;
+  gap:10px;
+  align-items:center;
+  flex-wrap:wrap;
+}
+.vg-dev-label{
+  font-family:'Cinzel',serif;
+  font-size:10px;
+  letter-spacing:2px;
+  color:#f59e0b;
+  opacity:0.7;
+}
+.vg-dev-btn{
+  background:rgba(245,158,11,0.14);
+  border:1px dashed rgba(245,158,11,0.5);
+  color:#fbbf24;
+  padding:5px 10px;
+  border-radius:5px;
+  font-family:'Cinzel',serif;
+  font-size:10px;
+  letter-spacing:1px;
+  cursor:pointer;
+}
+.vg-dev-btn:hover{background:rgba(245,158,11,0.28);}
+
+@media (max-width:640px){
+  #veilgatePanel{inset:10px;padding:10px;}
+  .vg-tier-card{flex-direction:column;align-items:stretch;gap:8px;}
+  .vg-tier-enter-btn{width:100%;}
+  .vg-stat-val{font-size:22px;}
+}
