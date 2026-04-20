@@ -361,6 +361,8 @@ const VEILGATE_MYTHIC_UNIQUES = [
     classLock: null,
     flavor: 'Worn by no one. Worn by everyone. Worn, regardless.',
     stats: { hp:500, sm:30, atk:25, crit:15 },
+    uniqueEffect: 'crown_execute',
+    uniqueEffectDesc: 'All abilities auto-crit enemies below 30% HP',
   },
   {
     name: 'Mantle of the First Hollow',
@@ -382,6 +384,8 @@ const VEILGATE_MYTHIC_UNIQUES = [
     classLock: null,
     flavor: 'Leaves no footprint. Leaves no memory of having been worn.',
     stats: { hp:350, moveSpdPct:25, cdr:18, res:10 },
+    uniqueEffect: 'shroud_momentum',
+    uniqueEffectDesc: 'Moving 200+ units without stopping grants +50% damage for 3s',
   },
   {
     name: 'Girdle of Endless Echoes',
@@ -403,6 +407,8 @@ const VEILGATE_MYTHIC_UNIQUES = [
     classLock: null,
     flavor: 'You wore this before you could remember. You were someone else then.',
     stats: { hp:300, sm:40, atk:25, crit:14, cdr:12 },
+    uniqueEffect: 'hollowed_threshold',
+    uniqueEffectDesc: 'Absorb all damage that would deal less than 10% of your max HP',
   },
 ];
 
