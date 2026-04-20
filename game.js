@@ -7080,7 +7080,20 @@ function hitEnemy(e,dmg,isCrit=false,fromX,fromY){
     }
   }
   e.hp-=finalDmg;e.hitFlash=0.18;
-  spawnDmgText(e.x,e.y-e.size,Math.round(finalDmg),critRoll?'#fde68a':'#fff',critRoll);
+  // Magnitude-aware damage text. Tier is computed from damage/maxHp ratio.
+  // If this hit will kill the enemy, use execute color (amber) even at low tiers
+  // to signal "the killing blow." Otherwise, standard crit/normal palette.
+  const isKillingBlow = e.hp <= 0;
+  const dmgColor = isKillingBlow
+    ? '#fbbf24'                              // golden — execution
+    : (critRoll ? '#fde68a' : '#fff');
+  spawnDmgText(
+    e.x, e.y - e.size,
+    Math.round(finalDmg),
+    dmgColor,
+    critRoll,
+    { targetMaxHp: e.maxHp }
+  );
   // ─── Reaver-Saint passive lifesteal: heal for % of damage dealt ───
   if(typeof reaverSaintOnHit === 'function') reaverSaintOnHit(finalDmg);
   // ─── Bloodbound Crimson Thirst — Ironwake talent lifesteal ───
@@ -7116,9 +7129,84 @@ function hitEnemy(e,dmg,isCrit=false,fromX,fromY){
   if(e.hp<=0)killEnemy(e);
 }
 
+// Death flourish — scales to the enemy type. Called from killEnemy.
+function _spawnDeathFlourish(e){
+  const color = e.typeData?.color || '#d4a555';
+  if(e.isBoss){
+    // BOSS DEATH — cinematic implosion
+    if(typeof screenShake === 'function') screenShake(28, 900);
+    if(typeof pushGroundFX === 'function'){
+      pushGroundFX({type:'bloom', x:e.x, y:e.y, r:300, maxR:300, color, life:0.9, maxLife:0.9});
+      pushGroundFX({type:'bloom', x:e.x, y:e.y, r:220, maxR:220, color:'#fbbf24', life:0.7, maxLife:0.7});
+      pushGroundFX({type:'ring', x:e.x, y:e.y, maxR:520, r:30, color:'#fbbf24', life:1.2, maxLife:1.2, expand:true});
+      pushGroundFX({type:'ring', x:e.x, y:e.y, maxR:380, r:20, color, life:1.0, maxLife:1.0, expand:true});
+      pushGroundFX({type:'scorch', x:e.x, y:e.y, r:240, maxR:240, color:'#7c2d12', life:4.0, maxLife:4.0});
+    }
+    // 40 soul fragments burst outward
+    for(let i = 0; i < 40; i++){
+      const a = (i/40) * Math.PI*2 + Math.random()*0.2;
+      const sp = 200 + Math.random()*200;
+      particles.push({
+        x: e.x, y: e.y,
+        vx: Math.cos(a)*sp, vy: Math.sin(a)*sp,
+        life: 0.9 + Math.random()*0.6,
+        maxLife: 1.5,
+        color: i % 3 === 0 ? '#fbbf24' : color,
+        size: 3 + Math.random()*3,
+        soul: true,
+      });
+    }
+    if(typeof SFX !== 'undefined' && SFX.eliteDeath) SFX.eliteDeath();
+  } else if(e.isElite){
+    // ELITE DEATH — satisfying burst
+    if(typeof screenShake === 'function') screenShake(12, 350);
+    if(typeof pushGroundFX === 'function'){
+      pushGroundFX({type:'bloom', x:e.x, y:e.y, r:160, maxR:160, color, life:0.6, maxLife:0.6});
+      pushGroundFX({type:'ring', x:e.x, y:e.y, maxR:240, r:15, color, life:0.7, maxLife:0.7, expand:true});
+      pushGroundFX({type:'scorch', x:e.x, y:e.y, r:110, maxR:110, color:'#2a1810', life:2.5, maxLife:2.5});
+    }
+    // 18 particles
+    for(let i = 0; i < 18; i++){
+      const a = (i/18) * Math.PI*2 + Math.random()*0.3;
+      const sp = 140 + Math.random()*120;
+      particles.push({
+        x: e.x, y: e.y,
+        vx: Math.cos(a)*sp, vy: Math.sin(a)*sp,
+        life: 0.7 + Math.random()*0.4,
+        maxLife: 1.1,
+        color, size: 2 + Math.random()*2,
+        soul: true,
+      });
+    }
+    if(typeof SFX !== 'undefined' && SFX.eliteDeath) SFX.eliteDeath();
+  } else {
+    // NORMAL DEATH — light puff
+    if(typeof pushGroundFX === 'function'){
+      pushGroundFX({type:'bloom', x:e.x, y:e.y, r:40, maxR:40, color, life:0.3, maxLife:0.3});
+    }
+    for(let i = 0; i < 6; i++){
+      const a = Math.random() * Math.PI*2;
+      const sp = 60 + Math.random()*60;
+      particles.push({
+        x: e.x, y: e.y,
+        vx: Math.cos(a)*sp, vy: Math.sin(a)*sp - 30,
+        life: 0.4 + Math.random()*0.2,
+        maxLife: 0.6,
+        color, size: 1.5 + Math.random()*1.5,
+      });
+    }
+    if(typeof SFX !== 'undefined' && SFX.enemyDeath) SFX.enemyDeath();
+  }
+}
+
 function killEnemy(e){
   e.dead=true;kills++;
   document.getElementById('killCount').textContent=`☠ ${kills}`;
+  // ═════ DEATH FLOURISH — scales to enemy significance ═════
+  // Normal mob: quick puff + kill particle. Elite: bigger burst + soul
+  // fragment ejection. Boss: big ring + shake + color flash. The
+  // perceptual difference makes every significant kill read as a moment.
+  _spawnDeathFlourish(e);
   // Juggernaut momentum refresh — kills sustain your stack window and add 1 stack.
   // Without this, momentum dies between fights even with full set.
   if(player.momentumStacks !== undefined){
@@ -7486,7 +7574,64 @@ function emitImpactSparks(ex,ey,fromX,fromY,color,count=8){
 function emitExplosion(x,y,color){for(let i=0;i<22;i++){const a=(i/22)*Math.PI*2,s=180+Math.random()*120;particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:0.65,maxLife:0.65,color,size:5+Math.random()*5});}}
 function emitWave(x,y){for(let i=0;i<28;i++){const a=Math.random()*Math.PI*2,s=120+Math.random()*180;particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:0.55,maxLife:0.55,color:'#a855f7',size:4+Math.random()*5});}}
 function emitSpiritBurst(x,y){for(let i=0;i<16;i++){const a=(i/16)*Math.PI*2;particles.push({x,y,vx:Math.cos(a)*100,vy:Math.sin(a)*100,life:0.7,maxLife:0.7,color:'#9DC4B0',size:4+Math.random()*3,soul:true});}}
-function spawnDmgText(wx,wy,val,color,isCrit){dmgTexts.push({wx,wy,val:isCrit?'CRIT '+String(val):String(val),color,isCrit,life:1.4,maxLife:1.4,vy:-70-Math.random()*25,vx:(Math.random()-0.5)*35});}
+// ═══════ IMPACT FEEDBACK ═══════════════════════════════════
+// Damage text with magnitude tiers. Tier determines size/color/shake:
+//   0 (tiny)    — <5% of target maxHP — faded small text
+//   1 (normal)  — 5-15% — standard text
+//   2 (solid)   — 15-30% — larger, golden accent
+//   3 (big)     — 30-50% — large, warm color, emits small spark particles
+//   4 (massive) — 50%+ — huge, screen pulse, golden burst
+// Crit adds one tier. Overkill (damage exceeds remaining HP by 2x+) adds bonus flair.
+function spawnDmgText(wx, wy, val, color, isCrit, opts){
+  opts = opts || {};
+  // Allow callers to pass a tier directly, or we infer from magnitude
+  let tier = opts.tier;
+  if(tier === undefined){
+    const maxHp = opts.targetMaxHp || 0;
+    const numeric = typeof val === 'number' ? val : parseFloat(val);
+    if(maxHp > 0 && !isNaN(numeric)){
+      const ratio = numeric / maxHp;
+      if(ratio < 0.05)      tier = 0;
+      else if(ratio < 0.15) tier = 1;
+      else if(ratio < 0.30) tier = 2;
+      else if(ratio < 0.50) tier = 3;
+      else                  tier = 4;
+    } else {
+      tier = isCrit ? 2 : 1;
+    }
+  }
+  if(isCrit) tier = Math.min(4, tier + 1);
+  dmgTexts.push({
+    wx, wy,
+    val: isCrit ? 'CRIT ' + String(val) : String(val),
+    color, isCrit, tier,
+    life: 1.4 + tier * 0.15,
+    maxLife: 1.4 + tier * 0.15,
+    vy: -70 - Math.random()*25 - tier*8,
+    vx: (Math.random()-0.5) * (35 + tier*6),
+  });
+  // Magnitude-appropriate screen shake. Bigger hits shake more.
+  if(tier >= 3){
+    if(typeof screenShake === 'function'){
+      screenShake(3 + tier*2, 120 + tier*40);
+    }
+  }
+  // Big/massive hits emit spark particles at impact point
+  if(tier >= 3 && typeof particles !== 'undefined'){
+    const sparks = tier === 4 ? 12 : 6;
+    for(let i = 0; i < sparks; i++){
+      const a = (i/sparks) * Math.PI*2 + Math.random()*0.3;
+      const sp = 120 + Math.random()*120;
+      particles.push({
+        x: wx, y: wy,
+        vx: Math.cos(a)*sp, vy: Math.sin(a)*sp - 50,
+        life: 0.5 + Math.random()*0.3,
+        maxLife: 0.8,
+        color, size: 2 + Math.random()*2,
+      });
+    }
+  }
+}
 function screenShake(amt,ms){shakeAmt=Math.max(shakeAmt,amt);shakeTimer=Math.max(shakeTimer,ms);}
 function addFeed(msg,color='#9DC4B0'){const l=document.getElementById('feedLog');const el=document.createElement('div');el.className='feed';el.style.color=color;el.textContent=msg;l.prepend(el);setTimeout(()=>el.remove(),3800);}
 function showLevelUp(){
@@ -8143,12 +8288,26 @@ function render(now){
 
   // Damage numbers
   dmgTexts.forEach(d=>{
-    const a=Math.min(1,d.life/d.maxLife*2);
-    ctx.globalAlpha=a;
-    ctx.font=`${d.isCrit?'bold ':''} ${d.isCrit?20:13}px 'Cinzel',serif`;
-    ctx.fillStyle=d.color;ctx.textAlign='center';
-    ctx.shadowColor=d.color;ctx.shadowBlur=d.isCrit?12:6;
-    ctx.fillText(d.val,d.wx,d.wy);
+    const a = Math.min(1, d.life/d.maxLife * 2);
+    ctx.globalAlpha = a;
+    // Tier-based sizing. Base 13, scales up per tier.
+    const tier = d.tier ?? (d.isCrit ? 2 : 1);
+    const fontSize = 11 + tier * 4;                // tier0=11, tier4=27
+    const weight = tier >= 2 ? 'bold' : 'normal';
+    ctx.font = `${weight} ${fontSize}px 'Cinzel', serif`;
+    ctx.textAlign = 'center';
+    // Tier 4 — golden outline shimmer
+    if(tier === 4){
+      ctx.strokeStyle = '#fbbf24';
+      ctx.lineWidth = 3;
+      ctx.shadowColor = '#fbbf24';
+      ctx.shadowBlur = 20;
+      ctx.strokeText(d.val, d.wx, d.wy);
+    }
+    ctx.fillStyle = d.color;
+    ctx.shadowColor = d.color;
+    ctx.shadowBlur = 4 + tier * 3;                 // tier0=4, tier4=16
+    ctx.fillText(d.val, d.wx, d.wy);
   });
   ctx.globalAlpha=1;ctx.shadowBlur=0;
 
