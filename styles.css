@@ -170,7 +170,12 @@ canvas#c{display:block;position:fixed;top:0;left:0}
   border:1.5px solid rgba(192,132,252,0.2);
   display:flex;flex-direction:column;align-items:center;justify-content:center;
   cursor:pointer;position:relative;overflow:hidden;transition:all 0.2s;
-  box-shadow:0 4px 15px rgba(0,0,0,0.6),inset 0 1px 0 rgba(255,255,255,0.05)
+  box-shadow:0 4px 15px rgba(0,0,0,0.6),inset 0 1px 0 rgba(255,255,255,0.05);
+  /* Mobile responsiveness — kill 300ms tap delay, disable text selection on hold */
+  touch-action:manipulation;
+  -webkit-tap-highlight-color:transparent;
+  user-select:none;
+  -webkit-user-select:none;
 }
 .ab:active{transform:scale(0.91)}
 .ab.ready{border-color:rgba(192,132,252,0.45);box-shadow:0 0 14px rgba(192,132,252,0.15),0 4px 15px rgba(0,0,0,0.6),inset 0 1px 0 rgba(255,255,255,0.08)}
@@ -1548,11 +1553,11 @@ canvas#c{display:block;position:fixed;top:0;left:0}
   #zoneLabel .kill-counter{font-size:10px}
   #spiritPanel{top:74px;left:10px}
   #setProgress{top:82px}
-  #abilityBar{padding:6px 8px 10px;gap:5px}
-  .ab{width:48px;height:48px;border-radius:9px}
+  #abilityBar{padding:6px 8px 10px;gap:6px}
+  .ab{width:56px;height:56px;border-radius:10px}
   .ab-hotkey{font-size:8px;top:2px;left:3px}
-  .ab-name{font-size:7px;bottom:2px}
-  .ab-cd{font-size:13px}
+  .ab-name{font-size:8px;bottom:2px}
+  .ab-cd{font-size:14px}
   /* Use the same ☰ toggle pattern as portrait — screen is too short for
      a 7-button vertical stack */
   #menuToggleBtn{
@@ -1614,11 +1619,11 @@ canvas#c{display:block;position:fixed;top:0;left:0}
   .set-badge{font-size:7px;padding:2px 8px}
 
   /* Ability bar — unchanged position, slightly tighter */
-  #abilityBar{padding:6px 6px 12px;gap:5px}
-  .ab{width:52px;height:52px;border-radius:10px}
+  #abilityBar{padding:6px 8px 12px;gap:6px}
+  .ab{width:60px;height:60px;border-radius:12px}
   .ab-hotkey{display:none} /* no keyboard on phone, free the visual space */
-  .ab-name{font-size:8px;bottom:3px;letter-spacing:0.3px}
-  .ab-cd{font-size:14px}
+  .ab-name{font-size:9px;bottom:3px;letter-spacing:0.3px}
+  .ab-cd{font-size:16px}
 
   /* ─── PULL-OUT MENU BUTTON ─── */
   /* Single toggle button replaces the vertical menu stack.
