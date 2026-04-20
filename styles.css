@@ -3062,3 +3062,20 @@ canvas#c{display:block;position:fixed;top:0;left:0}
   line-height:1.45;
   margin-top:3px;
 }
+
+/* Unique badge in bag slots — small golden diamond in upper right */
+.bag-slot-unique{
+  position:absolute;
+  top:3px;
+  right:3px;
+  font-size:14px;
+  color:#f59e0b;
+  text-shadow:0 0 8px rgba(245,158,11,0.9);
+  pointer-events:none;
+  z-index:3;
+  animation:unique-pulse 2.4s ease-in-out infinite;
+}
+@keyframes unique-pulse{
+  0%,100%{opacity:0.85;transform:scale(1);}
+  50%{opacity:1;transform:scale(1.15);}
+}
