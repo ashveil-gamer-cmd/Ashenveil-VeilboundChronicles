@@ -60,7 +60,7 @@ const QUEST_DEFINITIONS = [
     narrative:
       'The Procession speaks as one: "You arrived. That means you can still leave. ' +
       'Walk among the dead. Prove you can return."',
-    objective: { type: 'reach_zone', target: 'ashen_wastes', count: 1 },
+    objective: { type: 'reach_zone', target: 'ashen', count: 1 },
     reward: { xp: 'auto', gold: 100, materials: { scrap: 5 } },
     requires: { level: 1 },
     repeatable: false,
@@ -732,6 +732,135 @@ function _escHTML(s){
 // Shows the player's top-priority active quest at a glance. Picks the
 // oldest-accepted or most-progressed active quest as the "pinned" one.
 // Hidden when no active quests or when player is in camp.
+// ─── QUEST AUTO-NAVIGATION ──────────────────────────────────────────
+// Called when player taps the quest HUD tracker. Figures out what the
+// active quest needs and routes the player there:
+//   - Quest is ready to turn in   → travel to camp & walk to the quest giver NPC
+//   - Needs a specific zone       → open Cartographer / travel directly
+//   - Needs to kill enemies       → enable AFK (player is already where they need to be)
+//   - Needs a dungeon clear       → enable AFK (portal will spawn, AFK enters)
+//   - Needs a level               → enable AFK (grind path)
+function navigateToActiveQuest(){
+  const active = getActiveQuests();
+  if(active.length === 0){
+    if(typeof addFeed === 'function') addFeed('No active quest to navigate.', '#9ca3af');
+    return;
+  }
+  // Same pinning logic as the HUD — prefer the first incomplete
+  let pinned = active.find(q => {
+    const prog = questState.active[q.id]?.progress || 0;
+    return prog < q.objective.count;
+  });
+  if(!pinned) pinned = active[0];
+  const progress = questState.active[pinned.id]?.progress || 0;
+  const isReady = progress >= pinned.objective.count;
+  const obj = pinned.objective;
+
+  // ═══ READY TO TURN IN ═══
+  // Go to camp, set AFK autowalk destination to the quest giver.
+  if(isReady){
+    if(typeof addFeed === 'function'){
+      addFeed(`✦ Ready to turn in: ${pinned.title}`, '#22c55e');
+      addFeed('  ↳ Returning to camp...', '#9DC4B0');
+    }
+    _navTravelToCamp();
+    _navQueueCampTarget(pinned.giver);
+    return;
+  }
+
+  // ═══ OBJECTIVE-SPECIFIC ROUTING ═══
+  if(obj.type === 'reach_zone'){
+    // Walk to Cartographer in camp, OR if already in camp, open travel directly
+    const targetZone = ZONES.find(z => z.id === obj.target);
+    if(!targetZone){
+      if(typeof addFeed === 'function') addFeed(`Zone "${obj.target}" not found`, '#ef4444');
+      return;
+    }
+    // If already in the target zone, nothing to do
+    if(curZone?.id === obj.target){
+      if(typeof addFeed === 'function') addFeed(`Already in ${targetZone.name}`, '#9DC4B0');
+      return;
+    }
+    // If in camp, open travel screen directly
+    if(curZone?.isCamp){
+      if(typeof openZoneTravelScreen === 'function'){
+        openZoneTravelScreen();
+        if(typeof addFeed === 'function') addFeed(`◈ Travel to ${targetZone.name}`, '#c084fc');
+      }
+      return;
+    }
+    // Otherwise head back to camp to use the Cartographer
+    if(typeof addFeed === 'function') addFeed(`◈ Returning to camp for travel...`, '#c084fc');
+    _navTravelToCamp();
+    _navQueueCampTarget('cartographer');
+    return;
+  }
+
+  if(obj.type === 'kill_enemy_type' || obj.type === 'kill_elite' || obj.type === 'kill_boss'){
+    // Player needs to fight. If in camp, leave. Then turn on AFK.
+    if(curZone?.isCamp){
+      // Go to the starter zone so player can grind
+      const target = ZONES.find(z => !z.isCamp && player.level >= (z.minLv||0));
+      if(target && typeof travelToZone === 'function'){
+        travelToZone(target.id);
+      }
+    }
+    _navEnableAfk();
+    if(typeof addFeed === 'function') addFeed('▸ AFK enabled — hunt targets will be engaged automatically', '#fbbf24');
+    return;
+  }
+
+  if(obj.type === 'clear_dungeon'){
+    // AFK will walk into portals automatically. Player just needs to be out of camp.
+    if(curZone?.isCamp){
+      const target = ZONES.find(z => !z.isCamp && player.level >= (z.minLv||0));
+      if(target && typeof travelToZone === 'function') travelToZone(target.id);
+    }
+    _navEnableAfk();
+    if(typeof addFeed === 'function') addFeed('▸ AFK enabled — portals will be entered automatically', '#fbbf24');
+    return;
+  }
+
+  if(obj.type === 'reach_level'){
+    if(curZone?.isCamp){
+      const target = ZONES.find(z => !z.isCamp && player.level >= (z.minLv||0));
+      if(target && typeof travelToZone === 'function') travelToZone(target.id);
+    }
+    _navEnableAfk();
+    if(typeof addFeed === 'function') addFeed(`▸ AFK enabled — grind to level ${obj.target}`, '#fbbf24');
+    return;
+  }
+
+  // Fallback — just tell the player what to do
+  if(typeof addFeed === 'function'){
+    addFeed(`Objective: ${_objectiveDescription(pinned)}`, '#c4b5fd');
+  }
+}
+
+// Helper: travel to camp zone. Camp ID is 'procession' (see data.js).
+function _navTravelToCamp(){
+  if(curZone?.isCamp) return; // already there
+  if(typeof travelToZone === 'function') travelToZone('procession');
+}
+
+// After camp arrives, enable AFK and set a target NPC so AFK pathing
+// walks directly to them. Uses a pending target flag read by AFK movement.
+function _navQueueCampTarget(npcId){
+  player._questNavTarget = npcId;
+  // Enable AFK so player walks; in camp, AFK normally hides but we set an
+  // explicit target so movement code can path to the NPC manually.
+  player.afkEnabled = true;
+  if(typeof updateAfkToggleUI === 'function') updateAfkToggleUI();
+}
+
+// Helper: enable AFK mode programmatically (not via the toggle button).
+function _navEnableAfk(){
+  if(curZone?.isCamp) return; // AFK disabled in camp
+  player.afkEnabled = true;
+  player.lastInput = 0; // force idle timer to trigger immediately
+  if(typeof updateAfkToggleUI === 'function') updateAfkToggleUI();
+}
+
 function updateQuestHUDTracker(){
   const tracker = document.getElementById('questTracker');
   if(!tracker) return;
@@ -913,6 +1042,7 @@ if(typeof window !== 'undefined'){
   window.openProcessionDialogue = openProcessionDialogue;
   window.closeProcessionDialogue = closeProcessionDialogue;
   window.updateQuestHUDTracker = updateQuestHUDTracker;
+  window.navigateToActiveQuest = navigateToActiveQuest;
   window.devCompleteAllActive = devCompleteAllActive;
   window.devConfirmReset = devConfirmReset;
 }
