@@ -4273,3 +4273,480 @@ function castHollowcallerPresetOverride(idx, now){
   }
   return false;
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// IRONWAKE PRESET ABILITY OVERRIDES
+// ═══════════════════════════════════════════════════════════════════════
+// Three preset playstyles with dramatically different feel:
+//
+//   IRONGUARD   — fortress tank (defensive, reflection, pulls, taunts)
+//   JUGGERNAUT  — mobile warrior (charge, momentum stacks, execute)
+//   BLOODFORGED — glass-tank berserker (self-damage fuels big hits, lifesteal)
+//
+// Activation: wearing 4+ pieces of the preset's set. 8-piece amplifies.
+// castIronwakePresetOverride dispatches to the preset-specific handler.
+
+function castIronwakePresetOverride(idx, now){
+  const activePreset = (typeof getActivePresetId === 'function') ? getActivePresetId() : null;
+  if(!activePreset) return false;
+  const preset = BUILD_PRESETS[activePreset];
+  if(!preset || preset.classId !== 'ironwake') return false;
+  if(activePreset === 'ironguard'){
+    return (typeof castIronguard === 'function') ? castIronguard(idx, now) : false;
+  }
+  if(activePreset === 'juggernaut'){
+    return (typeof castJuggernaut === 'function') ? castJuggernaut(idx, now) : false;
+  }
+  if(activePreset === 'bloodforged'){
+    return (typeof castBloodforged === 'function') ? castBloodforged(idx, now) : false;
+  }
+  return false;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// IRONGUARD — The fortress
+// ═══════════════════════════════════════════════════════════════════════
+// Q: Steel Call — magnetic pull of 3 nearest enemies
+// W: Iron Tortoise — 90% damage reduction + reflect for 3s (5s at 8pc)
+// E: Thunderclap — stun all adjacent enemies for 1.5s
+// R: Thornguard — 15s buff, any melee hit on you reflects 150% damage
+// Ult: Unbroken Pillar — 8s invulnerability + zone-wide taunt
+
+function castIronguard(idx, now){
+  const setCount = getEquippedSetPieceCount('Unyielding Bulwark');
+  const is8pc = setCount >= 8;
+
+  if(idx === 0){
+    // ─── STEEL CALL — pull 3 nearest enemies to you ───
+    const pullCount = is8pc ? 5 : 3;
+    const pullRange = 500;
+    const pulled = [];
+    enemies.filter(e => !e.dead).forEach(e => {
+      const d = Math.sqrt((e.x - player.x)**2 + (e.y - player.y)**2);
+      if(d < pullRange) pulled.push({e, d});
+    });
+    pulled.sort((a,b) => a.d - b.d);
+    const targets = pulled.slice(0, pullCount);
+    targets.forEach(({e, d}) => {
+      // Tween enemy toward player over ~0.4s
+      const pullStrength = Math.min(1.0, 250 / d);
+      const dx = player.x - e.x, dy = player.y - e.y;
+      e.vx += (dx / d) * pullStrength * 400;
+      e.vy += (dy / d) * pullStrength * 400;
+      // Mark with blue streak
+      pushGroundFX({type:'bloom', x:e.x, y:e.y, r:40, maxR:40, color:'#60a5fa', life:0.4, maxLife:0.4});
+    });
+    abilityCDs[0] = now + effectiveCD(0);
+    if(typeof SFX !== 'undefined' && SFX.veilmark) SFX.veilmark();
+    // Visual: radial chain from player
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:pullRange*0.7, r:20, color:'#60a5fa', life:0.5, maxLife:0.5, expand:true});
+    addFeed(`⛓ STEEL CALL — ${targets.length} pulled${is8pc?' [AMPLIFIED]':''}`, '#60a5fa');
+    return true;
+  }
+
+  if(idx === 1){
+    // ─── IRON TORTOISE — 90% DR + reflect for 3s (5s at 8pc) ───
+    const duration = is8pc ? 5000 : 3000;
+    player.ironTortoiseUntil = now + duration;
+    abilityCDs[1] = now + effectiveCD(1);
+    if(typeof SFX !== 'undefined' && SFX.spiritSummon) SFX.spiritSummon();
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:120, r:15, color:'#60a5fa', life:0.5, maxLife:0.5, expand:true});
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:90, maxR:90, color:'#60a5fa', life:duration/1000, maxLife:duration/1000});
+    addFeed(`⛨ IRON TORTOISE — ${duration/1000}s invincible`, '#60a5fa');
+    return true;
+  }
+
+  if(idx === 2){
+    // ─── THUNDERCLAP — stun all adjacent enemies ───
+    const radius = is8pc ? 280 : 220;
+    const stunMs = is8pc ? 2000 : 1500;
+    const dmg = player.attack * 2.5 * damageMult();
+    let hits = 0;
+    enemies.forEach(e => {
+      if(e.dead) return;
+      const d2 = (e.x - player.x)**2 + (e.y - player.y)**2;
+      if(d2 < radius * radius){
+        hitEnemy(e, dmg, false, player.x, player.y);
+        e.stunUntil = now + stunMs;
+        // Kill their velocity
+        e.vx = 0; e.vy = 0;
+        hits++;
+      }
+    });
+    abilityCDs[2] = now + effectiveCD(2);
+    if(typeof SFX !== 'undefined' && SFX.detonate) SFX.detonate();
+    screenShake(18, 400);
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:radius, r:25, color:'#93c5fd', life:0.5, maxLife:0.5, expand:true});
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:radius*0.8, maxR:radius*0.8, color:'#60a5fa', life:0.4, maxLife:0.4});
+    addFeed(`⚡ THUNDERCLAP — ${hits} stunned`, '#60a5fa');
+    return true;
+  }
+
+  if(idx === 3){
+    // ─── THORNGUARD — 15s buff, hits reflect 150% ───
+    const duration = is8pc ? 20000 : 15000;
+    player.thornguardUntil = now + duration;
+    player.thornguardPct = is8pc ? 2.0 : 1.5; // reflect multiplier
+    abilityCDs[3] = now + effectiveCD(3);
+    if(typeof SFX !== 'undefined' && SFX.wrathTide) SFX.wrathTide();
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:200, r:20, color:'#60a5fa', life:0.6, maxLife:0.6, expand:true});
+    addFeed(`🗡 THORNGUARD — ${duration/1000}s reflection`, '#60a5fa');
+    return true;
+  }
+
+  if(idx === 4){
+    // ─── UNBROKEN PILLAR (Ult) — 8s invuln + global taunt ───
+    const duration = is8pc ? 10000 : 8000;
+    player.unbrokenPillarUntil = now + duration;
+    // Make all enemies target player
+    enemies.forEach(e => {
+      if(e.dead) return;
+      e.tauntedUntil = now + duration;
+    });
+    abilityCDs[4] = now + effectiveCD(4);
+    if(typeof SFX !== 'undefined' && SFX.eliteDeath) SFX.eliteDeath();
+    screenShake(26, 600);
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:400, maxR:400, color:'#60a5fa', life:0.8, maxLife:0.8});
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:600, r:40, color:'#93c5fd', life:1.0, maxLife:1.0, expand:true});
+    addFeed(`★ UNBROKEN PILLAR — ${duration/1000}s fortress`, '#93c5fd');
+    return true;
+  }
+
+  return false;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// JUGGERNAUT — The unstoppable force
+// ═══════════════════════════════════════════════════════════════════════
+// Q: Warpath — dash through enemies
+// W: Momentum — builds stacks, +5% dmg per stack, up to 20 stacks
+// E: Cleaving Arc — 270° melee arc, hits multiple
+// R: Executioner — kills enemies <30% HP instantly
+// Ult: Avalanche — jump-slam at target
+
+function castJuggernaut(idx, now){
+  const setCount = getEquippedSetPieceCount('Titan\'s Momentum');
+  const is8pc = setCount >= 8;
+
+  if(idx === 0){
+    // ─── WARPATH — dash through enemies ───
+    const dashRange = is8pc ? 520 : 400;
+    const dashDmg = player.attack * 3.5 * damageMult();
+    const dx = Math.cos(player.facing) * dashRange;
+    const dy = Math.sin(player.facing) * dashRange;
+    const endX = player.x + dx, endY = player.y + dy;
+    // Damage everything along the path
+    enemies.forEach(e => {
+      if(e.dead) return;
+      // Distance from enemy to line segment (player → endpoint)
+      const lineDist = _pointToSegDist(e.x, e.y, player.x, player.y, endX, endY);
+      if(lineDist < 80){
+        hitEnemy(e, dashDmg, false, player.x, player.y);
+        // Small punt
+        const pa = Math.atan2(dy, dx);
+        e.vx += Math.cos(pa + Math.PI/2) * 200;
+        e.vy += Math.sin(pa + Math.PI/2) * 200;
+      }
+    });
+    // Warp player
+    player.x = endX;
+    player.y = endY;
+    // Momentum gain
+    player.momentumStacks = Math.min(20, (player.momentumStacks || 0) + (is8pc ? 3 : 2));
+    player.momentumLastGainedAt = now;
+    abilityCDs[0] = now + effectiveCD(0);
+    if(typeof SFX !== 'undefined' && SFX.veilmark) SFX.veilmark();
+    screenShake(10, 250);
+    // Trail of fire behind player's path
+    for(let i = 0; i < 8; i++){
+      const t = i / 8;
+      pushGroundFX({
+        type:'bloom',
+        x: player.x - dx*(1-t), y: player.y - dy*(1-t),
+        r: 60+i*6, maxR: 60+i*6,
+        color:'#f59e0b', life: 0.4+i*0.05, maxLife: 0.4+i*0.05,
+      });
+    }
+    addFeed(`⚡ WARPATH — +${is8pc?3:2} Momentum (${player.momentumStacks})`, '#f59e0b');
+    return true;
+  }
+
+  if(idx === 1){
+    // ─── MOMENTUM — instantly gain 5 stacks + 8s lock-in ───
+    const gain = is8pc ? 8 : 5;
+    player.momentumStacks = Math.min(20, (player.momentumStacks || 0) + gain);
+    player.momentumLastGainedAt = now;
+    player.momentumLockedUntil = now + 8000; // no decay during this window
+    abilityCDs[1] = now + effectiveCD(1);
+    if(typeof SFX !== 'undefined' && SFX.spiritSummon) SFX.spiritSummon();
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:140, maxR:140, color:'#f59e0b', life:0.5, maxLife:0.5});
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:180, r:20, color:'#fbbf24', life:0.5, maxLife:0.5, expand:true});
+    addFeed(`🔥 MOMENTUM — +${gain} stacks (${player.momentumStacks} total)`, '#f59e0b');
+    return true;
+  }
+
+  if(idx === 2){
+    // ─── CLEAVING ARC — 270° melee arc ───
+    const radius = is8pc ? 320 : 250;
+    const dmg = player.attack * 3.0 * damageMult();
+    const facing = player.facing || 0;
+    const arcHalf = (is8pc ? 160 : 135) * Math.PI / 180; // 270° or 320°
+    let hits = 0;
+    enemies.forEach(e => {
+      if(e.dead) return;
+      const ex = e.x - player.x, ey = e.y - player.y;
+      const d = Math.sqrt(ex*ex + ey*ey);
+      if(d > radius) return;
+      const angle = Math.atan2(ey, ex);
+      let diff = angle - facing;
+      while(diff > Math.PI) diff -= 2*Math.PI;
+      while(diff < -Math.PI) diff += 2*Math.PI;
+      if(Math.abs(diff) <= arcHalf){
+        hitEnemy(e, dmg, false, player.x, player.y);
+        hits++;
+      }
+    });
+    abilityCDs[2] = now + effectiveCD(2);
+    if(typeof SFX !== 'undefined' && SFX.detonate) SFX.detonate();
+    screenShake(14, 320);
+    // Fan of fire in front
+    for(let i = -4; i <= 4; i++){
+      const a = facing + (i/5) * arcHalf;
+      const fx = player.x + Math.cos(a) * radius * 0.7;
+      const fy = player.y + Math.sin(a) * radius * 0.7;
+      pushGroundFX({type:'bloom', x:fx, y:fy, r:50, maxR:50, color:'#f59e0b', life:0.4, maxLife:0.4});
+    }
+    pushGroundFX({type:'scorch', x:player.x, y:player.y, r:radius-20, maxR:radius-20, color:'#7c2d12', life:1.2, maxLife:1.2});
+    addFeed(`⚔ CLEAVING ARC — ${hits} struck`, '#f59e0b');
+    return true;
+  }
+
+  if(idx === 3){
+    // ─── EXECUTIONER — instantly kill enemies <30% HP ───
+    const threshold = is8pc ? 0.40 : 0.30;
+    const radius = 350;
+    let executions = 0;
+    enemies.forEach(e => {
+      if(e.dead || e.isBoss) return; // bosses immune
+      const d = (e.x - player.x)**2 + (e.y - player.y)**2;
+      if(d > radius*radius) return;
+      if(e.hp / e.maxHp < threshold){
+        hitEnemy(e, 99999, true, player.x, player.y);
+        pushGroundFX({type:'bloom', x:e.x, y:e.y, r:100, maxR:100, color:'#fbbf24', life:0.4, maxLife:0.4});
+        // Blood fountain
+        for(let i = 0; i < 12; i++){
+          const a = Math.random() * Math.PI * 2;
+          particles.push({
+            x: e.x, y: e.y,
+            vx: Math.cos(a)*200, vy: Math.sin(a)*200 - 100,
+            life: 0.9, maxLife: 0.9,
+            color: '#ef4444', size: 3, soul: true,
+          });
+        }
+        executions++;
+      }
+    });
+    abilityCDs[3] = now + effectiveCD(3);
+    if(typeof SFX !== 'undefined' && SFX.wrathTide) SFX.wrathTide();
+    screenShake(20, 500);
+    addFeed(`☠ EXECUTIONER — ${executions} executed`, '#fbbf24');
+    return true;
+  }
+
+  if(idx === 4){
+    // ─── AVALANCHE (Ult) — jump to target, massive impact ───
+    const nearestEnemy = getNearestEnemy(800);
+    let tx, ty;
+    if(nearestEnemy){
+      tx = nearestEnemy.x; ty = nearestEnemy.y;
+    } else {
+      // Fire in facing direction
+      tx = player.x + Math.cos(player.facing) * 500;
+      ty = player.y + Math.sin(player.facing) * 500;
+    }
+    const radius = is8pc ? 420 : 340;
+    const dmg = player.attack * (is8pc ? 8 : 6) * damageMult();
+    let hits = 0;
+    // Teleport player (the "jump")
+    player.x = tx; player.y = ty;
+    // Smash
+    enemies.forEach(e => {
+      if(e.dead) return;
+      const d2 = (e.x - tx)**2 + (e.y - ty)**2;
+      if(d2 < radius*radius){
+        hitEnemy(e, dmg, false, tx, ty);
+        // Launch enemies away from impact
+        const dist = Math.sqrt(d2) || 1;
+        e.vx += (e.x - tx)/dist * 600;
+        e.vy += (e.y - ty)/dist * 600;
+        hits++;
+      }
+    });
+    abilityCDs[4] = now + effectiveCD(4);
+    if(typeof SFX !== 'undefined' && SFX.eliteDeath) SFX.eliteDeath();
+    screenShake(30, 700);
+    // Huge impact visuals
+    pushGroundFX({type:'bloom', x:tx, y:ty, r:300, maxR:300, color:'#f59e0b', life:0.8, maxLife:0.8});
+    pushGroundFX({type:'ring', x:tx, y:ty, maxR:radius, r:50, color:'#fbbf24', life:0.9, maxLife:0.9, expand:true});
+    pushGroundFX({type:'ring', x:tx, y:ty, maxR:radius*0.7, r:40, color:'#ef4444', life:0.7, maxLife:0.7, expand:true});
+    pushGroundFX({type:'scorch', x:tx, y:ty, r:radius-20, maxR:radius-20, color:'#7c2d12', life:3.0, maxLife:3.0});
+    addFeed(`★ AVALANCHE — ${hits} struck for ${Math.round(dmg)}`, '#fbbf24');
+    return true;
+  }
+
+  return false;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// BLOODFORGED — Pain is fuel
+// ═══════════════════════════════════════════════════════════════════════
+// Q: Frenzied Cleave — rapid strike (very short cooldown, chains)
+// W: Bloodrush — sacrifice HP for damage boost
+// E: Carnage — AOE that heals you 50% of damage dealt
+// R: Bloodvow — auto-revive once per fight
+// Ult: Unbound — execute threshold raised to 50% for 12s
+
+function castBloodforged(idx, now){
+  const setCount = getEquippedSetPieceCount('Bloodforged Harness');
+  const is8pc = setCount >= 8;
+
+  if(idx === 0){
+    // ─── FRENZIED CLEAVE — rapid short-range strike ───
+    // Very short cooldown version of Anchor Strike. Hits in a small front cone.
+    const range = is8pc ? 180 : 140;
+    const dmg = player.attack * (is8pc ? 2.2 : 1.8) * damageMult();
+    const facing = player.facing || 0;
+    const arcHalf = Math.PI / 3; // 120° cone
+    let hits = 0;
+    enemies.forEach(e => {
+      if(e.dead) return;
+      const ex = e.x - player.x, ey = e.y - player.y;
+      const d = Math.sqrt(ex*ex + ey*ey);
+      if(d > range) return;
+      const angle = Math.atan2(ey, ex);
+      let diff = angle - facing;
+      while(diff > Math.PI) diff -= 2*Math.PI;
+      while(diff < -Math.PI) diff += 2*Math.PI;
+      if(Math.abs(diff) <= arcHalf){
+        hitEnemy(e, dmg, false, player.x, player.y);
+        hits++;
+      }
+    });
+    // Short CD — 0.6s instead of default 1.5s Anchor Strike
+    abilityCDs[0] = now + 600;
+    if(typeof SFX !== 'undefined' && SFX.veilmark) SFX.veilmark();
+    screenShake(4, 120);
+    pushGroundFX({type:'bloom', x:player.x + Math.cos(facing)*60, y:player.y + Math.sin(facing)*60, r:range*0.6, maxR:range*0.6, color:'#ef4444', life:0.3, maxLife:0.3});
+    if(hits > 0) addFeed(`⚔ FRENZIED CLEAVE — ${hits} struck`, '#ef4444');
+    return true;
+  }
+
+  if(idx === 1){
+    // ─── BLOODRUSH — sacrifice 30% HP for +100% dmg/+50% dmg taken for 8s ───
+    const hpCost = Math.floor(player.hp * (is8pc ? 0.20 : 0.30));
+    player.hp = Math.max(1, player.hp - hpCost);
+    const duration = is8pc ? 12000 : 8000;
+    player.bloodrushUntil = now + duration;
+    player.bloodrushDmgMult = is8pc ? 2.5 : 2.0;
+    player.bloodrushTakenMult = is8pc ? 1.3 : 1.5;
+    abilityCDs[1] = now + effectiveCD(1);
+    if(typeof SFX !== 'undefined' && SFX.detonate) SFX.detonate();
+    screenShake(10, 300);
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:220, maxR:220, color:'#ef4444', life:0.6, maxLife:0.6});
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:250, r:25, color:'#7f1d1d', life:0.7, maxLife:0.7, expand:true});
+    // Blood eruption particles
+    for(let i = 0; i < 30; i++){
+      const a = Math.random() * Math.PI * 2;
+      particles.push({
+        x: player.x, y: player.y,
+        vx: Math.cos(a) * 250, vy: Math.sin(a) * 250 - 80,
+        life: 1.2, maxLife: 1.2,
+        color: '#7f1d1d', size: 3, soul: true,
+      });
+    }
+    addFeed(`⊗ BLOODRUSH — -${hpCost} HP, +${Math.round((player.bloodrushDmgMult-1)*100)}% dmg`, '#ef4444');
+    return true;
+  }
+
+  if(idx === 2){
+    // ─── CARNAGE — AOE that heals 50% of damage dealt ───
+    const radius = is8pc ? 380 : 300;
+    const dmg = player.attack * (is8pc ? 4.5 : 3.5) * damageMult();
+    let hits = 0;
+    let totalDmg = 0;
+    enemies.forEach(e => {
+      if(e.dead) return;
+      const d2 = (e.x - player.x)**2 + (e.y - player.y)**2;
+      if(d2 < radius*radius){
+        hitEnemy(e, dmg, false, player.x, player.y);
+        hits++;
+        totalDmg += dmg;
+      }
+    });
+    const healPct = is8pc ? 0.70 : 0.50;
+    const heal = Math.floor(totalDmg * healPct);
+    const actualHeal = Math.min(heal, player.maxHp - player.hp);
+    if(actualHeal > 0){
+      player.hp += actualHeal;
+      spawnDmgText(player.x, player.y - 30, `+${actualHeal}`, '#ef4444', true);
+    }
+    abilityCDs[2] = now + effectiveCD(2);
+    if(typeof SFX !== 'undefined' && SFX.detonate) SFX.detonate();
+    screenShake(16, 400);
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:radius, r:30, color:'#ef4444', life:0.7, maxLife:0.7, expand:true});
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:radius*0.8, maxR:radius*0.8, color:'#7f1d1d', life:0.5, maxLife:0.5});
+    pushGroundFX({type:'scorch', x:player.x, y:player.y, r:radius-30, maxR:radius-30, color:'#7f1d1d', life:2.5, maxLife:2.5});
+    addFeed(`✦ CARNAGE — ${hits} struck · +${actualHeal} HP`, '#ef4444');
+    return true;
+  }
+
+  if(idx === 3){
+    // ─── BLOODVOW — grant auto-revive (30% HP, once per cast) ───
+    player.bloodvowActive = true;
+    player.bloodvowReviveHpPct = is8pc ? 0.50 : 0.30;
+    abilityCDs[3] = now + effectiveCD(3);
+    if(typeof SFX !== 'undefined' && SFX.wrathTide) SFX.wrathTide();
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:200, maxR:200, color:'#ef4444', life:0.6, maxLife:0.6});
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:250, r:20, color:'#7f1d1d', life:0.8, maxLife:0.8, expand:true});
+    addFeed(`⊕ BLOODVOW — next death revives you`, '#ef4444');
+    return true;
+  }
+
+  if(idx === 4){
+    // ─── UNBOUND (Ult) — execute at 50% HP for 12s ───
+    const duration = is8pc ? 16000 : 12000;
+    player.unboundUntil = now + duration;
+    player.unboundThreshold = is8pc ? 0.60 : 0.50;
+    abilityCDs[4] = now + effectiveCD(4);
+    if(typeof SFX !== 'undefined' && SFX.eliteDeath) SFX.eliteDeath();
+    screenShake(24, 600);
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:320, maxR:320, color:'#ef4444', life:0.8, maxLife:0.8});
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:400, r:40, color:'#7f1d1d', life:1.0, maxLife:1.0, expand:true});
+    // Initial bloom of red particles
+    for(let i = 0; i < 40; i++){
+      const a = (i/40) * Math.PI * 2;
+      particles.push({
+        x: player.x, y: player.y,
+        vx: Math.cos(a) * 300, vy: Math.sin(a) * 300 - 80,
+        life: 1.5, maxLife: 1.5,
+        color: '#7f1d1d', size: 4, soul: true,
+      });
+    }
+    addFeed(`★ UNBOUND — ${duration/1000}s · execute at ${Math.round(player.unboundThreshold*100)}%`, '#ef4444');
+    return true;
+  }
+
+  return false;
+}
+
+// ─── SHARED HELPER: point-to-segment distance ───
+// Used by Warpath for path damage
+function _pointToSegDist(px, py, ax, ay, bx, by){
+  const dx = bx - ax, dy = by - ay;
+  const lenSq = dx*dx + dy*dy;
+  if(lenSq === 0) return Math.sqrt((px-ax)**2 + (py-ay)**2);
+  let t = ((px - ax)*dx + (py - ay)*dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  const closestX = ax + t*dx, closestY = ay + t*dy;
+  return Math.sqrt((px - closestX)**2 + (py - closestY)**2);
+}
