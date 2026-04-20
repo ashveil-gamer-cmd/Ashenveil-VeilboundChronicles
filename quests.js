@@ -60,7 +60,7 @@ const QUEST_DEFINITIONS = [
     narrative:
       'The Procession speaks as one: "You arrived. That means you can still leave. ' +
       'Walk among the dead. Prove you can return."',
-    objective: { type: 'reach_zone', target: 'ashen_wastes', count: 1 },
+    objective: { type: 'reach_zone', target: 'ashen', count: 1 },
     reward: { xp: 'auto', gold: 100, materials: { scrap: 5 } },
     requires: { level: 1 },
     repeatable: false,
@@ -68,7 +68,7 @@ const QUEST_DEFINITIONS = [
   {
     id: 'the_first_count',
     title: 'The First Count',
-    giver: 'procession',
+    giver: 'ashen_mourner',
     tier: 'zone',
     narrative:
       '"The bones remember who they were. Put them down a second time. ' +
@@ -81,7 +81,7 @@ const QUEST_DEFINITIONS = [
   {
     id: 'the_hollow_crawl',
     title: 'The Hollow Crawl',
-    giver: 'procession',
+    giver: 'ashen_scout',
     tier: 'zone',
     narrative:
       '"Something crawls under the ash. It was a child once. It deserves stillness."',
@@ -93,7 +93,7 @@ const QUEST_DEFINITIONS = [
   {
     id: 'into_the_crypts',
     title: 'Into the Crypts',
-    giver: 'procession',
+    giver: 'ashen_scout',
     tier: 'major',
     narrative:
       '"There is a door beneath the wastes. Behind it, something we left behind. ' +
@@ -118,12 +118,11 @@ const QUEST_DEFINITIONS = [
   },
 
   // ─── ZONE OBJECTIVES: Standing work in each zone ────────────────
-  // Repeatable quests tied to zone content. Think of them as "tasks the
-  // Procession always needs done." XP is lower but they never run out.
+  // Repeatable quests tied to zone content. Now given by zone NPCs.
   {
     id: 'zone_wastes_wraiths',
     title: 'The Wailing Chorus',
-    giver: 'procession',
+    giver: 'crypts_keeper',
     tier: 'zone',
     narrative: '"The wraiths sing when we sleep. Ten of them. Please."',
     objective: { type: 'kill_enemy_type', target: 'wraith', count: 10 },
@@ -134,7 +133,7 @@ const QUEST_DEFINITIONS = [
   {
     id: 'zone_elite_hunt',
     title: 'Name the Strongest',
-    giver: 'procession',
+    giver: 'crypts_scribe',
     tier: 'zone',
     narrative:
       '"Sometimes one of them grows stronger than the rest. A champion. ' +
@@ -149,7 +148,7 @@ const QUEST_DEFINITIONS = [
   {
     id: 'bounty_boss_hunt',
     title: 'A Crown of Skulls',
-    giver: 'procession',
+    giver: 'ember_pilgrim',
     tier: 'bounty',
     narrative: '"A boss still wears a crown. Pull it from them."',
     objective: { type: 'kill_boss', target: 'any', count: 1 },
@@ -371,8 +370,9 @@ function questOnEnemyKilled(enemy){
     const active = questState.active[qid];
     if(active.progress >= q.objective.count) return; // already done
     const obj = q.objective;
-    // Normalize enemy type — kill_enemy_type uses e.typeData.id or e.type
-    const enemyType = enemy.typeData?.id || enemy.type || '';
+    // Normalize enemy type — the real field is typeData.type (see ENEMY_TYPES in data.js).
+    // Fall back through e.type for safety (some code paths set it directly).
+    const enemyType = enemy.typeData?.type || enemy.type || '';
     if(obj.type === 'kill_enemy_type' && enemyType === obj.target){
       active.progress = Math.min(obj.count, active.progress + 1);
       updated = true;
@@ -511,4 +511,654 @@ if(typeof window !== 'undefined'){
   window.abandonQuest = abandonQuest;
   window.devCompleteQuest = devCompleteQuest;
   window.devResetAllQuests = devResetAllQuests;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// QUEST UI — Panels, tracker, Procession dialogue
+// ═══════════════════════════════════════════════════════════════════════
+
+// Current active tab in the quest log panel. Persisted in memory only.
+let _questActiveTab = 'active';
+
+// Open/close main quest log panel
+function openQuests(){
+  const panel = document.getElementById('questPanel');
+  if(!panel) return;
+  panel.style.display = 'block';
+  renderQuestPanel();
+}
+function closeQuests(){
+  const panel = document.getElementById('questPanel');
+  if(panel) panel.style.display = 'none';
+}
+function switchQuestTab(tab){
+  _questActiveTab = tab;
+  document.querySelectorAll('.quest-tab').forEach(el=>{
+    el.classList.toggle('active', el.getAttribute('data-qtab') === tab);
+  });
+  renderQuestPanel();
+}
+
+// Renders the quest panel based on active tab. Called on open and whenever
+// state changes (accept, turn-in, abandon).
+function renderQuestPanel(){
+  const list = document.getElementById('questListContainer');
+  if(!list) return;
+  // Refresh tab counts first
+  const active = getActiveQuests();
+  const available = getAvailableQuests();
+  const completed = QUEST_DEFINITIONS.filter(q => questState.completed[q.id]);
+  const activeCountEl = document.getElementById('qTabActiveCount');
+  const availCountEl = document.getElementById('qTabAvailCount');
+  const compCountEl = document.getElementById('qTabCompletedCount');
+  if(activeCountEl) activeCountEl.textContent = active.length;
+  if(availCountEl) availCountEl.textContent = available.length;
+  if(compCountEl) compCountEl.textContent = completed.length;
+
+  list.innerHTML = '';
+  let quests;
+  let emptyMsg;
+  if(_questActiveTab === 'active'){
+    quests = active;
+    emptyMsg = 'No active quests. Visit The Old Procession in camp to accept new offerings.';
+  } else if(_questActiveTab === 'available'){
+    quests = available;
+    emptyMsg = 'No offerings available at your level. Continue your journey — more will come.';
+  } else {
+    quests = completed;
+    emptyMsg = 'No quests completed yet. Your name is not yet written in the Procession\'s ledger.';
+  }
+  if(quests.length === 0){
+    list.innerHTML = `<div class="quest-empty-message">${emptyMsg}</div>`;
+    return;
+  }
+  quests.forEach(q => list.appendChild(_renderQuestCard(q, _questActiveTab)));
+
+  // Dev panel visibility — always visible for now (small team dev)
+  const devPanel = document.getElementById('questDevPanel');
+  if(devPanel) devPanel.style.display = 'flex';
+}
+
+function _renderQuestCard(q, context){
+  const card = document.createElement('div');
+  card.className = `quest-card quest-tier-${q.tier}`;
+  const active = questState.active[q.id];
+  const isComplete = active && active.progress >= q.objective.count;
+  if(isComplete) card.classList.add('quest-complete');
+
+  // Title + tier
+  const tierLabel = { story:'STORY', major:'MAJOR', zone:'ZONE', bounty:'BOUNTY' }[q.tier] || q.tier.toUpperCase();
+  let html = `<div class="quest-card-title">${_escHTML(q.title)} <span class="quest-card-tier">${tierLabel}</span></div>`;
+  // Narrative
+  html += `<div class="quest-card-narrative">${_escHTML(q.narrative)}</div>`;
+  // Objective description
+  html += `<div class="quest-card-objective">◆ ${_objectiveDescription(q)}</div>`;
+  // Progress bar (active quests only)
+  if(active){
+    const pct = Math.min(100, (active.progress / q.objective.count) * 100);
+    html += `<div class="quest-card-progress-bar"><div class="quest-card-progress-fill" style="width:${pct}%"></div></div>`;
+    html += `<div style="font-size:10px;color:#a89dc4;letter-spacing:1px;margin-bottom:8px;">${active.progress} / ${q.objective.count}</div>`;
+  }
+  // Rewards
+  html += '<div class="quest-card-rewards">';
+  // XP — show estimate based on tier
+  const tierXpMap = { story:'storyQuest', major:'majorQuest', zone:'stdQuest', bounty:'smallQuest' };
+  const activity = tierXpMap[q.tier] || 'stdQuest';
+  const xpEst = (typeof computeKillXP === 'function')
+    ? computeKillXP(player.level, player.level, activity)
+    : 0;
+  if(xpEst > 0){
+    html += `<span class="quest-card-reward reward-xp">✦ ${xpEst} XP</span>`;
+  }
+  if(q.reward.gold){
+    html += `<span class="quest-card-reward reward-gold">💰 ${q.reward.gold} gold</span>`;
+  }
+  if(q.reward.materials){
+    Object.entries(q.reward.materials).forEach(([mat, n])=>{
+      html += `<span class="quest-card-reward reward-material">◈ ${n} ${mat}</span>`;
+    });
+  }
+  html += '</div>';
+  card.innerHTML = html;
+
+  // Action buttons
+  const actions = document.createElement('div');
+  actions.className = 'quest-card-actions';
+  if(context === 'available'){
+    const acceptBtn = document.createElement('button');
+    acceptBtn.className = 'quest-action-btn';
+    acceptBtn.textContent = '✦ ACCEPT';
+    acceptBtn.addEventListener('click', ()=>{
+      if(acceptQuest(q.id)){
+        renderQuestPanel();
+        updateQuestHUDTracker();
+      }
+    });
+    actions.appendChild(acceptBtn);
+  } else if(context === 'active'){
+    if(isComplete){
+      const turnInBtn = document.createElement('button');
+      turnInBtn.className = 'quest-action-btn quest-action-turn-in';
+      turnInBtn.textContent = '★ TURN IN';
+      turnInBtn.addEventListener('click', ()=>{
+        if(turnInQuest(q.id)){
+          renderQuestPanel();
+          updateQuestHUDTracker();
+        }
+      });
+      actions.appendChild(turnInBtn);
+    }
+    const abandonBtn = document.createElement('button');
+    abandonBtn.className = 'quest-action-btn quest-action-danger';
+    abandonBtn.textContent = '⊗ ABANDON';
+    abandonBtn.addEventListener('click', ()=>{
+      if(confirm(`Abandon "${q.title}"?\n\nProgress will be lost. You can re-accept later.`)){
+        abandonQuest(q.id);
+        renderQuestPanel();
+        updateQuestHUDTracker();
+      }
+    });
+    actions.appendChild(abandonBtn);
+  }
+  if(actions.childElementCount > 0){
+    card.appendChild(actions);
+  }
+  return card;
+}
+
+// Convert an objective spec into human-readable text
+function _objectiveDescription(q){
+  const obj = q.objective;
+  switch(obj.type){
+    case 'kill_enemy_type':
+      return `Slay ${obj.count} ${_prettyEnemyName(obj.target)}`;
+    case 'kill_elite':
+      return obj.target === 'any'
+        ? `Slay ${obj.count} elite enemies`
+        : `Slay ${obj.count} elite ${_prettyEnemyName(obj.target)}`;
+    case 'kill_boss':
+      return obj.target === 'any'
+        ? `Defeat ${obj.count} dungeon boss${obj.count > 1 ? 'es' : ''}`
+        : `Defeat ${obj.target}`;
+    case 'clear_dungeon':
+      return obj.target === 'any'
+        ? `Clear ${obj.count} dungeon${obj.count > 1 ? 's' : ''}`
+        : `Clear ${_prettyDungeonName(obj.target)}`;
+    case 'reach_zone':
+      return `Travel to ${_prettyZoneName(obj.target)}`;
+    case 'reach_level':
+      return `Reach character level ${obj.target}`;
+    default:
+      return `Complete objective`;
+  }
+}
+
+function _prettyEnemyName(id){
+  const names = {
+    skeleton:'Skeletons', crawler:'Crawlers', wraith:'Wraiths', shade:'Shades',
+    specter:'Specters', golem:'Golems', abomination:'Abominations',
+  };
+  return names[id] || id;
+}
+function _prettyDungeonName(id){
+  const names = {
+    hollow_crypt:'the Hollow Crypts',
+    wraith_sanctum:'the Wraith Sanctum',
+    ashen_cathedral:'the Ashen Cathedral',
+  };
+  return names[id] || id;
+}
+function _prettyZoneName(id){
+  const names = {
+    ashen_wastes:'the Ashen Wastes',
+    wraith_sanctum:'the Wraith Sanctum',
+    ashen_cathedral:'the Ashen Cathedral',
+  };
+  // Try the ZONES array for a real match
+  if(typeof ZONES !== 'undefined'){
+    const z = ZONES.find(z => z.id === id);
+    if(z) return z.name;
+  }
+  return names[id] || id;
+}
+function _escHTML(s){
+  if(!s) return '';
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
+
+// ─── HUD QUEST TRACKER ──────────────────────────────────────────────
+// Shows the player's top-priority active quest at a glance. Picks the
+// oldest-accepted or most-progressed active quest as the "pinned" one.
+// Hidden when no active quests or when player is in camp.
+// ─── QUEST AUTO-NAVIGATION ──────────────────────────────────────────
+// Called when player taps the quest HUD tracker. Figures out what the
+// active quest needs and routes the player there:
+//   - Quest is ready to turn in   → travel to camp & walk to the quest giver NPC
+//   - Needs a specific zone       → open Cartographer / travel directly
+//   - Needs to kill enemies       → enable AFK (player is already where they need to be)
+//   - Needs a dungeon clear       → enable AFK (portal will spawn, AFK enters)
+//   - Needs a level               → enable AFK (grind path)
+function navigateToActiveQuest(){
+  const active = getActiveQuests();
+  if(active.length === 0){
+    if(typeof addFeed === 'function') addFeed('No active quest to navigate.', '#9ca3af');
+    return;
+  }
+  // Same pinning logic as the HUD — prefer the first incomplete
+  let pinned = active.find(q => {
+    const prog = questState.active[q.id]?.progress || 0;
+    return prog < q.objective.count;
+  });
+  if(!pinned) pinned = active[0];
+  const progress = questState.active[pinned.id]?.progress || 0;
+  const isReady = progress >= pinned.objective.count;
+  const obj = pinned.objective;
+
+  // ═══ READY TO TURN IN ═══
+  // Go to camp, set AFK autowalk destination to the quest giver.
+  if(isReady){
+    if(typeof addFeed === 'function'){
+      addFeed(`✦ Ready to turn in: ${pinned.title}`, '#22c55e');
+      addFeed('  ↳ Returning to camp...', '#9DC4B0');
+    }
+    _navTravelToCamp();
+    _navQueueCampTarget(pinned.giver);
+    return;
+  }
+
+  // ═══ OBJECTIVE-SPECIFIC ROUTING ═══
+  if(obj.type === 'reach_zone'){
+    // Walk to Cartographer in camp, OR if already in camp, open travel directly
+    const targetZone = ZONES.find(z => z.id === obj.target);
+    if(!targetZone){
+      if(typeof addFeed === 'function') addFeed(`Zone "${obj.target}" not found`, '#ef4444');
+      return;
+    }
+    // If already in the target zone, nothing to do
+    if(curZone?.id === obj.target){
+      if(typeof addFeed === 'function') addFeed(`Already in ${targetZone.name}`, '#9DC4B0');
+      return;
+    }
+    // If in camp, open travel screen directly
+    if(curZone?.isCamp){
+      if(typeof openZoneTravelScreen === 'function'){
+        openZoneTravelScreen();
+        if(typeof addFeed === 'function') addFeed(`◈ Travel to ${targetZone.name}`, '#c084fc');
+      }
+      return;
+    }
+    // Otherwise head back to camp to use the Cartographer
+    if(typeof addFeed === 'function') addFeed(`◈ Returning to camp for travel...`, '#c084fc');
+    _navTravelToCamp();
+    _navQueueCampTarget('cartographer');
+    return;
+  }
+
+  if(obj.type === 'kill_enemy_type' || obj.type === 'kill_elite' || obj.type === 'kill_boss'){
+    // Player needs to fight. If in camp, leave. Then turn on AFK.
+    if(curZone?.isCamp){
+      // Go to the starter zone so player can grind
+      const target = ZONES.find(z => !z.isCamp && player.level >= (z.minLv||0));
+      if(target && typeof travelToZone === 'function'){
+        travelToZone(target.id);
+      }
+    }
+    _navEnableAfk();
+    if(typeof addFeed === 'function') addFeed('▸ AFK enabled — hunt targets will be engaged automatically', '#fbbf24');
+    return;
+  }
+
+  if(obj.type === 'clear_dungeon'){
+    // AFK will walk into portals automatically. Player just needs to be out of camp.
+    if(curZone?.isCamp){
+      const target = ZONES.find(z => !z.isCamp && player.level >= (z.minLv||0));
+      if(target && typeof travelToZone === 'function') travelToZone(target.id);
+    }
+    _navEnableAfk();
+    if(typeof addFeed === 'function') addFeed('▸ AFK enabled — portals will be entered automatically', '#fbbf24');
+    return;
+  }
+
+  if(obj.type === 'reach_level'){
+    if(curZone?.isCamp){
+      const target = ZONES.find(z => !z.isCamp && player.level >= (z.minLv||0));
+      if(target && typeof travelToZone === 'function') travelToZone(target.id);
+    }
+    _navEnableAfk();
+    if(typeof addFeed === 'function') addFeed(`▸ AFK enabled — grind to level ${obj.target}`, '#fbbf24');
+    return;
+  }
+
+  // Fallback — just tell the player what to do
+  if(typeof addFeed === 'function'){
+    addFeed(`Objective: ${_objectiveDescription(pinned)}`, '#c4b5fd');
+  }
+}
+
+// Helper: travel to camp zone. Camp ID is 'procession' (see data.js).
+function _navTravelToCamp(){
+  if(curZone?.isCamp) return; // already there
+  if(typeof travelToZone === 'function') travelToZone('procession');
+}
+
+// After camp arrives, enable AFK and set a target NPC so AFK pathing
+// walks directly to them. Uses a pending target flag read by AFK movement.
+function _navQueueCampTarget(npcId){
+  player._questNavTarget = npcId;
+  // Enable AFK so player walks; in camp, AFK normally hides but we set an
+  // explicit target so movement code can path to the NPC manually.
+  player.afkEnabled = true;
+  if(typeof updateAfkToggleUI === 'function') updateAfkToggleUI();
+}
+
+// Helper: enable AFK mode programmatically (not via the toggle button).
+function _navEnableAfk(){
+  if(curZone?.isCamp) return; // AFK disabled in camp
+  player.afkEnabled = true;
+  player.lastInput = 0; // force idle timer to trigger immediately
+  if(typeof updateAfkToggleUI === 'function') updateAfkToggleUI();
+}
+
+function updateQuestHUDTracker(){
+  const tracker = document.getElementById('questTracker');
+  if(!tracker) return;
+  // Hide in camp (player isn't actively pursuing anything in camp)
+  if(curZone?.isCamp){
+    tracker.classList.add('quest-tracker-hidden');
+    return;
+  }
+  const active = getActiveQuests();
+  if(active.length === 0){
+    tracker.classList.add('quest-tracker-hidden');
+    return;
+  }
+  tracker.classList.remove('quest-tracker-hidden');
+  // Pick the first incomplete, else any complete one
+  let pinned = active.find(q => {
+    const prog = questState.active[q.id]?.progress || 0;
+    return prog < q.objective.count;
+  });
+  if(!pinned) pinned = active[0];
+  const progress = questState.active[pinned.id]?.progress || 0;
+  const required = pinned.objective.count;
+  const isReady = progress >= required;
+  const titleEl = document.getElementById('qtTitle');
+  const progEl = document.getElementById('qtProgress');
+  if(titleEl) titleEl.textContent = pinned.title;
+  if(progEl){
+    if(isReady){
+      progEl.textContent = '✓ READY TO TURN IN';
+      progEl.classList.add('quest-tracker-ready');
+    } else {
+      progEl.textContent = `${_objectiveDescription(pinned)} · ${progress}/${required}`;
+      progEl.classList.remove('quest-tracker-ready');
+    }
+  }
+}
+
+// ─── PROCESSION DIALOGUE (NPC interaction) ──────────────────────────
+// Opened when the player interacts with The Old Procession NPC in camp.
+// Shows three sections: turn-in ready, available to accept, active.
+function openProcessionDialogue(){
+  const panel = document.getElementById('processionDialogue');
+  if(!panel) return;
+  panel.style.display = 'block';
+  renderProcessionDialogue();
+}
+function closeProcessionDialogue(){
+  const panel = document.getElementById('processionDialogue');
+  if(panel) panel.style.display = 'none';
+}
+function renderProcessionDialogue(){
+  const turnInList = document.getElementById('procTurnInList');
+  const availList = document.getElementById('procAvailableList');
+  const activeList = document.getElementById('procActiveList');
+  if(!turnInList || !availList || !activeList) return;
+  turnInList.innerHTML = '';
+  availList.innerHTML = '';
+  activeList.innerHTML = '';
+
+  const active = getActiveQuests();
+  const completed = getCompletedQuests();
+  const available = getAvailableQuests();
+
+  // Quests ready to turn in
+  completed.forEach(q => turnInList.appendChild(_renderProcessionEntry(q, 'turn_in')));
+  // Available to accept
+  available.forEach(q => availList.appendChild(_renderProcessionEntry(q, 'accept')));
+  // In progress (not complete)
+  active.forEach(q => {
+    const prog = questState.active[q.id]?.progress || 0;
+    if(prog < q.objective.count){
+      activeList.appendChild(_renderProcessionEntry(q, 'in_progress'));
+    }
+  });
+
+  // Dynamic narrative based on state
+  const narrEl = document.getElementById('processionNarrative');
+  if(narrEl){
+    let msg;
+    if(completed.length > 0){
+      msg = '"You return. You have done what we asked. Give us the proof."';
+    } else if(available.length > 0){
+      msg = '"We speak as one. We have offerings. The dead remember what must be done."';
+    } else if(active.length > 0){
+      msg = '"We see the work you carry. Finish it, and return to us."';
+    } else {
+      msg = '"We have nothing to ask of you. Live, and come back when you are stronger."';
+    }
+    narrEl.innerHTML = `<em>${_escHTML(msg)}</em>`;
+  }
+}
+
+function _renderProcessionEntry(q, kind){
+  const row = document.createElement('div');
+  row.className = `quest-card quest-tier-${q.tier}`;
+  if(kind === 'turn_in') row.classList.add('quest-complete');
+  const tierLabel = { story:'STORY', major:'MAJOR', zone:'ZONE', bounty:'BOUNTY' }[q.tier] || q.tier.toUpperCase();
+  let html = `<div class="quest-card-title">${_escHTML(q.title)} <span class="quest-card-tier">${tierLabel}</span></div>`;
+  html += `<div class="quest-card-narrative">${_escHTML(q.narrative)}</div>`;
+  html += `<div class="quest-card-objective">◆ ${_objectiveDescription(q)}</div>`;
+  // Progress bar for in-progress
+  if(kind === 'in_progress'){
+    const prog = questState.active[q.id]?.progress || 0;
+    const pct = Math.min(100, (prog / q.objective.count) * 100);
+    html += `<div class="quest-card-progress-bar"><div class="quest-card-progress-fill" style="width:${pct}%"></div></div>`;
+    html += `<div style="font-size:10px;color:#a89dc4;margin-bottom:8px;">${prog} / ${q.objective.count}</div>`;
+  }
+  // Rewards
+  html += '<div class="quest-card-rewards">';
+  const tierXpMap = { story:'storyQuest', major:'majorQuest', zone:'stdQuest', bounty:'smallQuest' };
+  const activity = tierXpMap[q.tier] || 'stdQuest';
+  const xpEst = (typeof computeKillXP === 'function')
+    ? computeKillXP(player.level, player.level, activity)
+    : 0;
+  if(xpEst > 0) html += `<span class="quest-card-reward reward-xp">✦ ${xpEst} XP</span>`;
+  if(q.reward.gold) html += `<span class="quest-card-reward reward-gold">💰 ${q.reward.gold} gold</span>`;
+  if(q.reward.materials){
+    Object.entries(q.reward.materials).forEach(([mat, n])=>{
+      html += `<span class="quest-card-reward reward-material">◈ ${n} ${mat}</span>`;
+    });
+  }
+  html += '</div>';
+  row.innerHTML = html;
+
+  // Action
+  const actions = document.createElement('div');
+  actions.className = 'quest-card-actions';
+  if(kind === 'turn_in'){
+    const btn = document.createElement('button');
+    btn.className = 'quest-action-btn quest-action-turn-in';
+    btn.textContent = '★ TURN IN';
+    btn.addEventListener('click', ()=>{
+      if(turnInQuest(q.id)){
+        renderProcessionDialogue();
+        updateQuestHUDTracker();
+      }
+    });
+    actions.appendChild(btn);
+  } else if(kind === 'accept'){
+    const btn = document.createElement('button');
+    btn.className = 'quest-action-btn';
+    btn.textContent = '✦ ACCEPT';
+    btn.addEventListener('click', ()=>{
+      if(acceptQuest(q.id)){
+        renderProcessionDialogue();
+        updateQuestHUDTracker();
+      }
+    });
+    actions.appendChild(btn);
+  }
+  if(actions.childElementCount > 0) row.appendChild(actions);
+  return row;
+}
+
+// ─── DEV: complete all active quests at once ────────────────────────
+function devCompleteAllActive(){
+  const active = getActiveQuests();
+  active.forEach(q => {
+    questState.active[q.id].progress = q.objective.count;
+  });
+  if(typeof addFeed === 'function') addFeed(`⚡ Dev: completed ${active.length} quests`, '#f59e0b');
+  renderQuestPanel();
+  updateQuestHUDTracker();
+  if(typeof writeSave === 'function') writeSave();
+}
+function devConfirmReset(){
+  if(confirm('Reset ALL quest progress?\n\nThis will clear:\n• All active quests\n• All completion records\n• All turn-in history\n\nCharacter level, gear, and talents are untouched.')){
+    devResetAllQuests();
+    renderQuestPanel();
+    updateQuestHUDTracker();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ZONE NPC DIALOGUE — per-NPC quest interface (WoW Classic style)
+// Each zone NPC filters quests by giver, shows only their own offerings.
+// ═══════════════════════════════════════════════════════════════════
+
+// Returns {available, turnIn, active} counts for a specific quest giver.
+// Used to light up "!" / "?" indicators on NPCs.
+function questGiverHasWork(giverId){
+  if(!giverId) return {available:0, turnIn:0, active:0};
+  const result = {available:0, turnIn:0, active:0};
+  // Available quests from this giver
+  getAvailableQuests().forEach(q => {
+    if(q.giver === giverId) result.available++;
+  });
+  // Turn-in ready + active-in-progress from this giver
+  getActiveQuests().forEach(q => {
+    if(q.giver !== giverId) return;
+    const prog = questState.active[q.id]?.progress || 0;
+    if(prog >= q.objective.count) result.turnIn++;
+    else result.active++;
+  });
+  return result;
+}
+
+// Currently-open zone NPC for the dialogue (so renderZoneNpcDialogue can
+// filter by the right giver).
+let _currentZoneNpc = null;
+
+function openZoneNpcDialogue(npc){
+  if(!npc) return;
+  _currentZoneNpc = npc;
+  // Build the panel lazily — it's not in the base HTML
+  let panel = document.getElementById('zoneNpcDialogue');
+  if(!panel){
+    panel = document.createElement('div');
+    panel.id = 'zoneNpcDialogue';
+    panel.innerHTML = `
+      <div class="panel-header">
+        <h2 id="znpcTitle">NPC</h2>
+        <button class="panel-close" onclick="closeZoneNpcDialogue()">← BACK</button>
+      </div>
+      <div class="znpc-flavor" id="znpcFlavor"></div>
+      <div class="znpc-section" id="znpcTurnInSection">
+        <div class="znpc-section-label">✓ READY TO TURN IN</div>
+        <div id="znpcTurnInList"></div>
+      </div>
+      <div class="znpc-section" id="znpcAvailableSection">
+        <div class="znpc-section-label">◆ AVAILABLE</div>
+        <div id="znpcAvailableList"></div>
+      </div>
+      <div class="znpc-section" id="znpcActiveSection">
+        <div class="znpc-section-label">▸ IN PROGRESS</div>
+        <div id="znpcActiveList"></div>
+      </div>
+      <div class="znpc-empty" id="znpcEmpty" style="display:none">
+        <div style="font-style:italic">The figure regards you in silence.</div>
+        <div style="font-size:10px;margin-top:8px;opacity:0.7">Come back when you're stronger.</div>
+      </div>
+    `;
+    document.body.appendChild(panel);
+  }
+  panel.style.display = 'block';
+  renderZoneNpcDialogue();
+}
+
+function closeZoneNpcDialogue(){
+  const panel = document.getElementById('zoneNpcDialogue');
+  if(panel) panel.style.display = 'none';
+  _currentZoneNpc = null;
+}
+
+function renderZoneNpcDialogue(){
+  const npc = _currentZoneNpc;
+  if(!npc) return;
+  const titleEl = document.getElementById('znpcTitle');
+  const flavorEl = document.getElementById('znpcFlavor');
+  if(titleEl) titleEl.textContent = npc.name || 'NPC';
+  if(flavorEl) flavorEl.innerHTML = `<em>${npc.flavor || ''}</em>`;
+
+  const turnInList = document.getElementById('znpcTurnInList');
+  const availList = document.getElementById('znpcAvailableList');
+  const activeList = document.getElementById('znpcActiveList');
+  const emptyEl = document.getElementById('znpcEmpty');
+  if(!turnInList || !availList || !activeList) return;
+  turnInList.innerHTML = '';
+  availList.innerHTML = '';
+  activeList.innerHTML = '';
+
+  const active = getActiveQuests().filter(q => q.giver === npc.id);
+  const completed = getCompletedQuests().filter(q => q.giver === npc.id);
+  const available = getAvailableQuests().filter(q => q.giver === npc.id);
+
+  completed.forEach(q => turnInList.appendChild(_renderProcessionEntry(q, 'turn_in')));
+  available.forEach(q => availList.appendChild(_renderProcessionEntry(q, 'accept')));
+  active.forEach(q => {
+    const prog = questState.active[q.id]?.progress || 0;
+    if(prog < q.objective.count){
+      activeList.appendChild(_renderProcessionEntry(q, 'in_progress'));
+    }
+  });
+
+  // Toggle section visibility based on content
+  document.getElementById('znpcTurnInSection').style.display = completed.length ? '' : 'none';
+  document.getElementById('znpcAvailableSection').style.display = available.length ? '' : 'none';
+  document.getElementById('znpcActiveSection').style.display = active.filter(q => {
+    const prog = questState.active[q.id]?.progress || 0;
+    return prog < q.objective.count;
+  }).length ? '' : 'none';
+  if(emptyEl){
+    emptyEl.style.display = (completed.length + available.length + active.length) === 0 ? '' : 'none';
+  }
+}
+
+// Expose all UI entry points globally so HTML onclick/onchange can reach them
+if(typeof window !== 'undefined'){
+  window.openQuests = openQuests;
+  window.closeQuests = closeQuests;
+  window.switchQuestTab = switchQuestTab;
+  window.openProcessionDialogue = openProcessionDialogue;
+  window.closeProcessionDialogue = closeProcessionDialogue;
+  window.updateQuestHUDTracker = updateQuestHUDTracker;
+  window.navigateToActiveQuest = navigateToActiveQuest;
+  window.devCompleteAllActive = devCompleteAllActive;
+  window.devConfirmReset = devConfirmReset;
+  window.openZoneNpcDialogue = openZoneNpcDialogue;
+  window.closeZoneNpcDialogue = closeZoneNpcDialogue;
+  window.questGiverHasWork = questGiverHasWork;
 }
