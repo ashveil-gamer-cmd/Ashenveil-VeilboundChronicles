@@ -664,3 +664,299 @@ if(typeof window !== 'undefined'){
   window.devGrantAllEchoes = devGrantAllEchoes;
   window.devClearVeilforge = devClearVeilforge;
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// VEILFORGE UI — Panel rendering, slot interaction, echo picker
+// ═══════════════════════════════════════════════════════════════════════
+
+// Current filter tab in the inventory view. Memory only.
+let _vfActiveTab = 'all';
+
+// Track which slot is currently awaiting an echo pick (for the modal)
+let _vfPickerContext = null; // {abilityId, slotIndex} | null
+
+function openVeilforge(){
+  const panel = document.getElementById('veilforgePanel');
+  if(!panel) return;
+  panel.style.display = 'block';
+  renderVeilforgePanel();
+}
+function closeVeilforge(){
+  const panel = document.getElementById('veilforgePanel');
+  if(panel) panel.style.display = 'none';
+  closeVeilforgePicker();
+}
+function switchVeilforgeTab(tab){
+  _vfActiveTab = tab;
+  document.querySelectorAll('.vf-type-tab').forEach(el=>{
+    el.classList.toggle('active', el.getAttribute('data-vftab') === tab);
+  });
+  renderVeilforgeInventory();
+}
+
+function renderVeilforgePanel(){
+  renderVeilforgeAbilities();
+  renderVeilforgeInventory();
+  // Inventory count header
+  const totalCount = Object.values(veilforgeState.inventory).reduce((a,b)=>a+b, 0);
+  const countEl = document.getElementById('vfInvCount');
+  if(countEl) countEl.textContent = `${totalCount} echoes`;
+}
+
+// ─── ABILITY LIST + SLOTS ───────────────────────────────────────
+function renderVeilforgeAbilities(){
+  const list = document.getElementById('vfAbilityList');
+  if(!list) return;
+  list.innerHTML = '';
+  const abilities = getPlayerAbilities();
+  const unlockedSlots = getUnlockedConduitSlots(player.level);
+  const hotkeys = ['Q','W','E','R','Ult'];
+  abilities.forEach((ability, idx) => {
+    const card = document.createElement('div');
+    card.className = 'vf-ability-card';
+    // Header
+    const hdr = document.createElement('div');
+    hdr.className = 'vf-ability-hdr';
+    hdr.innerHTML = `
+      <span class="vf-ability-name">${_vfEscHTML(ability.name)}</span>
+      <span class="vf-ability-hotkey">${hotkeys[idx] || '—'}</span>
+    `;
+    card.appendChild(hdr);
+    // Slots row — render all 5 slots, lock icons for ones not yet unlocked
+    const slotsRow = document.createElement('div');
+    slotsRow.className = 'vf-slots';
+    for(let s = 0; s < 5; s++){
+      const slotDef = _vfSlotDefAtIndex(s);
+      const isUnlocked = unlockedSlots.some(u => u.index === s);
+      const slotEl = document.createElement('div');
+      slotEl.className = `vf-slot ${slotDef.type}`;
+      const slotted = getSlottedEchoes(ability.id);
+      const currentEcho = slotted[s]?.echo;
+      if(currentEcho){
+        slotEl.classList.add('filled');
+        slotEl.innerHTML = `
+          <div class="vf-slot-icon">${ECHO_TYPES[currentEcho.type]?.icon || '◇'}</div>
+          <div class="vf-slot-label" title="${_vfEscHTML(currentEcho.name)}">${_vfTruncate(currentEcho.name, 14)}</div>
+        `;
+      } else if(isUnlocked){
+        slotEl.innerHTML = `
+          <div class="vf-slot-icon">${ECHO_TYPES[slotDef.type]?.icon || '—'}</div>
+          <div class="vf-slot-label">${slotDef.type.toUpperCase()}</div>
+        `;
+      } else {
+        slotEl.classList.add('locked');
+        slotEl.innerHTML = `
+          <div class="vf-slot-icon">🔒</div>
+          <div class="vf-slot-lock">L${slotDef.unlockLevel}</div>
+        `;
+      }
+      // Click handler
+      if(isUnlocked){
+        slotEl.addEventListener('click', ()=>{
+          openVeilforgePicker(ability.id, s);
+        });
+      } else {
+        slotEl.addEventListener('click', ()=>{
+          if(typeof addFeed === 'function'){
+            addFeed(`Slot unlocks at level ${slotDef.unlockLevel}`, '#9ca3af');
+          }
+        });
+      }
+      slotsRow.appendChild(slotEl);
+    }
+    card.appendChild(slotsRow);
+    list.appendChild(card);
+  });
+}
+
+// Definition for slot at index — used for labels when slot not unlocked
+function _vfSlotDefAtIndex(index){
+  const defaults = [
+    { index:0, type:'shape',     unlockLevel:10 },
+    { index:1, type:'element',   unlockLevel:20 },
+    { index:2, type:'behavior',  unlockLevel:35 },
+    { index:3, type:'resonance', unlockLevel:50 },
+    { index:4, type:'any',       unlockLevel:75 },
+  ];
+  return defaults[index] || defaults[0];
+}
+
+// ─── INVENTORY LIST ─────────────────────────────────────────────
+function renderVeilforgeInventory(){
+  const list = document.getElementById('vfInventoryList');
+  if(!list) return;
+  list.innerHTML = '';
+  // Gather inventory filtered by tab
+  const entries = [];
+  Object.entries(veilforgeState.inventory).forEach(([id, count])=>{
+    if(count <= 0) return;
+    const e = ECHO_BY_ID[id];
+    if(!e) return;
+    if(_vfActiveTab !== 'all' && e.type !== _vfActiveTab) return;
+    entries.push({ echo:e, count });
+  });
+  // Sort: tier desc (mythic first), then by name
+  const tierRank = { mythic:4, rare:3, uncommon:2, common:1 };
+  entries.sort((a,b) => {
+    const tr = (tierRank[b.echo.tier]||0) - (tierRank[a.echo.tier]||0);
+    if(tr !== 0) return tr;
+    return a.echo.name.localeCompare(b.echo.name);
+  });
+  if(entries.length === 0){
+    list.innerHTML = `<div class="vf-empty-msg">No echoes ${_vfActiveTab === 'all' ? 'collected yet' : `of type ${_vfActiveTab.toUpperCase()}`}. Defeat enemies to gather them.</div>`;
+    return;
+  }
+  entries.forEach(({echo, count}) => {
+    list.appendChild(_vfRenderEchoCard(echo, count));
+  });
+}
+
+function _vfRenderEchoCard(echo, count){
+  const card = document.createElement('div');
+  card.className = `vf-echo-card tier-${echo.tier}`;
+  const typeMeta = ECHO_TYPES[echo.type] || {};
+  card.innerHTML = `
+    <div class="vf-echo-head">
+      <span class="vf-echo-name">
+        <span class="vf-echo-type" style="background:${typeMeta.color}22;color:${typeMeta.color}">${typeMeta.icon || '◇'} ${echo.type.toUpperCase()}</span>
+        ${_vfEscHTML(echo.name)}
+      </span>
+      <span class="vf-echo-count">×${count}</span>
+    </div>
+    <div class="vf-echo-desc">${_vfEscHTML(echo.description)}</div>
+    <div class="vf-echo-source">↳ ${_vfEscHTML(echo.dropSource)}</div>
+  `;
+  return card;
+}
+
+// ─── SLOT PICKER MODAL ──────────────────────────────────────────
+// When player clicks a slot, show a modal with all valid echoes they own
+// that can fit that slot (type match + class lock + ability lock).
+function openVeilforgePicker(abilityId, slotIndex){
+  _vfPickerContext = { abilityId, slotIndex };
+  // Build modal
+  let modal = document.getElementById('vfPickerModal');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id = 'vfPickerModal';
+    modal.className = 'vf-picker-overlay';
+    modal.addEventListener('click', e => {
+      if(e.target === modal) closeVeilforgePicker();
+    });
+    document.body.appendChild(modal);
+  }
+  const slotDef = _vfSlotDefAtIndex(slotIndex);
+  const ability = getPlayerAbilities().find(a => a.id === abilityId);
+  const slotted = getSlottedEchoes(abilityId);
+  const currentEcho = slotted[slotIndex]?.echo;
+  // Filter inventory for valid echoes
+  const eligible = [];
+  Object.entries(veilforgeState.inventory).forEach(([id, count])=>{
+    if(count <= 0) return;
+    const e = ECHO_BY_ID[id];
+    if(!e) return;
+    // Type match (unless slot is 'any')
+    if(slotDef.type !== 'any' && e.type !== slotDef.type) return;
+    // Class lock
+    if(e.classLock && e.classLock !== player.classId) return;
+    // Ability lock
+    if(e.abilityLock && !e.abilityLock.includes(abilityId)) return;
+    eligible.push({ echo:e, count });
+  });
+  // Sort by tier desc
+  const tierRank = { mythic:4, rare:3, uncommon:2, common:1 };
+  eligible.sort((a,b) => (tierRank[b.echo.tier]||0) - (tierRank[a.echo.tier]||0));
+  // Render
+  let html = `
+    <div class="vf-picker-panel">
+      <div class="vf-picker-hdr">
+        <div>
+          <div class="vf-picker-title">${_vfEscHTML(ability?.name || abilityId)}</div>
+          <div style="font-size:10px;color:#9ca3af;letter-spacing:1.5px;margin-top:3px;">
+            Slot ${slotIndex+1} · ${slotDef.type.toUpperCase()}
+          </div>
+        </div>
+        <button class="vf-picker-close" onclick="closeVeilforgePicker()">✕</button>
+      </div>
+  `;
+  if(currentEcho){
+    html += `
+      <button class="vf-picker-unslot" onclick="_vfDoUnslot('${abilityId}', ${slotIndex})">
+        ⊗ Remove ${_vfEscHTML(currentEcho.name)} (return to inventory)
+      </button>
+    `;
+  }
+  if(eligible.length === 0){
+    html += `<div class="vf-empty-msg">No eligible echoes in your inventory. Go hunt for ${slotDef.type} echoes.</div>`;
+  } else {
+    html += '<div class="vf-picker-list">';
+    eligible.forEach(({echo, count}) => {
+      const tierLabel = echo.tier.toUpperCase();
+      html += `
+        <div class="vf-echo-card tier-${echo.tier}" onclick="_vfDoSlot('${abilityId}', ${slotIndex}, '${echo.id}')" style="cursor:pointer;">
+          <div class="vf-echo-head">
+            <span class="vf-echo-name">${_vfEscHTML(echo.name)}</span>
+            <span class="vf-echo-count">×${count} [${tierLabel}]</span>
+          </div>
+          <div class="vf-echo-desc">${_vfEscHTML(echo.description)}</div>
+        </div>
+      `;
+    });
+    html += '</div>';
+  }
+  html += '</div>';
+  modal.innerHTML = html;
+  modal.style.display = 'flex';
+}
+
+function closeVeilforgePicker(){
+  const modal = document.getElementById('vfPickerModal');
+  if(modal) modal.style.display = 'none';
+  _vfPickerContext = null;
+}
+
+// Called from the picker when player clicks an echo to slot
+function _vfDoSlot(abilityId, slotIndex, echoId){
+  const result = slotEcho(abilityId, slotIndex, echoId);
+  if(result.success){
+    if(typeof addFeed === 'function'){
+      const e = ECHO_BY_ID[echoId];
+      addFeed(`⚡ SLOTTED: ${e.name}`, '#c4b5fd');
+    }
+    closeVeilforgePicker();
+    renderVeilforgePanel();
+  } else {
+    if(typeof addFeed === 'function') addFeed(`✗ ${result.reason}`, '#ef4444');
+  }
+}
+function _vfDoUnslot(abilityId, slotIndex){
+  const result = unslotEcho(abilityId, slotIndex);
+  if(result.success){
+    if(typeof addFeed === 'function') addFeed('↩ Echo returned to inventory', '#c4b5fd');
+    closeVeilforgePicker();
+    renderVeilforgePanel();
+  }
+}
+
+// ─── UTIL HELPERS ───────────────────────────────────────────────
+function _vfEscHTML(s){
+  if(!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function _vfTruncate(s, n){
+  if(!s) return '';
+  if(s.length <= n) return s;
+  return s.slice(0, n-1) + '…';
+}
+
+// Expose globally for HTML onclick and menu wiring
+if(typeof window !== 'undefined'){
+  window.openVeilforge = openVeilforge;
+  window.closeVeilforge = closeVeilforge;
+  window.switchVeilforgeTab = switchVeilforgeTab;
+  window.renderVeilforgePanel = renderVeilforgePanel;
+  window.openVeilforgePicker = openVeilforgePicker;
+  window.closeVeilforgePicker = closeVeilforgePicker;
+  window._vfDoSlot = _vfDoSlot;
+  window._vfDoUnslot = _vfDoUnslot;
+}
