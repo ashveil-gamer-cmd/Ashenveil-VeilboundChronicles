@@ -680,6 +680,7 @@ ENEMY_TYPES[6].draw=drawSpecter;
 
 const TALENT_TREE={
   Binding:{
+    classId:'hollowcaller',
     color:'#9DC4B0',
     icon:'✦',
     talents:[
@@ -710,6 +711,7 @@ const TALENT_TREE={
     ],
   },
   Veilcraft:{
+    classId:'hollowcaller',
     color:'#f43f5e',
     icon:'✖',
     talents:[
@@ -740,6 +742,7 @@ const TALENT_TREE={
     ],
   },
   Hollow:{
+    classId:'hollowcaller',
     color:'#c084fc',
     icon:'♰',
     talents:[
@@ -767,6 +770,108 @@ const TALENT_TREE={
        desc:'Once per life, fatal damage is reduced to 1 HP instead.',
        effect:_=>'Cheat death once per life',
        apply:_=>({cheatDeath:1})},
+    ],
+  },
+
+  // ═══════ IRONWAKE TALENTS ═══════════════════════════════════════
+  // Three branches for Ironwake, ~13 ranks each. Talent IDs prefixed with
+  // 'i' (Ironclad), 'w' (Warborn), 'bl' (Bloodbound). Keys on bonuses
+  // intentionally don't conflict with Hollowcaller keys so computeTalentBonuses
+  // can merge both classes' talents into a single lookup safely.
+
+  Ironclad:{
+    classId:'ironwake',
+    color:'#60a5fa',
+    icon:'⛨',
+    talents:[
+      {id:'i1',name:'Anvil Flesh',icon:'♡',maxRank:3,gate:0,
+       desc:'Your body hardens under repeated blows.',
+       effect:r=>`+${r*10}% max HP`,
+       apply:r=>({hpPct:r*10})},
+      {id:'i2',name:'Stone Footing',icon:'⇵',maxRank:3,gate:0,
+       desc:'Harder to knock around.',
+       effect:r=>`-${r*20}% knockback taken`,
+       apply:r=>({knockbackReduce:r*20})},
+      {id:'i3',name:'Last Breath',icon:'↯',maxRank:3,gate:2,
+       desc:'Regenerate HP when badly wounded (below 30%).',
+       effect:r=>`+${r*3}/sec HP regen below 30% HP`,
+       apply:r=>({lastBreathRegen:r*3})},
+      {id:'i4',name:'Ferrous Heart',icon:'⊠',maxRank:3,gate:3,
+       desc:'All incoming damage reduced.',
+       effect:r=>`-${r*6}% damage taken`,
+       apply:r=>({dmgReducePct:r*6})},
+      {id:'i5',name:'Steelfall',icon:'⬟',maxRank:3,gate:4,
+       desc:'Chance to block an incoming attack entirely.',
+       effect:r=>`${r*6}% chance to fully block`,
+       apply:r=>({blockChance:r*6})},
+      {id:'i6',name:'Unyielding',icon:'✦',maxRank:1,gate:6,
+       desc:'Once per life, a fatal blow reduces you to 1 HP.',
+       effect:_=>'Survive one fatal blow',
+       apply:_=>({cheatDeath:1})},
+    ],
+  },
+
+  Warborn:{
+    classId:'ironwake',
+    color:'#f59e0b',
+    icon:'⚔',
+    talents:[
+      {id:'w1',name:'Iron Edge',icon:'▲',maxRank:3,gate:0,
+       desc:'Your melee strikes hit harder.',
+       effect:r=>`+${r*8}% melee damage`,
+       apply:r=>({meleeDmgPct:r*8})},
+      {id:'w2',name:'Splintering Blows',icon:'※',maxRank:3,gate:0,
+       desc:'Melee hits cleave, dealing 30% damage to adjacent enemies.',
+       effect:r=>`${r*30}% chance to cleave 30% dmg`,
+       apply:r=>({cleaveChance:r*30})},
+      {id:'w3',name:'Savage Strike',icon:'◇',maxRank:3,gate:2,
+       desc:'Increased critical strike chance.',
+       effect:r=>`+${r*3}% crit chance`,
+       apply:r=>({critPct:r*3})},
+      {id:'w4',name:"Momentum's Edge",icon:'↯',maxRank:2,gate:3,
+       desc:'Juggernaut momentum stacks decay more slowly.',
+       effect:r=>`Momentum lasts ${r*1}s longer per stack`,
+       apply:r=>({momentumDecayBonus:r*1000})},
+      {id:'w5',name:"Executioner's Mark",icon:'✖',maxRank:3,gate:4,
+       desc:'Increased damage vs wounded enemies (below 50% HP).',
+       effect:r=>`+${r*15}% damage vs enemies under 50% HP`,
+       apply:r=>({executeDmgPct:r*15})},
+      {id:'w6',name:'Warbringer',icon:'✺',maxRank:1,gate:6,
+       desc:'Killing an elite refreshes one random ability cooldown.',
+       effect:_=>'Elite kills refresh 1 cooldown',
+       apply:_=>({warbringerRefresh:1})},
+    ],
+  },
+
+  Bloodbound:{
+    classId:'ironwake',
+    color:'#ef4444',
+    icon:'◈',
+    talents:[
+      {id:'bl1',name:'Crimson Thirst',icon:'♡',maxRank:3,gate:0,
+       desc:'Heal for a portion of melee damage dealt.',
+       effect:r=>`${r*3}% lifesteal`,
+       apply:r=>({lifestealPct:r*3})},
+      {id:'bl2',name:'Pain Offering',icon:'▼',maxRank:3,gate:0,
+       desc:'The more wounded you are, the harder you hit.',
+       effect:r=>`+${r*8}% damage when below 50% HP`,
+       apply:r=>({painOfferingPct:r*8})},
+      {id:'bl3',name:'Blood Price',icon:'⊗',maxRank:2,gate:2,
+       desc:'Take 3% HP on cast → next hit deals bonus damage.',
+       effect:r=>`+${r*25}% damage on first hit after cast`,
+       apply:r=>({bloodPricePct:r*25})},
+      {id:'bl4',name:'Ruinous Strike',icon:'✹',maxRank:1,gate:3,
+       desc:'Every 5th melee hit deals +100% damage.',
+       effect:_=>'Every 5th hit = +100% dmg',
+       apply:_=>({ruinousStrike:1})},
+      {id:'bl5',name:'Ravage',icon:'↻',maxRank:3,gate:4,
+       desc:'Kills refund part of your ability cooldowns.',
+       effect:r=>`Kills refund ${r*4}% CD`,
+       apply:r=>({ravageCdrPct:r*4})},
+      {id:'bl6',name:'Crimson Ascendance',icon:'✦',maxRank:1,gate:6,
+       desc:'Once per fight, falling below 20% HP resets all cooldowns AND grants 4s of guaranteed crits.',
+       effect:_=>'Emergency burst at low HP (once/fight)',
+       apply:_=>({crimsonAscendance:1})},
     ],
   },
 };
