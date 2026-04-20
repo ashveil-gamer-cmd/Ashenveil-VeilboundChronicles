@@ -2220,8 +2220,8 @@ canvas#c{display:block;position:fixed;top:0;left:0}
    - DISABLED (in camp): dimmed, shows "SAFE" label */
 #afkToggle{
   position:fixed;
-  /* Bottom-right above ability bar — much more visible than top corner */
-  bottom:190px;
+  /* Bottom-right above ability bar — nudged higher so it clears UI below */
+  bottom:220px;
   right:14px;
   z-index:60;
   display:flex;
@@ -2278,7 +2278,7 @@ canvas#c{display:block;position:fixed;top:0;left:0}
 @media (max-width:640px){
   #afkToggle{
     /* Mobile: bottom-right above the ability bar, same as desktop */
-    bottom:120px;
+    bottom:150px;
     right:10px;
     top:auto;
     padding:6px 10px;
@@ -3493,4 +3493,24 @@ canvas#c{display:block;position:fixed;top:0;left:0}
   letter-spacing:0.8px;
   line-height:1.4;
   border-radius:3px;
+}
+
+/* ═══ QUEST TRACKER: NAV HINT + TAPPABLE ═══ */
+#questTracker{cursor:pointer;transition:background 0.15s ease, box-shadow 0.15s ease;}
+#questTracker:hover{
+  background:linear-gradient(135deg,rgba(28,22,48,0.95),rgba(18,12,36,0.95)) !important;
+  box-shadow:0 0 12px rgba(139,92,246,0.3);
+}
+.quest-tracker-nav-hint{
+  font-family:'Cinzel',serif;
+  font-size:9px;
+  letter-spacing:1.5px;
+  color:#a78bfa;
+  margin-top:4px;
+  opacity:0.75;
+  text-transform:uppercase;
+}
+#questTracker:hover .quest-tracker-nav-hint{
+  opacity:1;
+  color:#c4b5fd;
 }
