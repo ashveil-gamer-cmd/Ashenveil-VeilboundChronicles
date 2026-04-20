@@ -7078,7 +7078,8 @@ function update(dt,now){
   if(ix!==0||iy!==0){
     const m=Math.sqrt(ix*ix+iy*iy)||1;
     const buffSpd = typeof getActiveBuffValue === 'function' ? getActiveBuffValue('speed') : 0;
-    const spdMult=(1+_tb('moveSpdPct')/100) * classSpdMult * levelSpdBonus * (1 + buffSpd);
+    const gearMoveSpd = typeof getGearBonus === 'function' ? getGearBonus('moveSpdPct') : 0;
+    const spdMult=(1+(_tb('moveSpdPct')+gearMoveSpd)/100) * classSpdMult * levelSpdBonus * (1 + buffSpd);
     player.vx=(ix/m)*PLAYER_SPEED*spdMult;player.vy=(iy/m)*PLAYER_SPEED*spdMult;
     player.facing=Math.atan2(iy,ix);
   } else if(isAfk){
@@ -7145,7 +7146,8 @@ function update(dt,now){
     }
     if(d<80||player.afkTimer>player.afkCommit){player.visitedSectors[player.sector]=true;setAfkWaypoint();}
     const buffSpdAfk = typeof getActiveBuffValue === 'function' ? getActiveBuffValue('speed') : 0;
-    const spdMult=(1+_tb('moveSpdPct')/100) * classSpdMult * levelSpdBonus * (1 + buffSpdAfk);
+    const gearMoveSpdAfk = typeof getGearBonus === 'function' ? getGearBonus('moveSpdPct') : 0;
+    const spdMult=(1+(_tb('moveSpdPct')+gearMoveSpdAfk)/100) * classSpdMult * levelSpdBonus * (1 + buffSpdAfk);
     // Kite mode moves at full speed to escape crowds; otherwise slower so
     // abilities have time to cycle.
     const spdBase = inCrowd ? PLAYER_SPEED*1.0 : (ne && md<classAttackRangeAfk+120 ? PLAYER_SPEED*0.9 : PLAYER_SPEED*0.72);
@@ -7287,9 +7289,10 @@ function update(dt,now){
       // Recompute distance now — player may have dodged out of range
       const ndx=player.x-e.x,ndy=player.y-e.y,nd=Math.sqrt(ndx*ndx+ndy*ndy)||1;
       if(nd<=e.attackRange&&player.iframes<=0){
-        // Apply damage reduction talent
+        // Apply damage reduction talent + gear 'res' stat (both capped together at 80%)
         const dmgReducePct=_tb('dmgReducePct');
-        let incomingDmg=e.attack*(1-Math.min(dmgReducePct,80)/100);
+        const gearRes = typeof getGearBonus === 'function' ? getGearBonus('res') : 0;
+        let incomingDmg=e.attack*(1-Math.min(dmgReducePct+gearRes,80)/100);
         // ─── IRONCLAD STEELFALL — chance to fully block ───
         const blockPct = _tb('blockChance');
         if(blockPct > 0 && Math.random()*100 < blockPct){
