@@ -6386,6 +6386,22 @@ function hitEnemy(e,dmg,isCrit=false,fromX,fromY){
   if(player.bloodrushUntil && now < player.bloodrushUntil){
     dmg *= (player.bloodrushDmgMult || 2.0);
   }
+  // ─── IRONWAKE TALENT TREE BONUSES ─────────────────────────────
+  // Warborn Iron Edge — melee damage (Ironwake only)
+  if(player.classId === 'ironwake'){
+    const meleePct = _tb('meleeDmgPct');
+    if(meleePct > 0) dmg *= (1 + meleePct/100);
+  }
+  // Warborn Executioner's Mark — bonus vs wounded enemies
+  const executePct = _tb('executeDmgPct');
+  if(executePct > 0 && e.hp < e.maxHp * 0.5){
+    dmg *= (1 + executePct/100);
+  }
+  // Bloodbound Pain Offering — bonus dmg when YOU are wounded
+  const painPct = _tb('painOfferingPct');
+  if(painPct > 0 && player.hp < player.maxHp * 0.5){
+    dmg *= (1 + painPct/100);
+  }
   const buffCrit = typeof getActiveBuffValue === 'function' ? getActiveBuffValue('crit') : 0;
   const critChance=0.12+_tb('critPct')/100 + buffCrit;
   let critRoll = Math.random() < critChance;
@@ -6412,6 +6428,16 @@ function hitEnemy(e,dmg,isCrit=false,fromX,fromY){
   spawnDmgText(e.x,e.y-e.size,Math.round(finalDmg),critRoll?'#fde68a':'#fff',critRoll);
   // ─── Reaver-Saint passive lifesteal: heal for % of damage dealt ───
   if(typeof reaverSaintOnHit === 'function') reaverSaintOnHit(finalDmg);
+  // ─── Bloodbound Crimson Thirst — Ironwake talent lifesteal ───
+  const lsPct = _tb('lifestealPct');
+  if(lsPct > 0 && !player.isDead){
+    const heal = Math.floor(finalDmg * lsPct/100);
+    const actual = Math.min(heal, player.maxHp - player.hp);
+    if(actual > 0){
+      player.hp += actual;
+      // Quiet heal — no text spam per hit
+    }
+  }
   // Bloodvow bonus lifesteal
   if(bloodvowBonus > 0 && player && !player.isDead){
     const heal = Math.floor(finalDmg * bloodvowBonus);
@@ -6444,6 +6470,31 @@ function killEnemy(e){
     const now = performance.now();
     player.momentumStacks = Math.min(20, (player.momentumStacks || 0) + 1);
     player.momentumLastGainedAt = now;
+  }
+  // Bloodbound Ravage — refund % of all cooldowns on kill (Ironwake talent)
+  const ravPct = _tb('ravageCdrPct');
+  if(ravPct > 0){
+    const now = performance.now();
+    for(let i = 0; i < abilityCDs.length; i++){
+      if(abilityCDs[i] > now){
+        const remaining = abilityCDs[i] - now;
+        abilityCDs[i] = now + remaining * (1 - ravPct/100);
+      }
+    }
+  }
+  // Warborn Warbringer — elite kills refresh one random ability CD entirely
+  if(e.isElite && _tb('warbringerRefresh') > 0){
+    const now = performance.now();
+    // Pick a random ability still on cooldown
+    const onCooldown = [];
+    for(let i = 0; i < abilityCDs.length; i++){
+      if(abilityCDs[i] > now) onCooldown.push(i);
+    }
+    if(onCooldown.length > 0){
+      const pick = onCooldown[Math.floor(Math.random() * onCooldown.length)];
+      abilityCDs[pick] = now;
+      addFeed(`⚔ WARBRINGER — ${['Q','W','E','R','ULT'][pick]} refreshed`, '#f59e0b');
+    }
   }
   // ─── XP REWARD via the new band-rate / activity-multiplier / delta system ───
   // Enemy level is approximated from current zone's minLv (or player level as fallback).
@@ -6912,6 +6963,11 @@ function update(dt,now){
       }
     }
   }
+  // ─── IRONCLAD LAST BREATH — regen below 30% HP ────────────────
+  const lbRegen = _tb('lastBreathRegen');
+  if(lbRegen > 0 && player.hp < player.maxHp * 0.3 && player.hp > 0 && !player.isDead){
+    player.hp = Math.min(player.maxHp, player.hp + lbRegen * dt);
+  }
 
   // Auto attack — uses class attack range (Hollowcaller 220, Ironwake 85)
   const classAttackRange = (CLASS_DEFS[player.classId]||CLASS_DEFS.hollowcaller).attackRange || ATTACK_RANGE;
@@ -7007,6 +7063,12 @@ function update(dt,now){
         // Apply damage reduction talent
         const dmgReducePct=_tb('dmgReducePct');
         let incomingDmg=e.attack*(1-Math.min(dmgReducePct,80)/100);
+        // ─── IRONCLAD STEELFALL — chance to fully block ───
+        const blockPct = _tb('blockChance');
+        if(blockPct > 0 && Math.random()*100 < blockPct){
+          incomingDmg = 0;
+          spawnDmgText(player.x, player.y-20, 'BLOCK', '#60a5fa', true);
+        }
         // Ironwake Bulwark — 70% damage reduction during active window
         if(player.classId==='ironwake' && player.bulwarkUntil && now < player.bulwarkUntil){
           incomingDmg *= 0.3;
