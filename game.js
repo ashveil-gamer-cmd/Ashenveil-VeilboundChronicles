@@ -4904,30 +4904,80 @@ function drawSpirit(s,t){
   const pulse=0.8+Math.sin(t/700+s.id)*0.2;
   ctx.save();
   ctx.globalAlpha=0.93*pulse;
-  ctx.shadowColor='#9DC4B0';ctx.shadowBlur=18;
   if(!isFinite(s.x)||!isFinite(s.y)){ctx.restore();return;}
+  // Archetype-driven visuals — falls back to ghost-teal if no archetype
+  const color = s.archColor || '#9DC4B0';
+  const sizeMult = s.archSizeMult || 1.0;
+  const isNexus = s.archetype === 'nexus';
+  const isWarden = s.archetype === 'warden';
+  const isReaver = s.archetype === 'reaver';
+  ctx.shadowColor = color;
+  ctx.shadowBlur = isNexus ? 28 : 18;
+  // Nexus aura — big pulsing golden halo
+  if(isNexus){
+    const haloR = 28 + Math.sin(t/250+s.id)*6;
+    const hg = ctx.createRadialGradient(s.x,s.y,0,s.x,s.y,haloR);
+    hg.addColorStop(0,'rgba(251,191,36,0.4)');
+    hg.addColorStop(1,'rgba(251,191,36,0)');
+    ctx.fillStyle = hg;
+    ctx.beginPath();ctx.arc(s.x,s.y,haloR,0,Math.PI*2);ctx.fill();
+  }
+  // Warden protective ring — faint blue shield arc
+  if(isWarden){
+    ctx.strokeStyle = 'rgba(96,165,250,0.35)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(s.x,s.y,14*sizeMult,0,Math.PI*2);
+    ctx.stroke();
+  }
   // Glow core
-  const g=ctx.createRadialGradient(s.x,s.y,0,s.x,s.y,16);
-  g.addColorStop(0,'#ffffff');g.addColorStop(0.35,'#9DC4B0');g.addColorStop(1,'rgba(157,196,176,0)');
-  ctx.fillStyle=g;ctx.beginPath();ctx.arc(s.x,s.y,16,0,Math.PI*2);ctx.fill();
-  // Ghost body
-  ctx.fillStyle='rgba(157,196,176,0.75)';
-  ctx.beginPath();ctx.arc(s.x,s.y-6,7,Math.PI,0);ctx.lineTo(s.x+7,s.y+2);
-  for(let i=0;i<3;i++)ctx.arc(s.x+5-i*4.5,s.y+2,2,0,Math.PI,true);
-  ctx.lineTo(s.x-7,s.y+2);ctx.closePath();ctx.fill();
+  const coreR = 16 * sizeMult;
+  const g=ctx.createRadialGradient(s.x,s.y,0,s.x,s.y,coreR);
+  g.addColorStop(0,'#ffffff');
+  g.addColorStop(0.35,color);
+  g.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=g;ctx.beginPath();ctx.arc(s.x,s.y,coreR,0,Math.PI*2);ctx.fill();
+  // Body — reavers are angular (more solid), others are rounded
+  const bodyR = 7 * sizeMult;
+  ctx.fillStyle = isReaver
+    ? `rgba(239,68,68,0.82)`
+    : `rgba(${_hexToRgbTriplet(color)},0.75)`;
+  ctx.beginPath();ctx.arc(s.x,s.y-6*sizeMult,bodyR,Math.PI,0);ctx.lineTo(s.x+bodyR,s.y+2*sizeMult);
+  for(let i=0;i<3;i++)ctx.arc(s.x+5*sizeMult-i*4.5*sizeMult,s.y+2*sizeMult,2*sizeMult,0,Math.PI,true);
+  ctx.lineTo(s.x-bodyR,s.y+2*sizeMult);ctx.closePath();ctx.fill();
   // Wisp tail
-  ctx.fillStyle='rgba(157,196,176,0.4)';
-  ctx.beginPath();ctx.moveTo(s.x-5,s.y+7);
-  ctx.bezierCurveTo(s.x-3,s.y+14+Math.sin(t/280+s.id)*4,s.x+3,s.y+14-Math.sin(t/280+s.id)*4,s.x+5,s.y+7);
+  ctx.fillStyle = `rgba(${_hexToRgbTriplet(color)},0.4)`;
+  ctx.beginPath();ctx.moveTo(s.x-5*sizeMult,s.y+7*sizeMult);
+  ctx.bezierCurveTo(
+    s.x-3*sizeMult,s.y+14*sizeMult+Math.sin(t/280+s.id)*4,
+    s.x+3*sizeMult,s.y+14*sizeMult-Math.sin(t/280+s.id)*4,
+    s.x+5*sizeMult,s.y+7*sizeMult
+  );
   ctx.closePath();ctx.fill();
-  // Eyes
-  ctx.fillStyle='rgba(0,0,0,0.7)';ctx.shadowBlur=0;
-  ctx.beginPath();ctx.arc(s.x-2.5,s.y-7,2.8,0,Math.PI*2);ctx.fill();
-  ctx.beginPath();ctx.arc(s.x+2.5,s.y-7,2.8,0,Math.PI*2);ctx.fill();
+  // Eyes — reavers have red, nexus gold, others dark
+  ctx.shadowBlur=0;
+  const eyeColor = isNexus ? 'rgba(251,191,36,0.95)' :
+                   isReaver ? 'rgba(150,20,20,0.9)' : 'rgba(0,0,0,0.7)';
+  ctx.fillStyle = eyeColor;
+  ctx.beginPath();ctx.arc(s.x-2.5*sizeMult,s.y-7*sizeMult,2.8*sizeMult,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(s.x+2.5*sizeMult,s.y-7*sizeMult,2.8*sizeMult,0,Math.PI*2);ctx.fill();
+  // Eye highlights — always bright
   ctx.fillStyle='#fff';
-  ctx.beginPath();ctx.arc(s.x-2.5,s.y-7,1.1,0,Math.PI*2);ctx.fill();
-  ctx.beginPath();ctx.arc(s.x+2.5,s.y-7,1.1,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(s.x-2.5*sizeMult,s.y-7*sizeMult,1.1*sizeMult,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(s.x+2.5*sizeMult,s.y-7*sizeMult,1.1*sizeMult,0,Math.PI*2);ctx.fill();
   ctx.restore();
+}
+
+// Convert "#rrggbb" to "R,G,B" triplet for rgba() use. Handles shorthand.
+function _hexToRgbTriplet(hex){
+  if(!hex || typeof hex !== 'string') return '157,196,176';
+  let h = hex.replace('#','');
+  if(h.length === 3) h = h.split('').map(c=>c+c).join('');
+  const r = parseInt(h.substring(0,2), 16);
+  const g = parseInt(h.substring(2,4), 16);
+  const b = parseInt(h.substring(4,6), 16);
+  if(isNaN(r) || isNaN(g) || isNaN(b)) return '157,196,176';
+  return `${r},${g},${b}`;
 }
 
 // ═══════ BACKGROUND & FOG ═══════════════════════════════
@@ -6390,11 +6440,98 @@ function drawPortal(now){
     });
   }
 }
+// Spirit archetypes — each summon gets a role with distinct combat behavior.
+// Variety makes large spirit counts (Legion Commander etc) feel more epic
+// than "10 identical blobs." Rolled probabilistically on spawn.
+const SPIRIT_ARCHETYPES = {
+  wailer: {
+    name: 'Wailer',
+    weight: 40,
+    color: '#c4b5fd',
+    sizeMult: 1.0,
+    orbitRadius: 95,      // wider orbit — ranged role
+    dmgMult: 0.9,
+    attackReach: 110,     // can damage enemies farther from spirit
+    style: 'ranged',
+  },
+  reaver: {
+    name: 'Reaver',
+    weight: 35,
+    color: '#ef4444',
+    sizeMult: 1.05,
+    orbitRadius: 55,      // close orbit — aggressive
+    dmgMult: 1.25,
+    attackReach: 70,
+    style: 'melee',
+  },
+  warden: {
+    name: 'Warden',
+    weight: 15,
+    color: '#60a5fa',
+    sizeMult: 1.15,
+    orbitRadius: 40,      // hugs player
+    dmgMult: 0.7,
+    attackReach: 70,
+    style: 'defender',
+    drAura: 3,           // +3% DR per warden nearby (stacks with Procession)
+  },
+  nexus: {
+    name: 'Nexus',
+    weight: 10,
+    color: '#fbbf24',
+    sizeMult: 1.35,
+    orbitRadius: 75,
+    dmgMult: 2.0,
+    attackReach: 100,
+    style: 'ranged',
+    rare: true,
+  },
+};
+
+function _rollSpiritArchetype(){
+  const keys = Object.keys(SPIRIT_ARCHETYPES);
+  const totalWeight = keys.reduce((s,k)=>s+SPIRIT_ARCHETYPES[k].weight, 0);
+  let roll = Math.random() * totalWeight;
+  for(const k of keys){
+    roll -= SPIRIT_ARCHETYPES[k].weight;
+    if(roll <= 0) return k;
+  }
+  return 'wailer';
+}
+
 function spawnSpirit(isTemp=false){
   const perms=spirits.filter(s=>!s.isTemp&&!s.dead);
   if(!isTemp&&perms.length>=(player.maxBonds||MAX_SPIRITS))return false;
   const a=Math.random()*Math.PI*2;
-  spirits.push({id:spiritId++,x:player.x+Math.cos(a)*40,y:player.y+Math.sin(a)*40,dead:false,isTemp,lifetime:isTemp?45000:Infinity,lastAttack:0,orbitAngle:Math.random()*Math.PI*2,hauntTarget:null,attackCount:0,wobble:Math.random()*Math.PI*2,empoweredUntil:0});
+  // Roll archetype for this spirit — determines visual + combat role
+  const archetype = _rollSpiritArchetype();
+  const arch = SPIRIT_ARCHETYPES[archetype];
+  spirits.push({
+    id: spiritId++,
+    x: player.x + Math.cos(a)*40,
+    y: player.y + Math.sin(a)*40,
+    dead: false, isTemp,
+    lifetime: isTemp ? 45000 : Infinity,
+    lastAttack: 0,
+    orbitAngle: Math.random() * Math.PI*2,
+    hauntTarget: null,
+    attackCount: 0,
+    wobble: Math.random() * Math.PI*2,
+    empoweredUntil: 0,
+    // Archetype fields
+    archetype,
+    archColor: arch.color,
+    archSizeMult: arch.sizeMult,
+    archOrbit: arch.orbitRadius,
+    archDmgMult: arch.dmgMult,
+    archReach: arch.attackReach,
+    archStyle: arch.style,
+    archDrAura: arch.drAura || 0,
+  });
+  // Feed announce rare archetypes so player feels the RNG moment
+  if(arch.rare && typeof addFeed === 'function'){
+    addFeed(`✦ A ${arch.name.toUpperCase()} ANSWERS THE CALL`, arch.color);
+  }
   return true;
 }
 
@@ -7907,9 +8044,18 @@ function update(dt,now){
   spirits.forEach(s=>{
     if(s.isTemp){s.lifetime-=dt*1000;if(s.lifetime<=0){s.dead=true;return;}}
     s.wobble+=dt*2.2;
-    const or=70+Math.sin(s.wobble)*10;
-    let haunt=s.hauntTarget&&!s.hauntTarget.dead&&s.hauntTarget.veilmarkStacks>0?s.hauntTarget:null;
-    if(!haunt){s.hauntTarget=null;let bd=950;enemies.forEach(e=>{if(e.dead||e.veilmarkStacks<=0)return;const d=dist2(s.x,s.y,e.x,e.y);if(d<bd){bd=d;haunt=e;}});s.hauntTarget=haunt;}
+    // Archetype-driven orbit radius. Defenders stick close, rangers hang back.
+    const baseOrbit = s.archOrbit || 70;
+    const or = baseOrbit + Math.sin(s.wobble)*10;
+    const dmgMultArch = s.archDmgMult || 1.0;
+    const reachArch = s.archReach || 70;
+    const isDefender = s.archStyle === 'defender';
+    // Defenders ignore haunt targets — they stay near player as bodyguards
+    let haunt = null;
+    if(!isDefender){
+      haunt = s.hauntTarget && !s.hauntTarget.dead && s.hauntTarget.veilmarkStacks>0 ? s.hauntTarget : null;
+      if(!haunt){s.hauntTarget=null;let bd=950;enemies.forEach(e=>{if(e.dead||e.veilmarkStacks<=0)return;const d=dist2(s.x,s.y,e.x,e.y);if(d<bd){bd=d;haunt=e;}});s.hauntTarget=haunt;}
+    }
     // Necrolord preset bonuses
     const _inBanner = (typeof isSpiritInBanner === 'function') ? isSpiritInBanner(s) : false;
     const _speedBurst = (s._necroSpeedUntil && s._necroSpeedUntil > now);
@@ -7919,31 +8065,52 @@ function update(dt,now){
       s.orbitAngle+=dt*3.8*_speedMult;
       const tx=haunt.x+Math.cos(s.orbitAngle)*or,ty=haunt.y+Math.sin(s.orbitAngle)*or;
       s.x+=(tx-s.x)*Math.min(1,dt*4.5*_speedMult);s.y+=(ty-s.y)*Math.min(1,dt*4.5*_speedMult);
-      const atkInterval = _inBanner ? 700 : 850; // banner also boosts attack speed
-      if(now-s.lastAttack>atkInterval){s.lastAttack=now;s.attackCount++;haunt.veilmarkStacks=Math.min(haunt.veilmarkStacks+1,10);hitEnemy(haunt,player.attack*0.32*_bannerDmgMult);}
+      const atkInterval = _inBanner ? 700 : 850;
+      if(now-s.lastAttack>atkInterval){
+        s.lastAttack=now;s.attackCount++;
+        haunt.veilmarkStacks=Math.min(haunt.veilmarkStacks+1,10);
+        hitEnemy(haunt, player.attack*0.32*_bannerDmgMult*dmgMultArch);
+      }
     } else {
-      let ne2=null,nd=720;
-      enemies.forEach(e=>{if(e.dead)return;const d=dist2(s.x,s.y,e.x,e.y);if(d<nd){nd=d;ne2=e;}});
-      if(ne2&&nd<340){
-        const sdx=ne2.x-s.x,sdy=ne2.y-s.y,sd=Math.sqrt(sdx*sdx+sdy*sdy)||1;
-        s.x+=sdx/sd*260*dt*_speedMult;s.y+=sdy/sd*260*dt*_speedMult;
-        const atkInterval2 = _inBanner ? 800 : 950;
-        if(now-s.lastAttack>atkInterval2&&sd<70){
-          s.lastAttack=now;s.attackCount++;
-          const spiritDmg = player.attack*1.15*(1+_tb('spiritDmgPct')/100)*_bannerDmgMult;
-          hitEnemy(ne2, spiritDmg);
-          // Sanguine Pact — spirits heal you for % of their damage dealt
-          const spiritLsPct = _tb('spiritLifestealPct');
-          if(spiritLsPct > 0 && !player.isDead){
-            const heal = Math.floor(spiritDmg * spiritLsPct / 100);
-            const actual = Math.min(heal, player.maxHp - player.hp);
-            if(actual > 0) player.hp += actual;
-          }
-        }
-      } else {
+      // Hunt mode — find a nearby enemy and attack, OR orbit player (defender).
+      if(isDefender){
+        // Wardens stay close to player; attack anything in reach
         s.orbitAngle+=dt*2.4*_speedMult;
         const tx=player.x+Math.cos(s.orbitAngle)*or,ty=player.y+Math.sin(s.orbitAngle)*or;
-        s.x+=(tx-s.x)*Math.min(1,dt*3.2*_speedMult);s.y+=(ty-s.y)*Math.min(1,dt*3.2*_speedMult);
+        s.x+=(tx-s.x)*Math.min(1,dt*3.8*_speedMult);
+        s.y+=(ty-s.y)*Math.min(1,dt*3.8*_speedMult);
+        // Attack any enemy that comes near
+        let ne2=null,nd=reachArch*1.8;
+        enemies.forEach(e=>{if(e.dead)return;const d=dist2(s.x,s.y,e.x,e.y);if(d<nd){nd=d;ne2=e;}});
+        if(ne2 && nd < reachArch && now-s.lastAttack > 950){
+          s.lastAttack = now;
+          const spiritDmg = player.attack*1.15*(1+_tb('spiritDmgPct')/100)*_bannerDmgMult*dmgMultArch;
+          hitEnemy(ne2, spiritDmg);
+        }
+      } else {
+        let ne2=null,nd=720;
+        enemies.forEach(e=>{if(e.dead)return;const d=dist2(s.x,s.y,e.x,e.y);if(d<nd){nd=d;ne2=e;}});
+        if(ne2&&nd<340){
+          const sdx=ne2.x-s.x,sdy=ne2.y-s.y,sd=Math.sqrt(sdx*sdx+sdy*sdy)||1;
+          s.x+=sdx/sd*260*dt*_speedMult;s.y+=sdy/sd*260*dt*_speedMult;
+          const atkInterval2 = _inBanner ? 800 : 950;
+          if(now-s.lastAttack>atkInterval2&&sd<reachArch){
+            s.lastAttack=now;s.attackCount++;
+            const spiritDmg = player.attack*1.15*(1+_tb('spiritDmgPct')/100)*_bannerDmgMult*dmgMultArch;
+            hitEnemy(ne2, spiritDmg);
+            // Sanguine Pact — spirits heal you for % of their damage dealt
+            const spiritLsPct = _tb('spiritLifestealPct');
+            if(spiritLsPct > 0 && !player.isDead){
+              const heal = Math.floor(spiritDmg * spiritLsPct / 100);
+              const actual = Math.min(heal, player.maxHp - player.hp);
+              if(actual > 0) player.hp += actual;
+            }
+          }
+        } else {
+          s.orbitAngle+=dt*2.4*_speedMult;
+          const tx=player.x+Math.cos(s.orbitAngle)*or,ty=player.y+Math.sin(s.orbitAngle)*or;
+          s.x+=(tx-s.x)*Math.min(1,dt*3.2*_speedMult);s.y+=(ty-s.y)*Math.min(1,dt*3.2*_speedMult);
+        }
       }
     }
     if(Math.random()<0.05)particles.push({x:s.x,y:s.y,vx:(Math.random()-0.5)*30,vy:-18-Math.random()*18,life:0.45,maxLife:0.45,color:'#9DC4B0',size:1.8});
@@ -8036,7 +8203,15 @@ function update(dt,now){
           const aliveSpirits = spirits.filter(sp => !sp.dead && !sp.isTemp).length;
           if(aliveSpirits >= 8) legionBonus = 25;
         }
-        let incomingDmg=e.attack*(1-Math.min(dmgReducePct+gearRes+spiritDr+legionBonus,80)/100);
+        // Warden archetype aura — each warden spirit near the player
+        // contributes its archDrAura to incoming damage reduction.
+        let wardenAura = 0;
+        spirits.forEach(sp=>{
+          if(sp.dead || !sp.archDrAura) return;
+          const sdx = sp.x - player.x, sdy = sp.y - player.y;
+          if(sdx*sdx + sdy*sdy < 200*200) wardenAura += sp.archDrAura;
+        });
+        let incomingDmg=e.attack*(1-Math.min(dmgReducePct+gearRes+spiritDr+legionBonus+wardenAura,80)/100);
         // ─── IRONCLAD STEELFALL — chance to fully block ───
         const blockPct = _tb('blockChance');
         if(blockPct > 0 && Math.random()*100 < blockPct){
