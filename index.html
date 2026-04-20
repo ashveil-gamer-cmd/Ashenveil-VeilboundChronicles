@@ -173,9 +173,17 @@
     <h2>⚕ BAG <span id="bagCountText" class="bag-count">0 / 24</span></h2>
     <button class="panel-close" onclick="closeInventory()">← BACK</button>
   </div>
+  <div class="bag-auto-row">
+    <label class="bag-toggle">
+      <input type="checkbox" id="autoEquipToggle" onchange="toggleAutoEquipUpgrades(this.checked)">
+      <span>AUTO-EQUIP UPGRADES</span>
+    </label>
+    <span class="bag-toggle-hint">Replaced gear goes to your bag or Gear Stash</span>
+  </div>
   <div class="bag-tabs">
     <button id="bagTabMain" class="bag-tab active" onclick="switchBagTab('main')">BAG</button>
     <button id="bagTabStash" class="bag-tab" onclick="switchBagTab('stash')">◆ SET STASH <span id="setStashCountText" class="bag-count-small">0</span></button>
+    <button id="bagTabGearStash" class="bag-tab" onclick="switchBagTab('gearstash')">⚒ GEAR STASH <span id="gearStashCountText" class="bag-count-small">0</span></button>
   </div>
   <div id="bagLayout">
     <div id="bagGrid"></div>
@@ -183,6 +191,9 @@
   </div>
   <div id="setStashLayout" style="display:none">
     <div id="setStashGrid"></div>
+  </div>
+  <div id="gearStashLayout" style="display:none">
+    <div id="gearStashGrid"></div>
   </div>
 </div>
 
@@ -237,6 +248,7 @@
 <div id="deathScreen">
   <h2>VEILBOUND FALLEN</h2>
   <p id="deathStats">0 enemies slain</p>
+  <div id="deathCountdown">Auto-rising in <span id="deathCountdownNum">30</span>s</div>
   <button id="riseBtn" onclick="respawn()">✦ Rise Again ✦</button>
 </div>
 
@@ -451,9 +463,9 @@
 </div>
 
 <!-- MINIMAP -->
-<div id="minimap" style="position:fixed;top:10px;right:130px;z-index:50;display:none;pointer-events:none">
-  <canvas id="minimapCanvas" width="80" height="80" style="border-radius:50%;border:1px solid rgba(192,132,252,0.18);box-shadow:0 2px 10px rgba(0,0,0,0.6)"></canvas>
-</div>
+<!-- Minimap removed — not useful for this game's scale. Kept as empty div
+     placeholder so any legacy JS that calls getElementById still gets a node. -->
+<div id="minimap" style="display:none"></div>
 
 <!-- 5TH ABILITY -->
 
