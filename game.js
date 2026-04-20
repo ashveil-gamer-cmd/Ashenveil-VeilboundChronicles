@@ -6160,6 +6160,12 @@ function playerCast(idx){
   if(now<abilityCDs[idx]||player.isDead)return;
   // Route to class-specific ability handler
   if(player.classId==='ironwake'){
+    // ═══ PRESET OVERRIDES (Ironwake) ═══
+    // Same pattern as Hollowcaller — preset handler returns true to
+    // intercept, false to fall through to the default Ironwake ability.
+    if(typeof castIronwakePresetOverride === 'function'){
+      if(castIronwakePresetOverride(idx, now)) return;
+    }
     return castIronwake(idx, now);
   }
   // ═══ PRESET OVERRIDES (Hollowcaller) ═══
@@ -6370,6 +6376,16 @@ function hitEnemy(e,dmg,isCrit=false,fromX,fromY){
     spawnDmgText(e.x,e.y-e.size,'IMMUNE','#60a5fa',false);
     return;
   }
+  const now = performance.now();
+  // ─── IRONWAKE PRESET DAMAGE BUFFS ─────────────────────────────
+  // Juggernaut — Momentum stacks give +5% per stack (max 20 = +100%)
+  if(player.momentumStacks && player.momentumStacks > 0){
+    dmg *= (1 + player.momentumStacks * 0.05);
+  }
+  // Bloodforged — Bloodrush active damage multiplier
+  if(player.bloodrushUntil && now < player.bloodrushUntil){
+    dmg *= (player.bloodrushDmgMult || 2.0);
+  }
   const buffCrit = typeof getActiveBuffValue === 'function' ? getActiveBuffValue('crit') : 0;
   const critChance=0.12+_tb('critPct')/100 + buffCrit;
   let critRoll = Math.random() < critChance;
@@ -6383,7 +6399,15 @@ function hitEnemy(e,dmg,isCrit=false,fromX,fromY){
       bloodvowBonus = bv.healPct; // bonus lifesteal % for this hit only
     }
   }
-  const finalDmg = critRoll ? dmg * 2.2 : dmg;
+  let finalDmg = critRoll ? dmg * 2.2 : dmg;
+  // ─── UNBOUND (Bloodforged Ult) — execute enemies below threshold ───
+  if(player.unboundUntil && now < player.unboundUntil && !e.isBoss){
+    const hpPctAfter = (e.hp - finalDmg) / e.maxHp;
+    if(hpPctAfter < (player.unboundThreshold || 0.5)){
+      finalDmg = e.hp; // kill shot
+      spawnDmgText(e.x, e.y - e.size - 10, 'UNBOUND', '#ef4444', true);
+    }
+  }
   e.hp-=finalDmg;e.hitFlash=0.18;
   spawnDmgText(e.x,e.y-e.size,Math.round(finalDmg),critRoll?'#fde68a':'#fff',critRoll);
   // ─── Reaver-Saint passive lifesteal: heal for % of damage dealt ───
@@ -6414,6 +6438,13 @@ function hitEnemy(e,dmg,isCrit=false,fromX,fromY){
 function killEnemy(e){
   e.dead=true;kills++;
   document.getElementById('killCount').textContent=`☠ ${kills}`;
+  // Juggernaut momentum refresh — kills sustain your stack window and add 1 stack.
+  // Without this, momentum dies between fights even with full set.
+  if(player.momentumStacks !== undefined){
+    const now = performance.now();
+    player.momentumStacks = Math.min(20, (player.momentumStacks || 0) + 1);
+    player.momentumLastGainedAt = now;
+  }
   // ─── XP REWARD via the new band-rate / activity-multiplier / delta system ───
   // Enemy level is approximated from current zone's minLv (or player level as fallback).
   // Activity type drives the multiplier (normal/elite/minor boss/major boss).
@@ -6862,6 +6893,26 @@ function update(dt,now){
   if(player.iframes>0)player.iframes-=dt*1000;
   if(player.hitFlash>0)player.hitFlash-=dt;
 
+  // ─── JUGGERNAUT MOMENTUM DECAY ─────────────────────────────────
+  // Stacks decay 1 per 1.5s when NOT in the locked window AND idle.
+  // The momentumLastGainedAt updates on any Warpath cast or enemy kill
+  // (see killEnemy). Hitting enemies refreshes the window indirectly via
+  // cast timing; the lock gives breathing room.
+  if(player.momentumStacks && player.momentumStacks > 0){
+    const locked = player.momentumLockedUntil && now < player.momentumLockedUntil;
+    if(!locked){
+      const lastGain = player.momentumLastGainedAt || 0;
+      const timeSinceGain = now - lastGain;
+      if(timeSinceGain > 1500){
+        // Decay 1 stack every 1500ms since last gain
+        const decays = Math.floor(timeSinceGain / 1500);
+        player.momentumStacks = Math.max(0, player.momentumStacks - decays);
+        // Shift the timer forward so we don't over-decay next frame
+        player.momentumLastGainedAt = now - (timeSinceGain - decays * 1500);
+      }
+    }
+  }
+
   // Auto attack — uses class attack range (Hollowcaller 220, Ironwake 85)
   const classAttackRange = (CLASS_DEFS[player.classId]||CLASS_DEFS.hollowcaller).attackRange || ATTACK_RANGE;
   // Level-based attack speed bonus shortens the attack interval
@@ -6967,6 +7018,30 @@ function update(dt,now){
           if(!e.dead)hitEnemy(e, reflectDmg, false, player.x, player.y);
           spawnDmgText(e.x, e.y-e.size, 'REFLECT', '#a78bfa', false);
         }
+        // ─── IRONGUARD PRESET BUFFS ─────────────────────────────────
+        // Unbroken Pillar — full invulnerability window
+        if(player.unbrokenPillarUntil && now < player.unbrokenPillarUntil){
+          incomingDmg = 0;
+          spawnDmgText(player.x, player.y-20, 'IMMUNE', '#60a5fa', false);
+        }
+        // Iron Tortoise — 90% damage reduction + reflect 200%
+        else if(player.ironTortoiseUntil && now < player.ironTortoiseUntil){
+          const reflectDmg = incomingDmg * 2.0;
+          if(!e.dead) hitEnemy(e, reflectDmg, false, player.x, player.y);
+          spawnDmgText(e.x, e.y-e.size, 'TORTOISE', '#60a5fa', true);
+          incomingDmg *= 0.1; // 90% reduction
+        }
+        // Thornguard — reflect multiplier (whatever was set by cast)
+        if(player.thornguardUntil && now < player.thornguardUntil){
+          const reflectDmg = incomingDmg * (player.thornguardPct || 1.5);
+          if(!e.dead) hitEnemy(e, reflectDmg, false, player.x, player.y);
+          spawnDmgText(e.x, e.y-e.size, 'THORNS', '#60a5fa', false);
+        }
+        // ─── BLOODFORGED PRESET BUFFS ───────────────────────────────
+        // Bloodrush — taking more damage AND dealing more (tracked in hitEnemy)
+        if(player.bloodrushUntil && now < player.bloodrushUntil){
+          incomingDmg *= (player.bloodrushTakenMult || 1.5);
+        }
         player.hp-=incomingDmg;
         // Ironwake Wrath generation — hits build wrath. Bulwark doubles rate.
         if(player.classId==='ironwake'){
@@ -6977,8 +7052,16 @@ function update(dt,now){
         screenShake(e.isElite?10:6,e.isElite?180:130);SFX.playerHit();
         pushGroundFX({type:'bloom',x:player.x,y:player.y,r:60,maxR:60,color:'#ef4444',life:0.3,maxLife:0.3});
         if(player.hp<=0){
+          // Bloodvow — Bloodforged preset active-revive
+          if(player.bloodvowActive){
+            player.bloodvowActive = false;
+            player.hp = Math.floor(player.maxHp * (player.bloodvowReviveHpPct || 0.30));
+            addFeed('⊕ BLOODVOW — you refuse to die','#ef4444');
+            pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:200, r:20, color:'#ef4444', life:1.0, maxLife:1.0, expand:true});
+            pushGroundFX({type:'bloom', x:player.x, y:player.y, r:150, maxR:150, color:'#7f1d1d', life:0.8, maxLife:0.8});
+          }
           // Everlasting talent: first fatal hit per life is reduced to 1 HP
-          if(_tb('cheatDeath')>0&&!player._cheatDeathUsed){
+          else if(_tb('cheatDeath')>0&&!player._cheatDeathUsed){
             player._cheatDeathUsed=true;
             player.hp=1;
             addFeed('✦ EVERLASTING','#fff4a0');
