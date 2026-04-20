@@ -220,6 +220,35 @@ const SLOT_ICONS={Weapon:'⚔',Helmet:'🜲',Chest:'🛡',Gloves:'✋',Boots:'�
 const INVENTORY_MAX=24;
 let inventory=[]; // array of full item objects
 
+// Gear Stash — unlimited-capacity overflow for when main bag fills up.
+// Items routed here instead of being lost or auto-salvaged. Player can
+// manually move them back to bag, equip, or salvage from the stash tab.
+// Separate from Set Stash (which only holds set pieces).
+let gearStash=[]; // array of full item objects, uncapped
+
+// Auto-equip upgrades toggle — when true, incoming loot is auto-equipped
+// if it's an upgrade over the current slot. The replaced item goes to bag
+// (or stash if bag is full). Set Stash items are never touched by this.
+let autoEquipUpgrades=false;
+
+// Crude "is this an upgrade?" heuristic — total weighted stat value.
+// Higher value wins. Rarity is included as a tiebreaker weight so a
+// same-stat higher-rarity item still reads as upgrade.
+function _itemPowerScore(item){
+  if(!item || !item.stats) return 0;
+  const w = {
+    atk: 3, hp: 0.5, sm: 2, spiritBonus: 40,
+    crit: 8, cdr: 10, lifeOnHit: 4, res: 6,
+    moveSpdPct: 5, dmgPct: 6, hpPct: 4,
+  };
+  let score = 0;
+  for(const [k,v] of Object.entries(item.stats)){
+    score += (w[k] || 1) * v;
+  }
+  const rarityBonus = {common:0, uncommon:5, rare:15, epic:30, legendary:50, mythic:100}[item.rarity] || 0;
+  return score + rarityBonus;
+}
+
 // Called by combat drop logic. Routes loot through the right pipeline.
 // - Common items: ALWAYS auto-salvage into Scrap (never clutter bag)
 // - Uncommon+: auto-equip if slot empty, otherwise go to bag
@@ -254,30 +283,33 @@ function acquireLoot(item){
     addFeed(`${icon} [${label}] ${item.name}`,col);
     addFeed(`  └ auto-equipped (${item.slot} was empty)`,'#5a7aa0');
     checkSetBonuses();
+  } else if(autoEquipUpgrades && _itemPowerScore(item) > _itemPowerScore(current)){
+    // Auto-equip upgrade — new item wins by power score. Swap in, route old to bag.
+    const replaced = current;
+    equipped[item.slot] = item;
+    recalcStats();
+    addFeed(`${icon} [${label}] ${item.name} → auto-equipped (UPGRADE)`, col);
+    checkSetBonuses();
+    // Route the displaced item — prefer bag, fall back to stash
+    if(inventory.length < INVENTORY_MAX){
+      inventory.push(replaced);
+      addFeed(`  └ ${replaced.name} → bag`, '#5a7aa0');
+    } else {
+      gearStash.push(replaced);
+      addFeed(`  └ ${replaced.name} → gear stash`, '#a78bfa');
+    }
+    updateInventoryBadge();
   } else if(inventory.length<INVENTORY_MAX){
     // Slot filled — goes to bag for player to decide
     inventory.push(item);
     addFeed(`${icon} ${label} ${item.name} → bag (${inventory.length}/${INVENTORY_MAX})`,col);
     updateInventoryBadge();
   } else {
-    // Bag full — behavior depends on rarity
-    if(rarityTier<=1){
-      // Uncommon — auto-salvage silently into materials so AFK doesn't waste them
-      const yields=salvageYieldFor(item);
-      Object.entries(yields).forEach(([mat,qty])=>creditMaterial(mat,qty));
-      // Small profession XP even from auto-salvage so AFK contributes to crafting
-      const salvageXP = {uncommon:10}[item.rarity] || 5;
-      Object.keys(professions).forEach(p=>addProfXP(p, salvageXP));
-      const gained=Object.entries(yields).map(([k,v])=>`+${v} ${MATERIAL_LABELS[k]}`).join(' ');
-      addFeed(`⚒ Bag full — auto-salvaged ${item.name} (${gained})`,'#a78bfa');
-    } else {
-      // Rare+ — warn player loud and clear, do NOT consume (they deserve a decision)
-      addFeed(`⚠ BAG FULL — ${label} ${item.name} LOST! Clear space in your bag!`,'#ef4444');
-      // Emergency pop-up via a ground FX so player notices mid-AFK
-      if(typeof pushGroundFX==='function'&&typeof player!=='undefined'){
-        pushGroundFX({type:'bloom',x:player.x,y:player.y,r:200,maxR:200,color:'#ef4444',life:1.2,maxLife:1.2});
-      }
-    }
+    // Bag full — route to GEAR STASH instead of dumping/losing the item.
+    // Stash is unlimited so no loot is ever lost to overflow.
+    gearStash.push(item);
+    addFeed(`${icon} ${label} ${item.name} → gear stash (bag full, ${gearStash.length} stashed)`, '#a78bfa');
+    updateInventoryBadge();
   }
 }
 
@@ -1471,6 +1503,12 @@ function openInventory(){
   const panel=document.getElementById('inventoryPanel');
   if(!panel)return;
   panel.style.display='flex';
+  // Sync auto-equip toggle with current state
+  const toggle = document.getElementById('autoEquipToggle');
+  if(toggle) toggle.checked = !!autoEquipUpgrades;
+  // Sync gear stash count badge
+  const gsCount = document.getElementById('gearStashCountText');
+  if(gsCount) gsCount.textContent = String(gearStash.length);
   // Default to main bag tab every time panel opens
   switchBagTab('main');
   renderInventory();
@@ -1488,24 +1526,146 @@ function closeInventory(){
 // the other hidden; both render functions keep their own state (selection,
 // grouping) so switching back restores what was there.
 function switchBagTab(which){
-  const mainTab  = document.getElementById('bagTabMain');
-  const stashTab = document.getElementById('bagTabStash');
-  const mainLayout  = document.getElementById('bagLayout');
-  const stashLayout = document.getElementById('setStashLayout');
+  const mainTab      = document.getElementById('bagTabMain');
+  const stashTab     = document.getElementById('bagTabStash');
+  const gearStashTab = document.getElementById('bagTabGearStash');
+  const mainLayout      = document.getElementById('bagLayout');
+  const stashLayout     = document.getElementById('setStashLayout');
+  const gearStashLayout = document.getElementById('gearStashLayout');
   if(!mainTab || !stashTab || !mainLayout || !stashLayout) return;
+  // Hide all first
+  mainTab.classList.remove('active');
+  stashTab.classList.remove('active');
+  if(gearStashTab) gearStashTab.classList.remove('active');
+  mainLayout.style.display = 'none';
+  stashLayout.style.display = 'none';
+  if(gearStashLayout) gearStashLayout.style.display = 'none';
+  // Show requested tab
   if(which === 'stash'){
-    mainTab.classList.remove('active');
     stashTab.classList.add('active');
-    mainLayout.style.display = 'none';
     stashLayout.style.display = '';
     if(typeof renderSetStash === 'function') renderSetStash();
+  } else if(which === 'gearstash'){
+    if(gearStashTab) gearStashTab.classList.add('active');
+    if(gearStashLayout) gearStashLayout.style.display = '';
+    if(typeof renderGearStash === 'function') renderGearStash();
   } else {
     mainTab.classList.add('active');
-    stashTab.classList.remove('active');
     mainLayout.style.display = '';
-    stashLayout.style.display = 'none';
     if(typeof renderInventory === 'function') renderInventory();
   }
+}
+
+// Toggle the auto-equip-upgrades behavior. Persisted via save.
+function toggleAutoEquipUpgrades(on){
+  autoEquipUpgrades = !!on;
+  if(typeof addFeed === 'function'){
+    addFeed(
+      autoEquipUpgrades
+        ? '✦ Auto-equip upgrades: ON — new gear will be compared to what you wear'
+        : '✦ Auto-equip upgrades: OFF — you control equipment',
+      autoEquipUpgrades ? '#22c55e' : '#9ca3af'
+    );
+  }
+  if(typeof writeSave === 'function') writeSave();
+}
+
+// Render the Gear Stash tab — overflow bag. Each item has Move-to-Bag,
+// Equip, and Salvage buttons.
+function renderGearStash(){
+  const grid = document.getElementById('gearStashGrid');
+  const countEl = document.getElementById('gearStashCountText');
+  if(!grid) return;
+  if(countEl) countEl.textContent = String(gearStash.length);
+  if(gearStash.length === 0){
+    grid.innerHTML = `
+      <div class="bag-empty-hint">
+        <div style="font-size:13px;color:#c4b5fd;margin-bottom:8px;">Your gear stash is empty.</div>
+        <div style="font-size:11px;color:#9ca3af;line-height:1.6;">
+          When your main bag fills up, overflow gear comes here automatically.<br>
+          Nothing is ever lost — pick through it when you're ready.
+        </div>
+      </div>
+    `;
+    return;
+  }
+  let html = '';
+  gearStash.forEach((item, idx) => {
+    const col = (typeof RARITY_COLORS !== 'undefined' ? RARITY_COLORS[item.rarity] : null) || '#9ca3af';
+    const icon = (typeof SLOT_ICONS !== 'undefined' ? SLOT_ICONS[item.slot] : null) || '✦';
+    const label = (typeof RARITY_LABELS !== 'undefined' ? RARITY_LABELS[item.rarity] : null) || 'ITEM';
+    const statsText = item.stats
+      ? Object.entries(item.stats).map(([k,v])=>`+${v} ${k}`).join(' · ')
+      : '';
+    html += `
+      <div class="gear-stash-row" style="border-left:3px solid ${col}">
+        <div class="gsr-head">
+          <span class="gsr-icon">${icon}</span>
+          <span class="gsr-name" style="color:${col}">${item.name}</span>
+          <span class="gsr-label" style="color:${col}">${label}</span>
+        </div>
+        <div class="gsr-stats">${statsText}</div>
+        <div class="gsr-actions">
+          <button onclick="gearStashToBag(${idx})">→ Bag</button>
+          <button onclick="gearStashEquip(${idx})">Equip</button>
+          <button onclick="gearStashSalvage(${idx})">Salvage</button>
+        </div>
+      </div>
+    `;
+  });
+  grid.innerHTML = html;
+}
+
+function gearStashToBag(idx){
+  if(idx < 0 || idx >= gearStash.length) return;
+  if(inventory.length >= INVENTORY_MAX){
+    if(typeof addFeed === 'function') addFeed('Bag full — salvage or equip first', '#ef4444');
+    return;
+  }
+  const item = gearStash.splice(idx, 1)[0];
+  inventory.push(item);
+  if(typeof updateInventoryBadge === 'function') updateInventoryBadge();
+  if(typeof addFeed === 'function') addFeed(`→ ${item.name} moved to bag`, '#9DC4B0');
+  if(typeof writeSave === 'function') writeSave();
+  renderGearStash();
+}
+
+function gearStashEquip(idx){
+  if(idx < 0 || idx >= gearStash.length) return;
+  const item = gearStash[idx];
+  const oldEquipped = equipped[item.slot];
+  equipped[item.slot] = item;
+  gearStash.splice(idx, 1);
+  if(oldEquipped){
+    // Route displaced item — prefer bag, fallback to stash
+    if(inventory.length < INVENTORY_MAX){
+      inventory.push(oldEquipped);
+    } else {
+      gearStash.push(oldEquipped);
+    }
+  }
+  recalcStats();
+  checkSetBonuses();
+  if(typeof addFeed === 'function') addFeed(`✦ Equipped ${item.name}`, '#fde68a');
+  if(typeof updateInventoryBadge === 'function') updateInventoryBadge();
+  if(typeof writeSave === 'function') writeSave();
+  renderGearStash();
+}
+
+function gearStashSalvage(idx){
+  if(idx < 0 || idx >= gearStash.length) return;
+  const item = gearStash[idx];
+  if(typeof salvageYieldFor !== 'function' || typeof creditMaterial !== 'function'){
+    if(typeof addFeed === 'function') addFeed('Salvage not available', '#ef4444');
+    return;
+  }
+  const yields = salvageYieldFor(item);
+  Object.entries(yields).forEach(([m,q]) => creditMaterial(m, q));
+  gearStash.splice(idx, 1);
+  const gained = Object.entries(yields).map(([k,v])=>`+${v} ${MATERIAL_LABELS[k]}`).join(' ');
+  if(typeof addFeed === 'function') addFeed(`⚒ Salvaged ${item.name} — ${gained}`, '#a78bfa');
+  if(typeof writeSave === 'function') writeSave();
+  renderGearStash();
 }
 
 function renderInventory(){
