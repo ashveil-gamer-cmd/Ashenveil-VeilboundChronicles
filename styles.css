@@ -2662,3 +2662,382 @@ canvas#c{display:block;position:fixed;top:0;left:0}
     max-width:none;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   VEILFORGE PANEL — Echo conduit + inventory system
+   ═══════════════════════════════════════════════════════════════════ */
+#veilforgePanel{
+  display:none;
+  position:fixed;
+  inset:40px;
+  z-index:900;
+  background:
+    radial-gradient(ellipse at top right,rgba(139,92,246,0.14),transparent 60%),
+    linear-gradient(140deg,rgba(14,10,24,0.97),rgba(22,16,36,0.97));
+  border:1px solid rgba(196,181,253,0.4);
+  border-radius:14px;
+  box-shadow:0 20px 60px rgba(0,0,0,0.85), 0 0 100px rgba(139,92,246,0.2) inset;
+  padding:18px 22px;
+  overflow-y:auto;
+  font-family:'Cinzel',serif;
+  color:#d4c8e8;
+}
+.vf-intro{
+  text-align:center;
+  padding:12px 10px;
+  margin:12px 0 18px;
+  font-size:12px;
+  color:#c4b5fd;
+  letter-spacing:0.5px;
+  line-height:1.6;
+  border-top:1px solid rgba(196,181,253,0.2);
+  border-bottom:1px solid rgba(196,181,253,0.2);
+  font-style:italic;
+}
+.vf-section-hdr{
+  font-family:'Cinzel',serif;
+  font-size:12px;
+  letter-spacing:3px;
+  color:#c4b5fd;
+  margin-bottom:12px;
+  padding-bottom:6px;
+  border-bottom:1px dashed rgba(196,181,253,0.25);
+}
+.vf-section-hdr span{
+  float:right;
+  color:#9DC4B0;
+  font-size:10px;
+}
+
+.vf-layout{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:20px;
+  margin-bottom:16px;
+}
+
+/* ─── ABILITY CARDS (LEFT COLUMN) ─────────────────────────────── */
+.vf-abilities{
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+}
+.vf-ability-card{
+  background:linear-gradient(150deg,rgba(28,22,44,0.9),rgba(22,18,36,0.9));
+  border:1px solid rgba(139,92,246,0.25);
+  border-radius:10px;
+  padding:12px 14px;
+  transition:border-color 0.2s ease;
+}
+.vf-ability-card:hover{
+  border-color:rgba(180,160,230,0.45);
+}
+.vf-ability-hdr{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:10px;
+}
+.vf-ability-name{
+  font-family:'Cinzel',serif;
+  font-size:14px;
+  color:#e9d5ff;
+  letter-spacing:1.5px;
+}
+.vf-ability-hotkey{
+  font-size:9px;
+  color:#9ca3af;
+  padding:2px 7px;
+  background:rgba(139,92,246,0.2);
+  border-radius:4px;
+  letter-spacing:2px;
+}
+.vf-slots{
+  display:flex;
+  gap:6px;
+  flex-wrap:wrap;
+}
+.vf-slot{
+  flex:1;
+  min-width:58px;
+  min-height:62px;
+  background:rgba(0,0,0,0.4);
+  border:1px dashed rgba(139,92,246,0.4);
+  border-radius:8px;
+  padding:4px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+  cursor:pointer;
+  transition:all 0.15s ease;
+  position:relative;
+}
+.vf-slot:hover{
+  border-color:rgba(196,181,253,0.7);
+  background:rgba(28,22,44,0.6);
+}
+.vf-slot.locked{
+  opacity:0.35;
+  cursor:not-allowed;
+  border-style:dashed;
+}
+.vf-slot.locked:hover{
+  border-color:rgba(139,92,246,0.4);
+  background:rgba(0,0,0,0.4);
+}
+.vf-slot.filled{
+  border-style:solid;
+  background:rgba(139,92,246,0.18);
+  border-color:rgba(196,181,253,0.8);
+}
+.vf-slot.shape   { border-left:3px solid #c084fc; }
+.vf-slot.element { border-left:3px solid #ef4444; }
+.vf-slot.behavior{ border-left:3px solid #60a5fa; }
+.vf-slot.resonance{ border-left:3px solid #fbbf24; }
+.vf-slot.any{ border-left:3px solid #9DC4B0; }
+.vf-slot-icon{
+  font-size:22px;
+  line-height:1;
+  color:#c4b5fd;
+  margin-bottom:2px;
+}
+.vf-slot-label{
+  font-size:7px;
+  letter-spacing:1px;
+  color:#9ca3af;
+}
+.vf-slot.filled .vf-slot-icon{
+  color:#fff;
+  text-shadow:0 0 8px currentColor;
+}
+.vf-slot.filled .vf-slot-label{
+  color:#e9d5ff;
+}
+.vf-slot-lock{
+  font-size:10px;
+  color:#6b7280;
+  letter-spacing:0;
+}
+
+/* ─── INVENTORY COLUMN (RIGHT) ───────────────────────────────── */
+.vf-inventory-col{
+  display:flex;
+  flex-direction:column;
+}
+.vf-type-tabs{
+  display:flex;
+  gap:4px;
+  margin-bottom:12px;
+  flex-wrap:wrap;
+}
+.vf-type-tab{
+  flex:1;
+  min-width:60px;
+  background:rgba(24,18,38,0.6);
+  border:1px solid rgba(139,92,246,0.25);
+  color:#9ca3af;
+  padding:5px 6px;
+  border-radius:5px;
+  font-family:'Cinzel',serif;
+  font-size:9px;
+  letter-spacing:1px;
+  cursor:pointer;
+  transition:all 0.15s ease;
+}
+.vf-type-tab:hover{
+  color:#c4b5fd;
+  border-color:rgba(196,181,253,0.6);
+}
+.vf-type-tab.active{
+  background:rgba(139,92,246,0.3);
+  color:#e9d5ff;
+  border-color:rgba(196,181,253,0.8);
+}
+.vf-inventory-list{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  max-height:calc(100vh - 340px);
+  overflow-y:auto;
+  padding-right:4px;
+}
+.vf-echo-card{
+  background:linear-gradient(150deg,rgba(28,22,44,0.9),rgba(22,18,36,0.9));
+  border:1px solid rgba(139,92,246,0.25);
+  border-radius:8px;
+  padding:8px 10px;
+  cursor:pointer;
+  transition:all 0.15s ease;
+  position:relative;
+}
+.vf-echo-card:hover{
+  border-color:rgba(196,181,253,0.7);
+  background:linear-gradient(150deg,rgba(36,28,54,0.95),rgba(28,22,44,0.95));
+}
+.vf-echo-card.tier-common{ border-left:3px solid #9ca3af; }
+.vf-echo-card.tier-uncommon{ border-left:3px solid #60a5fa; }
+.vf-echo-card.tier-rare{ border-left:3px solid #c084fc; }
+.vf-echo-card.tier-mythic{ border-left:3px solid #fbbf24; box-shadow:0 0 8px rgba(251,191,36,0.15); }
+.vf-echo-head{
+  display:flex;
+  justify-content:space-between;
+  align-items:baseline;
+  margin-bottom:4px;
+}
+.vf-echo-name{
+  font-family:'Cinzel',serif;
+  font-size:11px;
+  color:#e9d5ff;
+  letter-spacing:0.5px;
+}
+.vf-echo-count{
+  font-size:11px;
+  color:#9DC4B0;
+  letter-spacing:1px;
+}
+.vf-echo-type{
+  display:inline-block;
+  font-size:8px;
+  letter-spacing:1.5px;
+  padding:1px 5px;
+  border-radius:3px;
+  margin-right:6px;
+  background:rgba(139,92,246,0.2);
+  color:#c4b5fd;
+}
+.vf-echo-desc{
+  font-size:10px;
+  color:#a89dc4;
+  font-style:italic;
+  line-height:1.4;
+  margin-top:4px;
+}
+.vf-echo-source{
+  font-size:9px;
+  color:#6b7280;
+  letter-spacing:0.5px;
+  margin-top:4px;
+}
+
+.vf-empty-msg{
+  text-align:center;
+  padding:24px 16px;
+  color:#7a6c88;
+  font-style:italic;
+  font-size:11px;
+}
+
+.vf-dev-panel{
+  margin-top:16px;
+  padding-top:12px;
+  border-top:1px dashed rgba(139,92,246,0.3);
+  display:flex;
+  gap:10px;
+  align-items:center;
+  flex-wrap:wrap;
+}
+.vf-dev-label{
+  font-family:'Cinzel',serif;
+  font-size:10px;
+  letter-spacing:2px;
+  color:#f59e0b;
+  opacity:0.7;
+}
+.vf-dev-btn{
+  background:rgba(245,158,11,0.14);
+  border:1px dashed rgba(245,158,11,0.5);
+  color:#fbbf24;
+  padding:5px 10px;
+  border-radius:5px;
+  font-family:'Cinzel',serif;
+  font-size:10px;
+  letter-spacing:1.5px;
+  cursor:pointer;
+}
+.vf-dev-btn:hover{ background:rgba(245,158,11,0.28); }
+.vf-dev-btn-danger{
+  border-color:rgba(239,68,68,0.5);
+  color:#fca5a5;
+  background:rgba(239,68,68,0.12);
+}
+.vf-dev-btn-danger:hover{ background:rgba(239,68,68,0.24); }
+
+/* ─── SLOT PICKER MODAL ──────────────────────────────────────── */
+.vf-picker-overlay{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.75);
+  z-index:950;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:20px;
+}
+.vf-picker-panel{
+  background:linear-gradient(140deg,rgba(18,14,32,0.98),rgba(26,20,42,0.98));
+  border:1px solid rgba(196,181,253,0.6);
+  border-radius:12px;
+  padding:16px 18px;
+  max-width:520px;
+  width:100%;
+  max-height:80vh;
+  overflow-y:auto;
+  box-shadow:0 20px 60px rgba(0,0,0,0.9);
+}
+.vf-picker-hdr{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:14px;
+  padding-bottom:10px;
+  border-bottom:1px solid rgba(196,181,253,0.2);
+}
+.vf-picker-title{
+  font-family:'Cinzel',serif;
+  font-size:14px;
+  letter-spacing:2px;
+  color:#e9d5ff;
+}
+.vf-picker-close{
+  background:rgba(139,92,246,0.24);
+  border:1px solid rgba(180,160,230,0.5);
+  color:#e9d5ff;
+  padding:6px 12px;
+  border-radius:6px;
+  font-family:'Cinzel',serif;
+  font-size:11px;
+  letter-spacing:1px;
+  cursor:pointer;
+}
+.vf-picker-close:hover{ background:rgba(139,92,246,0.42); }
+.vf-picker-list{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.vf-picker-unslot{
+  background:rgba(239,68,68,0.14);
+  border:1px dashed rgba(239,68,68,0.5);
+  color:#fca5a5;
+  padding:8px 12px;
+  border-radius:6px;
+  font-family:'Cinzel',serif;
+  font-size:11px;
+  letter-spacing:1px;
+  cursor:pointer;
+  margin-bottom:10px;
+  width:100%;
+  text-align:center;
+}
+.vf-picker-unslot:hover{ background:rgba(239,68,68,0.28); }
+
+@media (max-width:640px){
+  #veilforgePanel{ inset:10px; padding:10px; }
+  .vf-layout{ grid-template-columns:1fr; gap:14px; }
+  .vf-slot{ min-width:50px; min-height:54px; }
+  .vf-slot-icon{ font-size:18px; }
+  .vf-slot-label{ font-size:6px; }
+  .vf-type-tab{ font-size:8px; padding:4px 4px; }
+}
