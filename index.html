@@ -285,9 +285,10 @@
 </div>
 
 <!-- HUD QUEST TRACKER — always visible, shows current pinned quest -->
-<div id="questTracker">
+<div id="questTracker" onclick="navigateToActiveQuest()" title="Click to auto-navigate">
   <div class="quest-tracker-title" id="qtTitle">No Active Quest</div>
   <div class="quest-tracker-progress" id="qtProgress"></div>
+  <div class="quest-tracker-nav-hint">▸ tap to auto-navigate</div>
 </div>
 
 <!-- VEILFORGE PANEL — echo inventory + ability conduit slots -->
