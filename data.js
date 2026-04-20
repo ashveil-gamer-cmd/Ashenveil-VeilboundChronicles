@@ -142,6 +142,20 @@ const CAMP_NPCS = [
     onInteract:'openQuestHub',
     npcType:'ghost-procession',
   },
+  {
+    // The Veilwarden — endgame content gateway. ONLY appears once player
+    // has reached L40 and the Veilgate has unlocked. Stands alone at the
+    // far edge of camp, hinting that something has changed.
+    id:'veilwarden', name:'The Veilwarden', role:'veilgate',
+    x:0, y:-500,                            // farthest north — alone
+    color:'#fbbf24', accent:'#fde68a',
+    description:'He stands where nothing else will. His eyes burn with the light of the Veil itself.',
+    flavor:'"You have walked far enough. Past here, the Veil does not merely open. It remembers."',
+    onInteract:'openVeilgate',
+    npcType:'ghost-warden',
+    // Conditional visibility — only render when veilgate is unlocked
+    unlockCondition:'veilgate',
+  },
 ];
 
 // Special world position: where the central campfire sits
