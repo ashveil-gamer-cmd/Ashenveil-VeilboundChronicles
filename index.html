@@ -136,6 +136,7 @@
   <div class="menu-btn" data-menu="bag" onclick="openInventory()">⚕ BAG</div>
   <div class="menu-btn" data-menu="shop" onclick="openShop()">⚖ SHOP</div>
   <div class="menu-btn" data-menu="talents" onclick="openTalents()">✦ TALENTS</div>
+  <div class="menu-btn" data-menu="quests" onclick="openQuests()">◈ QUESTS</div>
   <div class="menu-btn" onclick="openProf()">♆ PROF</div>
   <div class="menu-btn" onclick="openSettings()">⚙ SETTINGS</div>
   <div class="menu-btn menu-btn-camp" onclick="returnToCamp()">⌂ CAMP</div>
@@ -249,6 +250,57 @@
   <div class="gear-grid" id="gearSlots"></div>
 </div>
 
+<!-- QUEST PANEL — log of active, available, and completed quests -->
+<div id="questPanel">
+  <div class="panel-header">
+    <h2>◈ THE PROCESSION'S LEDGER</h2>
+    <button class="panel-close" onclick="closeQuests()">← BACK</button>
+  </div>
+  <div class="quest-tabs">
+    <button class="quest-tab active" data-qtab="active" onclick="switchQuestTab('active')">ACTIVE <span id="qTabActiveCount">0</span></button>
+    <button class="quest-tab" data-qtab="available" onclick="switchQuestTab('available')">AVAILABLE <span id="qTabAvailCount">0</span></button>
+    <button class="quest-tab" data-qtab="completed" onclick="switchQuestTab('completed')">COMPLETED <span id="qTabCompletedCount">0</span></button>
+  </div>
+  <div id="questListContainer" class="quest-list"></div>
+  <!-- Dev controls at the bottom — hidden unless dev flag set -->
+  <div id="questDevPanel" class="quest-dev-panel">
+    <div class="quest-dev-label">⚠ DEV TOOLS</div>
+    <button class="quest-dev-btn" onclick="devCompleteAllActive()">Complete All Active</button>
+    <button class="quest-dev-btn quest-dev-btn-danger" onclick="devConfirmReset()">Reset All Quests</button>
+  </div>
+</div>
+
+<!-- HUD QUEST TRACKER — always visible, shows current pinned quest -->
+<div id="questTracker">
+  <div class="quest-tracker-title" id="qtTitle">No Active Quest</div>
+  <div class="quest-tracker-progress" id="qtProgress"></div>
+</div>
+
+<!-- PROCESSION DIALOGUE — quest-giver interaction panel -->
+<div id="processionDialogue">
+  <div class="panel-header">
+    <h2>◈ THE OLD PROCESSION</h2>
+    <button class="panel-close" onclick="closeProcessionDialogue()">← BACK</button>
+  </div>
+  <div class="procession-narrative" id="processionNarrative">
+    <em>"We speak as one. We have waited for hands that still move."</em>
+  </div>
+  <div class="procession-sections">
+    <div class="procession-section">
+      <h3>✓ READY TO TURN IN</h3>
+      <div id="procTurnInList" class="proc-list"></div>
+    </div>
+    <div class="procession-section">
+      <h3>◆ NEW OFFERINGS</h3>
+      <div id="procAvailableList" class="proc-list"></div>
+    </div>
+    <div class="procession-section">
+      <h3>~ ACTIVE (IN PROGRESS)</h3>
+      <div id="procActiveList" class="proc-list"></div>
+    </div>
+  </div>
+</div>
+
 <!-- PROFESSION PANEL -->
 <div id="profPanel">
   <div class="panel-header">
@@ -336,10 +388,11 @@
 
 <!-- 5TH ABILITY -->
 
-<!-- Game scripts: ORDER MATTERS. data.js first (constants), then audio, systems, game -->
+<!-- Game scripts: ORDER MATTERS. data.js first (constants), then audio, systems, quests, game -->
 <script src="data.js"></script>
 <script src="audio.js"></script>
 <script src="systems.js"></script>
+<script src="quests.js"></script>
 <script src="game.js"></script>
 </body>
 </html>
