@@ -5752,18 +5752,29 @@ function completeDungeon(){
     ? computeKillXP(player.level, player.level, 'stdQuest')
     : reward.bonusXP;
   addXP(clearXP);
-  // Guaranteed loot at minimum rarity
-  const allRarities=['common','uncommon','rare','epic','legendary','mythic'];
-  const minIdx=allRarities.indexOf(reward.minRarity);
-  // Pick a random rarity at or above min
-  const maxIdx=Math.min(minIdx+2,allRarities.length-1);
-  const chosenIdx=minIdx+Math.floor(Math.random()*(maxIdx-minIdx+1));
-  const targetRarity=allRarities[chosenIdx];
-  // Filter item pool for that rarity, fall back if empty
-  const pool=ITEM_POOL.filter(i=>i.rarity===targetRarity);
-  const item=pool.length
-    ? {...pool[Math.floor(Math.random()*pool.length)]}
-    : rollLoot(player.level);
+  // Guaranteed loot at minimum rarity — UNLESS a unique drops from this boss
+  // (35% chance per completeDungeon call, filtered by bossId + class lock).
+  let item = null;
+  if(typeof rollUniqueDropFromBoss === 'function'){
+    const unique = rollUniqueDropFromBoss(def.id, player.level);
+    if(unique){
+      item = unique;
+    }
+  }
+  if(!item){
+    // Fallback: standard guaranteed rarity drop
+    const allRarities=['common','uncommon','rare','epic','legendary','mythic'];
+    const minIdx=allRarities.indexOf(reward.minRarity);
+    // Pick a random rarity at or above min
+    const maxIdx=Math.min(minIdx+2,allRarities.length-1);
+    const chosenIdx=minIdx+Math.floor(Math.random()*(maxIdx-minIdx+1));
+    const targetRarity=allRarities[chosenIdx];
+    // Filter item pool for that rarity, fall back if empty
+    const pool=ITEM_POOL.filter(i=>i.rarity===targetRarity);
+    item = pool.length
+      ? {...pool[Math.floor(Math.random()*pool.length)]}
+      : rollLoot(player.level);
+  }
   tryEquip(item);
   // Beam FX + dramatic exit
   const rarityColors={common:'#9ca3af',uncommon:'#22c55e',rare:'#60a5fa',epic:'#c084fc',legendary:'#f59e0b',mythic:'#ff6b6b'};
@@ -5772,6 +5783,12 @@ function completeDungeon(){
   pushGroundFX({type:'bloom',x:player.x,y:player.y,r:300,maxR:300,color:col,life:0.8,maxLife:0.8});
   screenShake(14,400);
   addFeed(`✦ ${def.name.toUpperCase()} CLEARED!`,def.color);
+  // Extra celebration for unique drops
+  if(item.unique){
+    addFeed(`◆◆◆ UNIQUE: ${item.name.toUpperCase()} ◆◆◆`, '#f59e0b');
+    addFeed(`  "${item.flavor}"`, '#c4b5fd');
+    screenShake(20, 600);
+  }
   addFeed(`+${reward.bonusGold} gold · +${clearXP} XP`,'#f59e0b');
   // Quest system hook — advance clear_dungeon objectives
   if(typeof questOnDungeonClear === 'function') questOnDungeonClear(def.id);
@@ -6127,6 +6144,10 @@ function effectiveCD(idx){
   const cls = CLASS_DEFS[player.classId] || CLASS_DEFS.hollowcaller;
   let base = cls.abilities[idx]?.cd || ABILITY_CDS[idx] || 16000;
   let cdrPct=_tb('cdrPct');
+  // Gear 'cdr' stat stacks with talent cdrPct (both are flat % reductions)
+  if(typeof getGearBonus === 'function'){
+    cdrPct += getGearBonus('cdr');
+  }
   // Hollowcaller Raise-specific CDR bonus (only applies to its slot 0)
   if(idx===0 && player.classId==='hollowcaller')cdrPct+=_tb('raiseCdrPct');
   let cd = base*(1-Math.min(cdrPct,70)/100); // cap CDR at 70% to prevent infinite loops
@@ -6569,7 +6590,8 @@ function hitEnemy(e,dmg,isCrit=false,fromX,fromY){
     dmg *= (1 + painPct/100);
   }
   const buffCrit = typeof getActiveBuffValue === 'function' ? getActiveBuffValue('crit') : 0;
-  const critChance=0.12+_tb('critPct')/100 + buffCrit;
+  const gearCrit = typeof getGearBonus === 'function' ? getGearBonus('crit') : 0;
+  const critChance=0.12+_tb('critPct')/100 + buffCrit + gearCrit/100;
   let critRoll = Math.random() < critChance;
   // ─── Reaver-Saint Bloodvow: force crit + extra lifesteal on empowered hits ───
   let bloodvowBonus = 0;
@@ -6687,8 +6709,9 @@ function killEnemy(e){
   addXP(xpG);player.gold+=goldG;
   SFX[e.isElite?'eliteDeath':'enemyDeath']();
   spawnDmgText(e.x,e.y-40,`+${xpG}XP`,'#8b5cf6',false);
-  // Pale Vitality talent: heal on kill
-  const heal=_tb('lifeOnHit');
+  // Pale Vitality talent + gear 'lifeOnHit' stat: heal on kill
+  let heal=_tb('lifeOnHit');
+  if(typeof getGearBonus === 'function') heal += getGearBonus('lifeOnHit');
   if(heal>0&&!player.isDead){
     const actualHeal=Math.min(heal,player.maxHp-player.hp);
     if(actualHeal>0){
@@ -6712,6 +6735,24 @@ function killEnemy(e){
   const inDungeon = (typeof dungeonState !== 'undefined' && dungeonState.active);
   const baseDropRate = e.isElite ? 0.16 : 0.05;
   const dropRate = inDungeon ? baseDropRate * 0.6 : baseDropRate;
+  // Elite unique roll — 2% per elite, bypasses normal drop slot.
+  // Filters by zone and class lock.
+  if(e.isElite && typeof rollUniqueDropFromElite === 'function'){
+    const zoneId = (typeof curZone !== 'undefined' && curZone) ? curZone.id : null;
+    const unique = rollUniqueDropFromElite(zoneId, player.level);
+    if(unique){
+      tryEquip(unique);
+      if(typeof SFX !== 'undefined' && SFX.pickupLegendary) SFX.pickupLegendary();
+      pushGroundFX({type:'beam',x:e.x,y:e.y,r:60,maxR:60,color:'#f59e0b',life:3.0,maxLife:3.0});
+      pushGroundFX({type:'bloom',x:e.x,y:e.y,r:220,maxR:220,color:'#f59e0b',life:0.7,maxLife:0.7});
+      screenShake(14, 500);
+      addFeed(`◆◆◆ UNIQUE: ${unique.name.toUpperCase()} ◆◆◆`, '#f59e0b');
+      addFeed(`  "${unique.flavor}"`, '#c4b5fd');
+      if(typeof writeSave === 'function') writeSave();
+      // Skip the normal drop — unique takes its place
+      // (fall through to materials/death FX below)
+    }
+  }
   if(Math.random()<dropRate){
     const item=rollLoot(player.level);tryEquip(item);
     // Rarity-tiered pickup sound
