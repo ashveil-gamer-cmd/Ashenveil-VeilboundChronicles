@@ -5773,6 +5773,8 @@ function completeDungeon(){
   screenShake(14,400);
   addFeed(`✦ ${def.name.toUpperCase()} CLEARED!`,def.color);
   addFeed(`+${reward.bonusGold} gold · +${clearXP} XP`,'#f59e0b');
+  // Quest system hook — advance clear_dungeon objectives
+  if(typeof questOnDungeonClear === 'function') questOnDungeonClear(def.id);
   // Save immediately — never lose a dungeon clear
   if(typeof writeSave==='function')writeSave();
   // Exit after a brief celebration pause
@@ -6487,6 +6489,8 @@ function killEnemy(e){
   for(let i=0;i<14;i++){const a=Math.random()*Math.PI*2;particles.push({x:e.x,y:e.y,vx:Math.cos(a)*90,vy:Math.sin(a)*90-60,life:1.0,maxLife:1.0,color:e.typeData.color,size:3+Math.random()*4,soul:true});}
   // Update boss bar if this was the target
   if(bossTarget===e)bossTarget=null;
+  // Quest system hook — advance kill-based objectives
+  if(typeof questOnEnemyKilled === 'function') questOnEnemyKilled(e);
 }
 
 function addXP(amt){
@@ -6502,6 +6506,8 @@ function addXP(amt){
     player.hp=Math.min(player.hp+player.maxHp*0.3,player.maxHp);
     SFX.levelUp();showLevelUp();checkZone();
     if(player.level%5===0){creditMaterial('runecore',1);addFeed('+1 Runecore','#c084fc');}
+    // Quest system hook — advance reach_level objectives
+    if(typeof questOnLevelUp === 'function') questOnLevelUp(player.level);
     leveledUp=true;
   }
   // Save the moment they level up — protect player progress from a closed tab
@@ -7273,6 +7279,8 @@ function buildSave(){
     shopState:typeof shopState!=='undefined'?JSON.parse(JSON.stringify(shopState)):null,
     professions:JSON.parse(JSON.stringify(professions)),
     talents:typeof talentState!=='undefined'?JSON.parse(JSON.stringify(talentState)):null,
+    // Quest system — active quests, completed quests, turn-in counts
+    quests:typeof serializeQuestState==='function' ? serializeQuestState() : null,
   };
 }
 
@@ -7509,6 +7517,10 @@ function applySave(data){
   if(data.player && data.player._testSetsGranted !== undefined){
     player._testSetsGranted = data.player._testSetsGranted;
   }
+  // Quest state — hydrate active/completed/turnInCount from save
+  if(data.quests && typeof hydrateQuestState === 'function'){
+    hydrateQuestState(data.quests);
+  }
   // Shop state — restore rotation, buyback, last refresh time
   if(typeof shopState!=='undefined'&&data.shopState){
     shopState.gear=data.shopState.gear||[];
@@ -7730,6 +7742,8 @@ function startGame(continueFromSave=false){
   requestAnimationFrame(loop);
   // Initial AFK toggle UI sync so button shows correct state (camp = SAFE)
   if(typeof updateAfkToggleUI === 'function') updateAfkToggleUI();
+  // Initial quest HUD tracker sync
+  if(typeof updateQuestHUDTracker === 'function') updateQuestHUDTracker();
   if(continueFromSave){
     addFeed(`✦ WELCOME BACK · LV ${player.level}`,'#c084fc');
   } else {
@@ -7793,7 +7807,7 @@ document.addEventListener('keydown',e=>{
   // Only fires on the initial keydown, not on held repeats.
   if(!wasPressed && (e.key === 'e' || e.key === 'E') && curZone?.isCamp){
     // Don't fire if a panel is already open — prevents double-dip
-    const anyPanelOpen = ['gearPanel','inventoryPanel','shopPanel','talentPanel','profPanel','zoneTravelOverlay'].some(id => {
+    const anyPanelOpen = ['gearPanel','inventoryPanel','shopPanel','talentPanel','profPanel','zoneTravelOverlay','questPanel','processionDialogue'].some(id => {
       const el = document.getElementById(id);
       return el && el.style.display !== 'none' && el.style.display !== '';
     });
@@ -8259,12 +8273,15 @@ function executeNpcInteraction(npc){
     openWeaponsmith:()=>{ if(typeof openProf === 'function') openProf(); },
     openArmorer:    ()=>{ if(typeof openProf === 'function') openProf(); },
     openRitualist:  ()=>{ if(typeof openProf === 'function') openProf(); },
-    // Quest hub — stub until the quest system ships. Shows a placeholder
-    // message so the player understands what this NPC will do.
+    // Quest hub — The Old Procession. Opens the Procession's dialogue
+    // where the player can accept available quests, turn in completed ones,
+    // and review active work.
     openQuestHub:   ()=>{
-      if(typeof addFeed === 'function'){
+      if(typeof openProcessionDialogue === 'function'){
+        openProcessionDialogue();
+      } else if(typeof addFeed === 'function'){
         addFeed(`"We have been waiting..."`, '#c4b5fd');
-        addFeed(`  └ The Procession stirs. Quests coming soon.`, '#9ca3af');
+        addFeed(`  └ The Procession stirs. Quest system not yet loaded.`, '#9ca3af');
       }
     },
   };
@@ -8279,7 +8296,7 @@ function handleTapAt(screenX, screenY){
   if(!curZone?.isCamp) return false;
   // Don't interact if any modal/panel is already open — tapping through them
   // would be confusing
-  const openPanel = ['gearPanel','inventoryPanel','shopPanel','talentPanel','profPanel','zoneTravelOverlay'].find(id => {
+  const openPanel = ['gearPanel','inventoryPanel','shopPanel','talentPanel','profPanel','zoneTravelOverlay','questPanel','processionDialogue'].find(id => {
     const el = document.getElementById(id);
     return el && getComputedStyle(el).display !== 'none' && el.style.display !== '';
   });
@@ -8847,6 +8864,10 @@ function travelToZone(zoneId){
   setTimeout(()=>zoneTransiting=false, 2600);
   // Refresh AFK toggle UI — it shows differently in camp vs combat zones
   if(typeof updateAfkToggleUI === 'function') updateAfkToggleUI();
+  // Quest system hook — advance reach_zone objectives
+  if(typeof questOnZoneEnter === 'function') questOnZoneEnter(target.id);
+  // Refresh quest HUD — tracker hides in camp, shows in combat
+  if(typeof updateQuestHUDTracker === 'function') updateQuestHUDTracker();
 }
 
 // Travel back to The Procession camp from any zone
