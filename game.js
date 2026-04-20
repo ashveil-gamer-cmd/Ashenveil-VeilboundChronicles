@@ -8315,6 +8315,8 @@ function startGame(continueFromSave=false){
   if(typeof updateAfkToggleUI === 'function') updateAfkToggleUI();
   // Initial quest HUD tracker sync
   if(typeof updateQuestHUDTracker === 'function') updateQuestHUDTracker();
+  // Sync Veilgate menu button visibility with unlock state (handles reload case)
+  if(typeof refreshVeilgateMenuVisibility === 'function') refreshVeilgateMenuVisibility();
   if(continueFromSave){
     addFeed(`✦ WELCOME BACK · LV ${player.level}`,'#c084fc');
   } else {
@@ -8827,12 +8829,24 @@ function getNpcAtWorld(wx, wy, radius = TAP_INTERACT_RADIUS){
   if(!curZone?.isCamp || typeof CAMP_NPCS === 'undefined') return null;
   let closest = null, closestDist = radius;
   CAMP_NPCS.forEach(npc => {
+    if(!isNpcAvailable(npc)) return; // skip locked NPCs
     const pos = campWorldPos(npc);
     const dx = wx - pos.x, dy = wy - pos.y;
     const d = Math.sqrt(dx*dx + dy*dy);
     if(d < closestDist){ closest = npc; closestDist = d; }
   });
   return closest;
+}
+
+// Returns true if this NPC should be visible/interactable right now.
+// NPCs without unlockCondition are always available. Conditional ones
+// (Veilwarden etc) only show when their gating condition is met.
+function isNpcAvailable(npc){
+  if(!npc.unlockCondition) return true;
+  if(npc.unlockCondition === 'veilgate'){
+    return (typeof veilgateState !== 'undefined') && veilgateState.unlocked;
+  }
+  return true;
 }
 
 // Execute NPC interaction — centralized so touch and keyboard both call it
@@ -8853,6 +8867,15 @@ function executeNpcInteraction(npc){
       } else if(typeof addFeed === 'function'){
         addFeed(`"We have been waiting..."`, '#c4b5fd');
         addFeed(`  └ The Procession stirs. Quest system not yet loaded.`, '#9ca3af');
+      }
+    },
+    // Veilgate — The Veilwarden. Opens the endgame tier selection panel.
+    // NPC is filtered by isNpcAvailable() so this only fires when unlocked.
+    openVeilgate:   ()=>{
+      if(typeof openVeilgate === 'function'){
+        openVeilgate();
+      } else if(typeof addFeed === 'function'){
+        addFeed(`"You are not ready for what lies beyond."`, '#fbbf24');
       }
     },
   };
@@ -8980,6 +9003,7 @@ function getNearbyCampNpc(){
   if(!curZone?.isCamp) return null;
   let closest = null, closestDist = CAMP_INTERACT_RADIUS;
   CAMP_NPCS.forEach(npc => {
+    if(!isNpcAvailable(npc)) return; // locked NPCs not interactable
     const pos = campWorldPos(npc);
     const dx = player.x - pos.x, dy = player.y - pos.y;
     const d = Math.sqrt(dx*dx + dy*dy);
@@ -9014,6 +9038,10 @@ function drawCampNpcFigure(npc, pos, now){
   } else if(npcType === 'living-mender'){
     // Seris — looks warmer, more human. Slightly shorter.
     bodyW = 13; bodyTop = 10; bodyHeight = 30; headR = 7; headY = -17;
+  } else if(npcType === 'ghost-warden'){
+    // The Veilwarden — tall, imposing, crowned presence.
+    // Stocky like a warrior but TALLER, signaling elevated status.
+    bodyW = 17; bodyTop = 12; bodyHeight = 42; headR = 8; headY = -26;
   }
 
   // ─── SHADOW ───
@@ -9205,6 +9233,52 @@ function drawCampNpcFigure(npc, pos, now){
     ctx.fill();
     ctx.globalAlpha = 1;
     ctx.shadowBlur = 0;
+  } else if(npc.role === 'veilgate'){
+    // The Veilwarden — halo of golden runic marks rotating above his head.
+    // Signals "he holds the key to something powerful."
+    ctx.translate(0, -bodyHeight*0.55);
+    const spin = now * 0.0012;
+    const glow = 0.75 + Math.sin(now*0.003)*0.25;
+    // Central radiant glyph — diamond with inner cross
+    ctx.save();
+    ctx.rotate(spin * 0.6);
+    ctx.globalAlpha = glow;
+    ctx.fillStyle = '#fbbf24';
+    ctx.shadowColor = '#fbbf24'; ctx.shadowBlur = 18 * glow;
+    ctx.beginPath();
+    ctx.moveTo(0, -14);
+    ctx.lineTo(6, -8);
+    ctx.lineTo(0, -2);
+    ctx.lineTo(-6, -8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    // Four orbiting runic sparks (golden halo)
+    const haloR = 22;
+    for(let i = 0; i < 4; i++){
+      const a = spin + (i * Math.PI / 2);
+      const rx = Math.cos(a) * haloR;
+      const ry = Math.sin(a) * haloR * 0.4 - 10; // flatten into a "crown" ellipse
+      ctx.save();
+      ctx.globalAlpha = glow;
+      ctx.fillStyle = '#fde68a';
+      ctx.shadowColor = '#fbbf24';
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(rx, ry, 1.8, 0, Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+    }
+    // Faint overall aura behind him — golden light bleeding into the air
+    ctx.save();
+    ctx.globalAlpha = 0.18 * glow;
+    ctx.fillStyle = '#fbbf24';
+    ctx.beginPath();
+    ctx.arc(0, -8, 32, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
   }
   ctx.restore();
 
@@ -9298,6 +9372,7 @@ function drawCampNPCs(now){
   // Draw each NPC
   const nearby = getNearbyCampNpc();
   CAMP_NPCS.forEach(npc => {
+    if(!isNpcAvailable(npc)) return; // skip drawing locked NPCs
     const pos = campWorldPos(npc);
     drawCampNpcFigure(npc, pos, now);
     // When NOT nearby, show a subtle name label above the NPC so player
