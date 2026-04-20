@@ -3041,3 +3041,24 @@ canvas#c{display:block;position:fixed;top:0;left:0}
   .vf-slot-label{ font-size:6px; }
   .vf-type-tab{ font-size:8px; padding:4px 4px; }
 }
+
+/* Unique item flavor line in gear tooltip — amber, italic, quote-style */
+.gear-unique-line{
+  margin-top:6px;
+  padding:6px 8px;
+  background:linear-gradient(90deg,rgba(245,158,11,0.08),rgba(245,158,11,0.15),rgba(245,158,11,0.08));
+  border-left:2px solid #f59e0b;
+  border-radius:3px;
+  font-size:10px;
+  color:#f59e0b;
+  letter-spacing:1px;
+}
+.gear-unique-line em{
+  display:block;
+  color:#c4b5fd;
+  font-size:10px;
+  font-style:italic;
+  letter-spacing:0.3px;
+  line-height:1.45;
+  margin-top:3px;
+}
