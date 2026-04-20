@@ -7914,6 +7914,35 @@ function update(dt,now){
     const spdMult=(1+(_tb('moveSpdPct')+gearMoveSpd)/100) * classSpdMult * levelSpdBonus * (1 + buffSpd);
     player.vx=(ix/m)*PLAYER_SPEED*spdMult;player.vy=(iy/m)*PLAYER_SPEED*spdMult;
     player.facing=Math.atan2(iy,ix);
+    // Player touched keys — cancel any pending quest auto-walk
+    if(player._questNavTarget) player._questNavTarget = null;
+  } else if(inCamp && player._questNavTarget && typeof CAMP_NPCS !== 'undefined'){
+    // ═══ CAMP AUTO-WALK (quest navigation) ═══
+    // Walk toward the target NPC. On arrival, fire their interaction handler.
+    const npc = CAMP_NPCS.find(n => n.id === player._questNavTarget);
+    if(!npc){
+      player._questNavTarget = null;
+    } else {
+      const npcX = WORLD_W/2 + (npc.x||0);
+      const npcY = WORLD_H/2 + (npc.y||0);
+      const dx = npcX - player.x, dy = npcY - player.y;
+      const d = Math.sqrt(dx*dx + dy*dy);
+      if(d < 60){
+        // Arrived — fire interaction
+        player.vx = 0; player.vy = 0;
+        const savedTarget = player._questNavTarget;
+        player._questNavTarget = null;
+        if(typeof executeNpcInteraction === 'function') executeNpcInteraction(npc);
+        else if(typeof addFeed === 'function') addFeed(`Reached ${npc.name}`, '#c4b5fd');
+      } else {
+        const gearMoveSpd2 = typeof getGearBonus === 'function' ? getGearBonus('moveSpdPct') : 0;
+        const spdMult2 = (1+(_tb('moveSpdPct')+gearMoveSpd2)/100) * classSpdMult * levelSpdBonus;
+        const spd = PLAYER_SPEED * 0.8 * spdMult2;
+        player.vx = (dx/d) * spd;
+        player.vy = (dy/d) * spd;
+        player.facing = Math.atan2(dy, dx);
+      }
+    }
   } else if(isAfk){
     player.afkTimer+=dt*1000;
     // ═════════════════════════════════════════════════════════════
@@ -8404,7 +8433,12 @@ function update(dt,now){
         }
         player.hitFlash=0.18;player.iframes=220;
         screenShake(e.isElite?10:6,e.isElite?180:130);SFX.playerHit();
-        pushGroundFX({type:'bloom',x:player.x,y:player.y,r:60,maxR:60,color:'#ef4444',life:0.3,maxLife:0.3});
+        // Red ground bloom — only on significant hits, not every tick of combat.
+        // Previous behavior spammed a red pulse around the player constantly
+        // which looked like a blinking red box during continuous combat.
+        if(incomingDmg > player.maxHp * 0.08){
+          pushGroundFX({type:'bloom',x:player.x,y:player.y,r:60,maxR:60,color:'#ef4444',life:0.3,maxLife:0.3});
+        }
         if(player.hp<=0){
           // Bloodvow — Bloodforged preset active-revive
           if(player.bloodvowActive){
