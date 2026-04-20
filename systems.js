@@ -1538,8 +1538,13 @@ function renderInventory(){
       const mark=UPGRADE_MARKS[classification];
       slot.classList.add('filled');
       slot.style.borderColor=col;
+      // Uniques get a golden diamond overlay so they're instantly recognizable
+      const uniqueBadge = item.unique
+        ? `<span class="bag-slot-unique" title="Unique Item">◆</span>`
+        : '';
       slot.innerHTML=`
         <span class="bag-slot-mark" style="color:${mark.color};text-shadow:0 0 8px ${mark.color}88" title="${mark.title}">${mark.symbol}</span>
+        ${uniqueBadge}
         <canvas class="bag-slot-icon-canvas" width="52" height="52"></canvas>
         <span class="bag-slot-rarity" style="background:${col}22;color:${col}">${RARITY_LABELS[item.rarity]||'?'}</span>
       `;
@@ -1655,6 +1660,7 @@ function renderInventory(){
         </div>
         <div class="bag-tt-slot">${SLOT_ICONS[item.slot]||'✦'} ${item.slot.toUpperCase()}${item.crafted?' <span class="gear-crafted-badge">⚒ CRAFTED</span>':''}</div>
         ${item.setName?`<div class="bag-tt-set">◈ ${item.setName} set</div>`:''}
+        ${item.unique && item.flavor ? `<div class="gear-unique-line">◆ UNIQUE · <em>${item.flavor}</em></div>` : ''}
         ${classBanner}
         <div class="bag-tt-section">
           <div class="bag-tt-section-label">Item Stats</div>
@@ -5065,6 +5071,110 @@ const UNIQUE_ITEMS = [
     classLock: null,
     flavor: 'She said it to the wall. It stayed.',
     stats: { hp:260, lifeOnHit:10, res:8 },
+    dropSource: { source:'boss', bossId:'hollow_crypt' },
+  },
+
+  // ─── EXPANSION BATCH 2 — 10 MORE UNIQUES ────────────────────────
+  // Adds breadth so each boss has more variety + specific class hooks.
+
+  {
+    name: 'Gravesinger',
+    slot: 'Weapon',
+    rarity: 'legendary',
+    unique: true,
+    classLock: 'hollowcaller',
+    flavor: 'Its voice made the grave itself weep. The tears are still dripping.',
+    stats: { atk:24, sm:26, cdr:12 },
+    dropSource: { source:'boss', bossId:'hollow_crypt' },
+  },
+  {
+    name: 'Foxspine',
+    slot: 'Weapon',
+    rarity: 'legendary',
+    unique: true,
+    classLock: 'ironwake',
+    flavor: 'Supple as a living creature. Quick as one too. Never still.',
+    stats: { atk:36, crit:16, moveSpdPct:8 },
+    dropSource: { source:'boss', bossId:'wraith_sanctum' },
+  },
+  {
+    name: 'Ashen Sovereign',
+    slot: 'Helmet',
+    rarity: 'legendary',
+    unique: true,
+    classLock: null,
+    flavor: 'A king who refused to die now wears their crown sideways.',
+    stats: { hp:260, atk:18, crit:10 },
+    dropSource: { source:'boss', bossId:'ashen_cathedral' },
+  },
+  {
+    name: 'Mantle of the Threadbroken',
+    slot: 'Chest',
+    rarity: 'legendary',
+    unique: true,
+    classLock: null,
+    flavor: 'Seris tried to repair this. Even she could not.',
+    stats: { hp:320, sm:20, cdr:12 },
+    dropSource: { source:'boss', bossId:'wraith_sanctum' },
+  },
+  {
+    name: 'Child\'s Grip',
+    slot: 'Gloves',
+    rarity: 'legendary',
+    unique: true,
+    classLock: null,
+    flavor: 'Too small for your hands. They fit anyway.',
+    stats: { cdr:18, lifeOnHit:8, sm:14 },
+    dropSource: { source:'boss', bossId:'hollow_crypt' },
+  },
+  {
+    name: 'Reaver\'s Knuckles',
+    slot: 'Gloves',
+    rarity: 'legendary',
+    unique: true,
+    classLock: 'ironwake',
+    flavor: 'Scarred into shape by things that deserved it.',
+    stats: { atk:32, crit:14, lifeOnHit:6 },
+    dropSource: { source:'boss', bossId:'ashen_cathedral' },
+  },
+  {
+    name: 'Grieftread',
+    slot: 'Boots',
+    rarity: 'legendary',
+    unique: true,
+    classLock: null,
+    flavor: 'Each step leaves a mark no rain can wash away.',
+    stats: { hp:240, moveSpdPct:12, res:6 },
+    dropSource: { source:'boss', bossId:'hollow_crypt' },
+  },
+  {
+    name: 'Weight of the Unfinished',
+    slot: 'Belt',
+    rarity: 'legendary',
+    unique: true,
+    classLock: null,
+    flavor: 'Everything left undone, hanging from a single leather strap.',
+    stats: { hp:320, atk:14, res:10 },
+    dropSource: { source:'boss', bossId:'ashen_cathedral' },
+  },
+  {
+    name: 'Echoband',
+    slot: 'Ring',
+    rarity: 'legendary',
+    unique: true,
+    classLock: null,
+    flavor: 'A circle of silver that hums at a frequency you almost recognize.',
+    stats: { sm:16, crit:10, cdr:14 },
+    dropSource: { source:'elite', zone:'wraith_sanctum' },
+  },
+  {
+    name: 'Last Candle\'s Memory',
+    slot: 'Amulet',
+    rarity: 'legendary',
+    unique: true,
+    classLock: null,
+    flavor: 'The one that would not go out. Seris kept it burning for you.',
+    stats: { sm:18, hp:180, lifeOnHit:8, cdr:8 },
     dropSource: { source:'boss', bossId:'hollow_crypt' },
   },
 ];
