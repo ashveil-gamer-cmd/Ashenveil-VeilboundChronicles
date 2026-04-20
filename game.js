@@ -9943,6 +9943,12 @@ canvas.addEventListener('touchstart', e => {
   e.preventDefault();
   for(let i=0; i<e.changedTouches.length; i++){
     const t = e.changedTouches[i];
+    // Skip touches that originated on a UI element (ability button, menu, etc).
+    // This prevents the joystick from hijacking ability taps.
+    const el = document.elementFromPoint(t.clientX, t.clientY);
+    if(el && (el.closest('#abilityBar') || el.closest('.menu-btn') || el.closest('#afkToggle') || el.closest('#questTracker'))){
+      continue;
+    }
     if(t.clientX < W/2 && !touchJoy.active){
       // Left side — joystick for movement
       joyId = t.identifier;
@@ -10004,6 +10010,25 @@ canvas.addEventListener('touchend', e => {
     }
   }
 });
+
+// ═══════ ABILITY BUTTON TOUCH HANDLERS ════════════════════════════
+// Inline onclick is unreliable on mobile when a joystick finger is already
+// held down (the browser can defer click until joystick releases). Adding
+// touchstart directly fires on first touch, completely independent of other
+// touches. This is why holding movement and tapping an ability can fail —
+// the click event is queued behind the joystick's ongoing touch stream.
+for(let i = 0; i < 5; i++){
+  const btn = document.getElementById(`ab${i}`);
+  if(!btn) continue;
+  const idx = i;
+  btn.addEventListener('touchstart', ev => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    // Fire the cast immediately; onclick as a safety fallback
+    if(typeof playerCast === 'function') playerCast(idx);
+    player.lastInput = performance.now();
+  }, {passive:false});
+}
 
 
 // ════════ ZONE TRANSITIONS ════════════════════════════════════════════
