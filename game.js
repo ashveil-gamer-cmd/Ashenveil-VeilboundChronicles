@@ -6352,12 +6352,18 @@ function castHollowcallerBase(idx, now){
       }
       addFeed(`💥 DETONATE! ${hits} HIT · ${Math.round(dmg)}`, tint);
       // Cataclysm echo — trigger detonation on ALL other marked enemies (0.3s delay each)
+      // Capture the echo dmg multiplier so chain-detonations (which fire
+      // async via setTimeout) still get the bonus. Sync hits go through
+      // hitEnemy during the active cast window, which applies dmgMult there.
+      const echoCapturedDmgMult = mods?.dmgMult || 1.0;
       if(mods?.chainDetonates && markedForChain.length > 0){
         markedForChain.forEach((me, i) => {
           setTimeout(() => {
             if(me.dead) return;
             const chainRadius = radius * 0.85;
-            const chainDmg = dmg * 0.7;
+            // chainDmg pre-applies the captured echo mult since the cast
+            // context is cleared by the time this setTimeout runs.
+            const chainDmg = dmg * 0.7 * echoCapturedDmgMult;
             enemies.forEach(ce=>{
               if(!ce.dead && dist2(me.x, me.y, ce.x, ce.y) < chainRadius){
                 hitEnemy(ce, chainDmg, false, me.x, me.y);
@@ -6378,7 +6384,9 @@ function castHollowcallerBase(idx, now){
       if(totalEchoChance > 0 && Math.random() < totalEchoChance){
         setTimeout(()=>{
           let hits2=0;
-          enemies.forEach(e=>{if(!e.dead&&dist2(t.x,t.y,e.x,e.y)<radius){hitEnemy(e,dmg*0.7,false,t.x,t.y);hits2++;}});
+          // chain damage pre-applies the captured echo mult (context is cleared by now)
+          const chainDmg2 = dmg * 0.7 * echoCapturedDmgMult;
+          enemies.forEach(e=>{if(!e.dead&&dist2(t.x,t.y,e.x,e.y)<radius){hitEnemy(e,chainDmg2,false,t.x,t.y);hits2++;}});
           pushGroundFX({type:'ring',x:t.x,y:t.y,maxR:radius,r:20,color:'#fff4a0',life:0.4,maxLife:0.4,expand:true});
           if(hits2>0)addFeed(`  ↳ CATACLYSM ECHO · ${hits2}`,'#fff4a0');
         },180);
@@ -7291,12 +7299,15 @@ function update(dt,now){
     if(!locked){
       const lastGain = player.momentumLastGainedAt || 0;
       const timeSinceGain = now - lastGain;
-      if(timeSinceGain > 1500){
-        // Decay 1 stack every 1500ms since last gain
-        const decays = Math.floor(timeSinceGain / 1500);
+      // Momentum's Edge / Perfect Form talents extend the decay grace window.
+      // Base grace is 1500ms; bonus adds ms per rank.
+      const decayGrace = 1500 + (_tb('momentumDecayBonus') || 0);
+      if(timeSinceGain > decayGrace){
+        // Decay 1 stack every decayGrace window since last gain
+        const decays = Math.floor(timeSinceGain / decayGrace);
         player.momentumStacks = Math.max(0, player.momentumStacks - decays);
         // Shift the timer forward so we don't over-decay next frame
-        player.momentumLastGainedAt = now - (timeSinceGain - decays * 1500);
+        player.momentumLastGainedAt = now - (timeSinceGain - decays * decayGrace);
       }
     }
   }
