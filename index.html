@@ -137,6 +137,7 @@
   <div class="menu-btn" data-menu="shop" onclick="openShop()">⚖ SHOP</div>
   <div class="menu-btn" data-menu="talents" onclick="openTalents()">✦ TALENTS</div>
   <div class="menu-btn" data-menu="veilforge" onclick="openVeilforge()">⚡ VEILFORGE</div>
+  <div class="menu-btn" data-menu="veilgate" onclick="openVeilgate()">✦ VEILGATE</div>
   <div class="menu-btn" data-menu="quests" onclick="openQuests()">◈ QUESTS</div>
   <div class="menu-btn" onclick="openProf()">♆ PROF</div>
   <div class="menu-btn" onclick="openSettings()">⚙ SETTINGS</div>
@@ -312,6 +313,38 @@
   </div>
 </div>
 
+<!-- VEILGATE PANEL — endgame tier selection + progression stats -->
+<div id="veilgatePanel">
+  <div class="panel-header">
+    <h2>✦ THE VEILGATE</h2>
+    <button class="panel-close" onclick="closeVeilgate()">← BACK</button>
+  </div>
+  <div class="vg-intro">
+    <em>"Past the Veil, there is only what you bring with you. And what was already there, waiting."</em>
+  </div>
+  <div id="vgUnlockBanner" class="vg-unlock-banner" style="display:none;">
+    <div class="vg-unlock-text">Veilgate unlocks at Level <span id="vgUnlockLv">40</span></div>
+    <div class="vg-unlock-sub">Your current level: <span id="vgCurLv">?</span></div>
+  </div>
+  <div id="vgStatsBanner" class="vg-stats-banner" style="display:none;">
+    <div class="vg-stat">
+      <span class="vg-stat-label">BEST TIER</span>
+      <span class="vg-stat-val" id="vgBestTier">0</span>
+    </div>
+    <div class="vg-stat">
+      <span class="vg-stat-label">HIGHEST ATTEMPTED</span>
+      <span class="vg-stat-val" id="vgHighestAttempt">0</span>
+    </div>
+  </div>
+  <div id="vgTierList" class="vg-tier-list"></div>
+  <div class="vg-dev-panel">
+    <div class="vg-dev-label">⚠ DEV</div>
+    <button class="vg-dev-btn" onclick="devUnlockVeilgate(); renderVeilgate();">Unlock Veilgate</button>
+    <button class="vg-dev-btn" onclick="devSetBestTier(5); renderVeilgate();">Set Best: T5</button>
+    <button class="vg-dev-btn" onclick="devSetBestTier(10); renderVeilgate();">Set Best: T10</button>
+  </div>
+</div>
+
 <!-- PROCESSION DIALOGUE — quest-giver interaction panel -->
 <div id="processionDialogue">
   <div class="panel-header">
@@ -430,6 +463,7 @@
 <script src="systems.js"></script>
 <script src="quests.js"></script>
 <script src="veilforge.js"></script>
+<script src="veilgate.js"></script>
 <script src="game.js"></script>
 </body>
 </html>
