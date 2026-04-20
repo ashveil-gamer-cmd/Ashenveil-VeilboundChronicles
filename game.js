@@ -6178,38 +6178,129 @@ function playerCast(idx){
   // Default: Hollowcaller (existing behavior)
   if(idx===0){
     // Raise — summon one spirit, or two with Echoing Call talent
+    // Echoes can further multiply the count, shorten cooldown, tint visuals.
+    const mods = (typeof getAbilityEchoModifiers === 'function')
+      ? getAbilityEchoModifiers('raise') : null;
     const doubles=_tb('raiseDoubles')>0;
-    const summoned=spawnSpirit();
-    if(summoned){
-      if(doubles)spawnSpirit(); // second summon if the talent is learned (silent failure if cap)
-      abilityCDs[0]=now+effectiveCD(0);SFX.spiritSummon();
-      addFeed(doubles?'✦✦ SPIRITS RAISED':'✦ SPIRIT RAISED','#9DC4B0');
+    // Base count is 1 (or 2 if talent), modified by echo countMult
+    let summonCount = doubles ? 2 : 1;
+    if(mods && mods.countMult > 1.0){
+      summonCount = Math.round(summonCount * mods.countMult);
+    }
+    let anySummoned = false;
+    for(let s = 0; s < summonCount; s++){
+      if(spawnSpirit()) anySummoned = true;
+    }
+    if(anySummoned){
+      // Echo-modified cooldown
+      const cd = effectiveCD(0) * (mods?.cdrMult || 1);
+      abilityCDs[0]=now+cd;
+      SFX.spiritSummon();
+      // Echo-modified visual tint
+      const tint = mods?.elementTint || '#9DC4B0';
+      addFeed(summonCount > 1 ? `✦×${summonCount} SPIRITS RAISED` : '✦ SPIRIT RAISED', tint);
       emitSpiritBurst(player.x,player.y);
-      pushGroundFX({type:'ring',x:player.x,y:player.y,maxR:110,r:10,color:'#9DC4B0',life:0.55,maxLife:0.55,expand:true});
-      pushGroundFX({type:'scorch',x:player.x,y:player.y,r:90,maxR:90,color:'#9DC4B0',life:0.9,maxLife:0.9});
+      pushGroundFX({type:'ring',x:player.x,y:player.y,maxR:110,r:10,color:tint,life:0.55,maxLife:0.55,expand:true});
+      pushGroundFX({type:'scorch',x:player.x,y:player.y,r:90,maxR:90,color:tint,life:0.9,maxLife:0.9});
+      // Bound Chord resonance — empower spirits for a duration
+      if(mods?.empowersSpirits){
+        spirits.forEach(sp => {
+          if(sp.dead) return;
+          sp.empoweredUntil = now + (mods.spiritEmpowerDur || 5000);
+          sp._echoEmpowerPct = mods.spiritEmpowerPct || 50;
+        });
+      }
     }
   } else if(idx===1){
+    // Veilmark — apply stacks to nearest enemy (up to 950u range)
+    // Echoes can boost stacks applied, reduce cooldown, tint visuals
+    const mods = (typeof getAbilityEchoModifiers === 'function')
+      ? getAbilityEchoModifiers('veilmark') : null;
     const t=getNearestEnemy(950);
     if(t){
       const vmMax=10+_tb('veilmarkMax');
-      t.veilmarkStacks=Math.min(t.veilmarkStacks+1,vmMax);t.veilmarkExpiry=now+8000;
-      abilityCDs[1]=now+effectiveCD(1);SFX.veilmark();addFeed(`VEILMARK ×${t.veilmarkStacks}`,'#f43f5e');
-      pushGroundFX({type:'bloom',x:t.x,y:t.y,r:80,maxR:80,color:'#f43f5e',life:0.35,maxLife:0.35});
+      // Base stack is 1, echoes can add more via appliesVeilmark
+      const stacksToApply = 1 + (mods?.appliesVeilmark || 0);
+      t.veilmarkStacks=Math.min(t.veilmarkStacks + stacksToApply, vmMax);
+      t.veilmarkExpiry=now+8000;
+      const cd = effectiveCD(1) * (mods?.cdrMult || 1);
+      abilityCDs[1]=now+cd;
+      SFX.veilmark();
+      const tint = mods?.elementTint || '#f43f5e';
+      addFeed(`VEILMARK ×${t.veilmarkStacks}`, tint);
+      pushGroundFX({type:'bloom',x:t.x,y:t.y,r:80,maxR:80,color:tint,life:0.35,maxLife:0.35});
     }
   } else if(idx===2){
+    // Detonate — AOE around a marked enemy
+    // Echoes can boost damage, radius, cooldown, tint, and unlock Cataclysm chaining
+    const mods = (typeof getAbilityEchoModifiers === 'function')
+      ? getAbilityEchoModifiers('detonate') : null;
     const t=getNearestMarkedEnemy();
     if(t&&t.veilmarkStacks>=3){
       const detoDmgMult=1+_tb('detoDmgPct')/100;
-      const radius=240+_tb('detoRadius');
-      const dmg=player.attack*2*t.veilmarkStacks*damageMult()*detoDmgMult;
+      // Echo dmgMult stacks multiplicatively on top of talent bonus
+      const echoDmg = mods?.dmgMult || 1.0;
+      const echoRadius = mods?.radiusMult || 1.0;
+      const radius=(240+_tb('detoRadius')) * echoRadius;
+      const dmg=player.attack*2*t.veilmarkStacks*damageMult()*detoDmgMult*echoDmg;
       let hits=0;
-      enemies.forEach(e=>{if(!e.dead&&dist2(t.x,t.y,e.x,e.y)<radius){hitEnemy(e,dmg,false,t.x,t.y);hits++;}});
-      t.veilmarkStacks=0;abilityCDs[2]=now+effectiveCD(2);SFX.detonate();
-      screenShake(14,320);emitExplosion(t.x,t.y,'#ff6b35');
-      pushGroundFX({type:'ring',x:t.x,y:t.y,maxR:radius,r:20,color:'#ff6b35',life:0.5,maxLife:0.5,expand:true});
-      pushGroundFX({type:'scorch',x:t.x,y:t.y,r:radius-40,maxR:radius-40,color:'#ff6b35',life:1.8,maxLife:1.8});
+      const markedForChain = []; // collect other marked enemies for chain-detonate
+      enemies.forEach(e=>{
+        if(!e.dead&&dist2(t.x,t.y,e.x,e.y)<radius){
+          hitEnemy(e,dmg,false,t.x,t.y);
+          hits++;
+          // If Cataclysm echo active, collect other marked enemies for chain
+          if(mods?.chainDetonates && e !== t && e.veilmarkStacks > 0){
+            markedForChain.push(e);
+          }
+        }
+      });
+      t.veilmarkStacks=0;
+      const cd = effectiveCD(2) * (mods?.cdrMult || 1);
+      abilityCDs[2]=now+cd;
+      SFX.detonate();
+      screenShake(14,320);
+      const tint = mods?.elementTint || '#ff6b35';
+      emitExplosion(t.x,t.y,tint);
+      pushGroundFX({type:'ring',x:t.x,y:t.y,maxR:radius,r:20,color:tint,life:0.5,maxLife:0.5,expand:true});
+      pushGroundFX({type:'scorch',x:t.x,y:t.y,r:radius-40,maxR:radius-40,color:tint,life:1.8,maxLife:1.8});
       pushGroundFX({type:'bloom',x:t.x,y:t.y,r:radius-60,maxR:radius-60,color:'#fff4a0',life:0.25,maxLife:0.25});
-      addFeed(`💥 DETONATE! ${hits} HIT · ${Math.round(dmg)}`,'#ff6b35');
+      // Lingering Wound echo — leaves a damaging zone
+      if(mods?.leavesPool){
+        // Use existing worldCaches/scorch pattern — emit scorch + queue pool damage
+        const poolDuration = mods.poolDuration || 4000;
+        const poolDps = mods.poolDmgPerSec || 0.3;
+        pushGroundFX({type:'scorch',x:t.x,y:t.y,r:radius*0.8,maxR:radius*0.8,color:tint,life:poolDuration/1000,maxLife:poolDuration/1000});
+        // Register a ticking damage pool
+        if(!window.__damagePools) window.__damagePools = [];
+        window.__damagePools.push({
+          x:t.x, y:t.y, radius:radius*0.8,
+          dmgPerTick: dmg * poolDps,
+          expiresAt: now + poolDuration,
+          lastTick: now,
+        });
+      }
+      addFeed(`💥 DETONATE! ${hits} HIT · ${Math.round(dmg)}`, tint);
+      // Cataclysm echo — trigger detonation on ALL other marked enemies (0.3s delay each)
+      if(mods?.chainDetonates && markedForChain.length > 0){
+        markedForChain.forEach((me, i) => {
+          setTimeout(() => {
+            if(me.dead) return;
+            const chainRadius = radius * 0.85;
+            const chainDmg = dmg * 0.7;
+            enemies.forEach(ce=>{
+              if(!ce.dead && dist2(me.x, me.y, ce.x, ce.y) < chainRadius){
+                hitEnemy(ce, chainDmg, false, me.x, me.y);
+              }
+            });
+            me.veilmarkStacks = 0;
+            pushGroundFX({type:'ring',x:me.x,y:me.y,maxR:chainRadius,r:15,color:tint,life:0.4,maxLife:0.4,expand:true});
+            pushGroundFX({type:'bloom',x:me.x,y:me.y,r:chainRadius*0.7,maxR:chainRadius*0.7,color:tint,life:0.3,maxLife:0.3});
+            emitExplosion(me.x, me.y, tint);
+          }, 200 + i * 150);
+        });
+        addFeed(`  ↳ CATACLYSM — chained ${markedForChain.length}`, '#fbbf24');
+      }
       // Cataclysm talent: 30% chance to echo the detonation
       if(_tb('detoEcho')>0&&Math.random()<0.3){
         setTimeout(()=>{
@@ -6221,26 +6312,57 @@ function playerCast(idx){
       }
     }
   } else if(idx===3){
-    const radius=340+_tb('wrathRadius');
-    const dmg=player.attack*1.6*damageMult();
+    // Wrath Tide — AOE around player that also applies Veilmark
+    const mods = (typeof getAbilityEchoModifiers === 'function')
+      ? getAbilityEchoModifiers('wrath') : null;
+    const echoDmg = mods?.dmgMult || 1.0;
+    const echoRadius = mods?.radiusMult || 1.0;
+    const radius=(340+_tb('wrathRadius')) * echoRadius;
+    const dmg=player.attack*1.6*damageMult()*echoDmg;
     let hits=0;
     const vmMax=10+_tb('veilmarkMax');
-    enemies.forEach(e=>{if(!e.dead&&dist2(player.x,player.y,e.x,e.y)<radius){hitEnemy(e,dmg,false,player.x,player.y);e.veilmarkStacks=Math.min(e.veilmarkStacks+1,vmMax);e.veilmarkExpiry=now+8000;hits++;}});
-    abilityCDs[3]=now+effectiveCD(3);SFX.wrathTide();
+    // Base 1 stack applied, echo appliesVeilmark can add more
+    const stacksApplied = 1 + (mods?.appliesVeilmark || 0);
+    enemies.forEach(e=>{
+      if(!e.dead&&dist2(player.x,player.y,e.x,e.y)<radius){
+        hitEnemy(e,dmg,false,player.x,player.y);
+        e.veilmarkStacks=Math.min(e.veilmarkStacks+stacksApplied,vmMax);
+        e.veilmarkExpiry=now+8000;
+        hits++;
+      }
+    });
+    const cd = effectiveCD(3) * (mods?.cdrMult || 1);
+    abilityCDs[3]=now+cd;
+    SFX.wrathTide();
     emitWave(player.x,player.y);
-    pushGroundFX({type:'ring',x:player.x,y:player.y,maxR:radius,r:20,color:'#a855f7',life:0.6,maxLife:0.6,expand:true});
-    pushGroundFX({type:'scorch',x:player.x,y:player.y,r:radius-20,maxR:radius-20,color:'#a855f7',life:1.5,maxLife:1.5});
-    addFeed(`⚡ WRATH TIDE — ${hits} MARKED`,'#a855f7');
+    const tint = mods?.elementTint || '#a855f7';
+    pushGroundFX({type:'ring',x:player.x,y:player.y,maxR:radius,r:20,color:tint,life:0.6,maxLife:0.6,expand:true});
+    pushGroundFX({type:'scorch',x:player.x,y:player.y,r:radius-20,maxR:radius-20,color:tint,life:1.5,maxLife:1.5});
+    addFeed(`⚡ WRATH TIDE — ${hits} MARKED`, tint);
   } else if(idx===4){
-    const dmg=player.attack*3.2*damageMult();let hits=0;
-    enemies.forEach(e=>{if(!e.dead&&dist2(player.x,player.y,e.x,e.y)<460){hitEnemy(e,dmg,false,player.x,player.y);hits++;}});
-    abilityCDs[4]=now+effectiveCD(4);
+    // Soul Nova — Hollowcaller ultimate AOE
+    const mods = (typeof getAbilityEchoModifiers === 'function')
+      ? getAbilityEchoModifiers('nova') : null;
+    const echoDmg = mods?.dmgMult || 1.0;
+    const echoRadius = mods?.radiusMult || 1.0;
+    const radius = 460 * echoRadius;
+    const dmg=player.attack*3.2*damageMult()*echoDmg;
+    let hits=0;
+    enemies.forEach(e=>{
+      if(!e.dead&&dist2(player.x,player.y,e.x,e.y)<radius){
+        hitEnemy(e,dmg,false,player.x,player.y);
+        hits++;
+      }
+    });
+    const cd = effectiveCD(4) * (mods?.cdrMult || 1);
+    abilityCDs[4]=now+cd;
     if(SFX.eliteDeath)SFX.eliteDeath();
     screenShake(20,500);
-    pushGroundFX({type:'bloom',x:player.x,y:player.y,r:300,maxR:300,color:'#fbbf24',life:0.5,maxLife:0.5});
-    pushGroundFX({type:'ring',x:player.x,y:player.y,maxR:460,r:30,color:'#fbbf24',life:0.8,maxLife:0.8,expand:true});
-    pushGroundFX({type:'scorch',x:player.x,y:player.y,r:440,maxR:440,color:'#fbbf24',life:2.2,maxLife:2.2});
-    addFeed(`★ SOUL NOVA — ${hits} STRUCK · ${Math.round(dmg)}`,'#fbbf24');
+    const tint = mods?.elementTint || '#fbbf24';
+    pushGroundFX({type:'bloom',x:player.x,y:player.y,r:300,maxR:300,color:tint,life:0.5,maxLife:0.5});
+    pushGroundFX({type:'ring',x:player.x,y:player.y,maxR:radius,r:30,color:tint,life:0.8,maxLife:0.8,expand:true});
+    pushGroundFX({type:'scorch',x:player.x,y:player.y,r:radius-20,maxR:radius-20,color:tint,life:2.2,maxLife:2.2});
+    addFeed(`★ SOUL NOVA — ${hits} STRUCK · ${Math.round(dmg)}`, tint);
   }
 }
 
@@ -6822,6 +6944,24 @@ function update(dt,now){
   if(typeof updateNecroBanners === 'function') updateNecroBanners(now);
   // Voidweaver preset — tick seals, singularities, rifts
   if(typeof updateVoidweaverEntities === 'function') updateVoidweaverEntities(now);
+  // Veilforge damage pools (Lingering Wound echo, etc.) — tick damage,
+  // expire when duration is up. Pools are simple {x,y,radius,dmgPerTick,expiresAt,lastTick}.
+  if(window.__damagePools && window.__damagePools.length > 0){
+    window.__damagePools = window.__damagePools.filter(p => {
+      if(now >= p.expiresAt) return false;
+      // Damage tick every 500ms
+      if(now - p.lastTick >= 500){
+        p.lastTick = now;
+        enemies.forEach(e => {
+          if(e.dead) return;
+          if(dist2(p.x, p.y, e.x, e.y) < p.radius){
+            hitEnemy(e, p.dmgPerTick, false, p.x, p.y);
+          }
+        });
+      }
+      return true;
+    });
+  }
   let ix=0,iy=0;
   if(keys['ArrowLeft']||keys['a']||keys['A'])ix=-1;
   if(keys['ArrowRight']||keys['d']||keys['D'])ix=1;
@@ -7960,7 +8100,7 @@ document.addEventListener('keydown',e=>{
   // Only fires on the initial keydown, not on held repeats.
   if(!wasPressed && (e.key === 'e' || e.key === 'E') && curZone?.isCamp){
     // Don't fire if a panel is already open — prevents double-dip
-    const anyPanelOpen = ['gearPanel','inventoryPanel','shopPanel','talentPanel','profPanel','zoneTravelOverlay','questPanel','processionDialogue'].some(id => {
+    const anyPanelOpen = ['gearPanel','inventoryPanel','shopPanel','talentPanel','profPanel','zoneTravelOverlay','questPanel','processionDialogue','veilforgePanel'].some(id => {
       const el = document.getElementById(id);
       return el && el.style.display !== 'none' && el.style.display !== '';
     });
@@ -8449,7 +8589,7 @@ function handleTapAt(screenX, screenY){
   if(!curZone?.isCamp) return false;
   // Don't interact if any modal/panel is already open — tapping through them
   // would be confusing
-  const openPanel = ['gearPanel','inventoryPanel','shopPanel','talentPanel','profPanel','zoneTravelOverlay','questPanel','processionDialogue'].find(id => {
+  const openPanel = ['gearPanel','inventoryPanel','shopPanel','talentPanel','profPanel','zoneTravelOverlay','questPanel','processionDialogue','veilforgePanel'].find(id => {
     const el = document.getElementById(id);
     return el && getComputedStyle(el).display !== 'none' && el.style.display !== '';
   });
