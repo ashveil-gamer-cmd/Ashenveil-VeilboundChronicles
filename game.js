@@ -6504,7 +6504,16 @@ function spawnSpirit(isTemp=false){
   if(!isTemp&&perms.length>=(player.maxBonds||MAX_SPIRITS))return false;
   const a=Math.random()*Math.PI*2;
   // Roll archetype for this spirit — determines visual + combat role
-  const archetype = _rollSpiritArchetype();
+  let archetype = _rollSpiritArchetype();
+  // ═════ UNIQUE EFFECT: The Pale Choir ═════
+  // Every 3rd spirit summoned is forced to be a Nexus (the rare golden one).
+  // Counter persists across session but not across character — fine for idle.
+  if(typeof hasUniqueEffect === 'function' && hasUniqueEffect('pale_choir_nexus')){
+    player._paleChoirCount = (player._paleChoirCount || 0) + 1;
+    if(player._paleChoirCount % 3 === 0){
+      archetype = 'nexus';
+    }
+  }
   const arch = SPIRIT_ARCHETYPES[archetype];
   spirits.push({
     id: spiritId++,
@@ -7152,6 +7161,11 @@ function hitEnemy(e,dmg,isCrit=false,fromX,fromY){
     const cost = Math.floor(player.hp * 0.03);
     if(cost > 0) player.hp = Math.max(1, player.hp - cost);
   }
+  // ═════ UNIQUE EFFECT: Shroud-Walker's Tread ═════
+  // +50% damage while the momentum buff is active.
+  if(player._shroudBuffUntil && now < player._shroudBuffUntil){
+    dmg *= 1.5;
+  }
   // Ruinous Strike — every Nth hit deals +100% damage
   // Savage Joy talent lowers N from 5 → 3.
   if(_tb('ruinousStrike') > 0){
@@ -7189,6 +7203,11 @@ function hitEnemy(e,dmg,isCrit=false,fromX,fromY){
   }
   const critChance=0.12+_tb('critPct')/100 + buffCrit + gearCrit/100 + lowHpCritBonus;
   let critRoll = Math.random() < critChance;
+  // ═════ UNIQUE EFFECT: Crown of the Unmaking ═════
+  // Guaranteed crit vs enemies below 30% HP.
+  if(typeof hasUniqueEffect === 'function' && hasUniqueEffect('crown_execute')){
+    if(e.hp < e.maxHp * 0.30) critRoll = true;
+  }
   // ─── Reaver-Saint Bloodvow: force crit + extra lifesteal on empowered hits ───
   let bloodvowBonus = 0;
   if(typeof applyBloodvowBonusToHit === 'function'){
@@ -7217,6 +7236,19 @@ function hitEnemy(e,dmg,isCrit=false,fromX,fromY){
     }
   }
   e.hp-=finalDmg;e.hitFlash=0.18;
+  // ═════ UNIQUE EFFECT: Mournblade ═════
+  // Every 5th player hit fears the target for 1 second.
+  if(typeof hasUniqueEffect === 'function' && hasUniqueEffect('mournblade_fear')){
+    player._mournbladeHits = (player._mournbladeHits || 0) + 1;
+    if(player._mournbladeHits >= 5){
+      player._mournbladeHits = 0;
+      e.fearedUntil = performance.now() + 1000;
+      spawnDmgText(e.x, e.y - e.size - 16, 'FEARED', '#a78bfa', true);
+      if(typeof pushGroundFX === 'function'){
+        pushGroundFX({type:'ring', x:e.x, y:e.y, maxR:70, r:10, color:'#a78bfa', life:0.5, maxLife:0.5, expand:true});
+      }
+    }
+  }
   // Magnitude-aware damage text. Tier is computed from damage/maxHp ratio.
   // If this hit will kill the enemy, use execute color (amber) even at low tiers
   // to signal "the killing blow." Otherwise, standard crit/normal palette.
@@ -7340,10 +7372,19 @@ function killEnemy(e){
   e.dead=true;kills++;
   document.getElementById('killCount').textContent=`☠ ${kills}`;
   // ═════ DEATH FLOURISH — scales to enemy significance ═════
-  // Normal mob: quick puff + kill particle. Elite: bigger burst + soul
-  // fragment ejection. Boss: big ring + shake + color flash. The
-  // perceptual difference makes every significant kill read as a moment.
   _spawnDeathFlourish(e);
+  // ═════ UNIQUE EFFECT: Whisperbone Cleaver ═════
+  // Melee kills (Ironwake) restore 4% max HP.
+  if(typeof hasUniqueEffect === 'function' && hasUniqueEffect('whisperbone_heal')){
+    if(player.classId === 'ironwake' && !player.isDead){
+      const heal = Math.floor(player.maxHp * 0.04);
+      const actual = Math.min(heal, player.maxHp - player.hp);
+      if(actual > 0){
+        player.hp += actual;
+        spawnDmgText(player.x, player.y - 30, `+${actual}`, '#22c55e', false);
+      }
+    }
+  }
   // Juggernaut momentum refresh — kills sustain your stack window and add 1 stack.
   // Without this, momentum dies between fights even with full set.
   if(player.momentumStacks !== undefined){
@@ -8015,11 +8056,33 @@ function update(dt,now){
   // Resolve against prop collisions — player slides along prop edges rather than
   // stopping dead. Player collision radius ~18px matches their visible body.
   const resolved=resolvePlayerMovement(player.x,player.y,proposedX,proposedY,18);
+  const oldX = player.x, oldY = player.y;
   player.x=resolved.x;
   player.y=resolved.y;
   player.glowPulse+=dt*2.2;
   if(player.iframes>0)player.iframes-=dt*1000;
   if(player.hitFlash>0)player.hitFlash-=dt;
+  // ═════ UNIQUE EFFECT: Shroud-Walker's Tread ═════
+  // Track continuous movement. If player moves 200+ units without stopping,
+  // grant +50% damage for 3 seconds. "Stopping" = moving under 0.2 units/frame.
+  if(typeof hasUniqueEffect === 'function' && hasUniqueEffect('shroud_momentum')){
+    const movedThisFrame = Math.sqrt((player.x-oldX)**2 + (player.y-oldY)**2);
+    if(movedThisFrame < 0.2){
+      // Stopped — reset accumulator
+      player._shroudMomentum = 0;
+    } else {
+      player._shroudMomentum = (player._shroudMomentum || 0) + movedThisFrame;
+      if(player._shroudMomentum >= 200 && (!player._shroudBuffUntil || now >= player._shroudBuffUntil - 500)){
+        // Activate / refresh buff
+        player._shroudBuffUntil = now + 3000;
+        player._shroudMomentum = 0; // start fresh
+        if(typeof addFeed === 'function') addFeed('✦ SHROUD-WALKER — +50% damage', '#c4b5fd');
+        if(typeof pushGroundFX === 'function'){
+          pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:80, r:12, color:'#c4b5fd', life:0.5, maxLife:0.5, expand:true});
+        }
+      }
+    }
+  }
 
   // ─── JUGGERNAUT MOMENTUM DECAY ─────────────────────────────────
   // Stacks decay 1 per 1.5s when NOT in the locked window AND idle.
@@ -8171,6 +8234,13 @@ function update(dt,now){
       return;
     }
     const dx=player.x-e.x,dy=player.y-e.y,d=Math.sqrt(dx*dx+dy*dy)||1;
+    // Mournblade fear — enemy flees from player, cannot attack
+    if(e.fearedUntil && now < e.fearedUntil){
+      e.chargingUntil = 0;
+      e.x -= (dx/d) * e.speed * 1.2 * dt;
+      e.y -= (dy/d) * e.speed * 1.2 * dt;
+      return;
+    }
 
     // ═══════════════════════════════════════════════════════════
     // PER-TYPE ENEMY AI
@@ -8251,6 +8321,15 @@ function update(dt,now){
           if(sdx*sdx + sdy*sdy < 200*200) wardenAura += sp.archDrAura;
         });
         let incomingDmg=e.attack*(1-Math.min(dmgReducePct+gearRes+spiritDr+legionBonus+wardenAura,80)/100);
+        // ═════ UNIQUE EFFECT: Amulet of the Hollowed Name ═════
+        // Hits below the 10%-max-HP threshold are absorbed entirely.
+        // Huge vs chip damage, negligible vs real threats.
+        if(typeof hasUniqueEffect === 'function' && hasUniqueEffect('hollowed_threshold')){
+          if(incomingDmg < player.maxHp * 0.10){
+            incomingDmg = 0;
+            spawnDmgText(player.x, player.y - 20, 'ABSORBED', '#c4b5fd', false);
+          }
+        }
         // ─── IRONCLAD STEELFALL — chance to fully block ───
         const blockPct = _tb('blockChance');
         if(blockPct > 0 && Math.random()*100 < blockPct){
