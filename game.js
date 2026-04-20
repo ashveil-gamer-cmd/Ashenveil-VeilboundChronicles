@@ -6573,6 +6573,8 @@ function killEnemy(e){
   if(bossTarget===e)bossTarget=null;
   // Quest system hook — advance kill-based objectives
   if(typeof questOnEnemyKilled === 'function') questOnEnemyKilled(e);
+  // Veilforge echo drop roll — chance to award an echo based on enemy tier
+  if(typeof rollEchoDropOnKill === 'function') rollEchoDropOnKill(e);
 }
 
 function addXP(amt){
@@ -7426,6 +7428,8 @@ function buildSave(){
     talents:typeof talentState!=='undefined'?JSON.parse(JSON.stringify(talentState)):null,
     // Quest system — active quests, completed quests, turn-in counts
     quests:typeof serializeQuestState==='function' ? serializeQuestState() : null,
+    // Veilforge — echo inventory and slotted echoes per ability
+    veilforge:typeof serializeVeilforgeState==='function' ? serializeVeilforgeState() : null,
   };
 }
 
@@ -7665,6 +7669,10 @@ function applySave(data){
   // Quest state — hydrate active/completed/turnInCount from save
   if(data.quests && typeof hydrateQuestState === 'function'){
     hydrateQuestState(data.quests);
+  }
+  // Veilforge state — echo inventory + slotted echoes
+  if(data.veilforge && typeof hydrateVeilforgeState === 'function'){
+    hydrateVeilforgeState(data.veilforge);
   }
   // Shop state — restore rotation, buyback, last refresh time
   if(typeof shopState!=='undefined'&&data.shopState){
