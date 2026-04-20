@@ -6201,6 +6201,89 @@ function damageMult(){
 // Nested calls are safe — hitEnemy just reads whatever's current.
 let _currentCastAbilityId = null;
 
+// ═══════ AFK ABILITY GATING ═══════════════════════════════════════
+// Returns true if the given ability slot should be cast right now given
+// the current combat situation. Per-class + per-ability rules.
+//
+// Philosophy: don't waste cooldowns. An ultimate on a single trash mob is
+// a massive loss. Detonate with 0 stacks is nothing. Wrath Tide on one
+// enemy is fine but better on three. This gating dramatically improves
+// the feel of AFK play.
+function shouldAfkCast(idx, target, crowdCount, now){
+  if(!target) return false; // never cast with no enemies visible
+  const cls = player.classId || 'hollowcaller';
+  const targetD2 = (target.x - player.x)**2 + (target.y - player.y)**2;
+  const inRangeFor = (radius) => targetD2 < radius * radius;
+  // Hollowcaller ability logic
+  if(cls === 'hollowcaller'){
+    if(idx === 0){
+      // Raise Spirit — always good to cast if we have spirit room
+      return true;
+    }
+    if(idx === 1){
+      // Veilmark — apply to nearest enemy. Only cast if not already marked
+      // to stack capacity, and target has > 20% HP (don't waste on dying)
+      if(!inRangeFor(950)) return false;
+      if(target.veilmarkStacks >= 8) return false;
+      if(target.hp < target.maxHp * 0.20) return false;
+      return true;
+    }
+    if(idx === 2){
+      // Detonate — only fire if SOMEONE has 3+ stacks (Detonate's minimum)
+      let hasMarked = false;
+      enemies.forEach(e=>{
+        if(!e.dead && e.veilmarkStacks >= 3) hasMarked = true;
+      });
+      return hasMarked;
+    }
+    if(idx === 3){
+      // Wrath Tide — AOE that applies marks. Worth casting at 2+ enemies,
+      // or 1 enemy if that enemy is an elite.
+      if(crowdCount >= 2) return true;
+      if(target.isElite && inRangeFor(340)) return true;
+      return false;
+    }
+    if(idx === 4){
+      // Soul Nova — ultimate. Only fire at 4+ enemies OR an elite/boss in range.
+      if(crowdCount >= 4) return true;
+      if((target.isElite || target.isBoss) && inRangeFor(460)) return true;
+      return false;
+    }
+  }
+  // Ironwake ability logic
+  if(cls === 'ironwake'){
+    if(idx === 0){
+      // Anchor Strike — 120 unit melee. Fire whenever target is close.
+      return inRangeFor(130);
+    }
+    if(idx === 1){
+      // Bulwark — defensive CD. Fire when multiple enemies nearby OR HP < 60%.
+      if(crowdCount >= 2) return true;
+      if(player.hp < player.maxHp * 0.6) return true;
+      return false;
+    }
+    if(idx === 2){
+      // Ground Shatter — AOE + stun. Fire at 2+ enemies.
+      return crowdCount >= 2;
+    }
+    if(idx === 3){
+      // Retribution — reflect window. Fire when actively being hit (crowd >= 2)
+      // or target is an elite.
+      if(crowdCount >= 2) return true;
+      if(target.isElite || target.isBoss) return true;
+      return false;
+    }
+    if(idx === 4){
+      // Ironwake's Fury — charge ult. Need target within charge range.
+      // Only fire at elite/boss or 4+ enemies.
+      if(crowdCount >= 4) return true;
+      if(target.isElite || target.isBoss) return true;
+      return false;
+    }
+  }
+  return true; // unknown class — fallback to always-fire
+}
+
 function playerCast(idx){
   const now=performance.now();
   if(now<abilityCDs[idx]||player.isDead)return;
@@ -7200,81 +7283,124 @@ function update(dt,now){
     player.facing=Math.atan2(iy,ix);
   } else if(isAfk){
     player.afkTimer+=dt*1000;
-    const tx=player.afkWpX-player.x,ty=player.afkWpY-player.y,d=Math.sqrt(tx*tx+ty*ty)||1;
-    // ═══ Smart AFK pathing ═══
-    // Class attack range determines "safe kite distance". Hollowcaller (ranged)
-    // wants to stay at ~90% of attack range. Ironwake (melee) wants to hover
-    // just inside its range. When surrounded by many mobs, kite OUT rather
-    // than walk deeper into the crowd — this prevents the "stuck in blob"
-    // bug where the player stands still attacking while enemies pile up.
+    // ═════════════════════════════════════════════════════════════
+    // AFK COMBAT STATE MACHINE
+    //
+    // Three states, chosen fresh each frame:
+    //   ENGAGE     — at least one enemy in fighting distance; commit to fight
+    //   REPOSITION — in a crowd (>= 4 enemies nearby); kite outward
+    //   WANDER     — no threats nearby; move toward exploration waypoint
+    //
+    // ENGAGE is sticky — once you enter it, you hold position within
+    // attackRange of the target rather than drifting past. This fixes
+    // the old bug where players would run in wide circles around enemies
+    // because waypoint direction won over enemy-direction.
+    // ═════════════════════════════════════════════════════════════
     const classAttackRangeAfk = (CLASS_DEFS[player.classId]||CLASS_DEFS.hollowcaller).attackRange || ATTACK_RANGE;
     const isMelee = classAttackRangeAfk < 120;
-    // Ideal range: just inside attack range. Gives us buffer so spawn jitter
-    // doesn't push us out of range mid-swing.
-    const idealRange = classAttackRangeAfk * 0.85;
-    // Count nearby enemies — if 3+, we're in a crowd and need to kite
+    const idealRange = classAttackRangeAfk * 0.80;       // where we want to be
+    const engageRange = classAttackRangeAfk * 1.15;      // "fight me now" threshold
+    const dangerRange = isMelee ? 60 : 140;              // "back off!" threshold
+
+    // Find threats — the nearest enemy for targeting, the cluster center for avoidance
+    let nearest = null, nearestDist = Infinity;
     let crowdCount = 0;
+    let crowdX = 0, crowdY = 0, crowdN = 0;
+    let nearestElite = null, nearestEliteDist = Infinity;
     enemies.forEach(e=>{
       if(e.dead)return;
       const ddx=e.x-player.x, ddy=e.y-player.y;
-      if(ddx*ddx+ddy*ddy < 120*120) crowdCount++;
-    });
-    const inCrowd = crowdCount >= 3;
-    // Compute center-of-mass of nearby threats (so we can kite AWAY from it)
-    let threatX=0, threatY=0, threatN=0;
-    enemies.forEach(e=>{
-      if(e.dead)return;
-      const ddx=e.x-player.x, ddy=e.y-player.y;
-      if(ddx*ddx+ddy*ddy < 200*200){
-        threatX+=e.x; threatY+=e.y; threatN++;
+      const d2=ddx*ddx+ddy*ddy;
+      const d=Math.sqrt(d2);
+      // Track nearest enemy overall
+      if(d < nearestDist){ nearest = e; nearestDist = d; }
+      // Track nearest elite separately (used for prioritization)
+      if(e.isElite && d < nearestEliteDist){ nearestElite = e; nearestEliteDist = d; }
+      // Crowd detection — within ~200 units
+      if(d2 < 200*200){
+        crowdCount++;
+        crowdX+=e.x; crowdY+=e.y; crowdN++;
       }
     });
-    const ne=getNearestEnemy(classAttackRangeAfk + 120);
-    let mx=tx, my=ty, md=d;
-    if(ne){
-      const edx=ne.x-player.x, edy=ne.y-player.y, eDist=Math.sqrt(edx*edx+edy*edy)||1;
-      if(inCrowd){
-        // ═ KITE MODE ═ Too many enemies nearby — back away from their center
-        threatX/=threatN; threatY/=threatN;
-        const kdx=player.x-threatX, kdy=player.y-threatY;
-        const kMag=Math.sqrt(kdx*kdx+kdy*kdy)||1;
-        // Move AWAY from threat cluster
-        mx=kdx; my=kdy; md=kMag;
-        // Boost to escape speed to actually get out
-      } else if(eDist < idealRange * 0.7){
-        // ═ TOO CLOSE ═ back off to restore optimal range (only matters for melee)
-        if(!isMelee){
-          mx=-edx; my=-edy; md=eDist;
-        } else {
-          // Melee: if inside attack range but not in crowd, slow creep is fine
-          // Move perpendicular to maintain positioning without piling in
-          mx=-edy; my=edx; md=eDist;
-        }
-      } else if(eDist > idealRange){
-        // ═ TOO FAR ═ close distance to enemy (same as old behavior)
-        mx=edx; my=edy; md=eDist;
-      } else {
-        // ═ OPTIMAL RANGE ═ we're in the sweet spot — orbit slightly to stay
-        // mobile (prevents enemies from stacking on top of us) while keeping
-        // the target in range.
-        mx=-edy; my=edx; md=eDist;
-      }
+    // Prefer engaging the nearest elite if one is within engagement range.
+    // This makes AFK play favor the valuable target rather than peel off
+    // the elite to chase a trash mob that wandered closer.
+    let target = nearest;
+    let targetDist = nearestDist;
+    if(nearestElite && nearestEliteDist < engageRange * 1.5){
+      target = nearestElite;
+      targetDist = nearestEliteDist;
     }
-    if(d<80||player.afkTimer>player.afkCommit){player.visitedSectors[player.sector]=true;setAfkWaypoint();}
+
+    const inCrowd = crowdCount >= 4;
+    let state = 'wander';
+    if(target && targetDist < engageRange) state = 'engage';
+    if(inCrowd && !isMelee) state = 'reposition'; // only caster-classes kite out
+    // Melee Bloodforged/Juggernaut WANT to be in the crowd — override
+    if(isMelee && state === 'reposition') state = 'engage';
+
+    let mx, my, md;
+    if(state === 'engage' && target){
+      const edx = target.x - player.x, edy = target.y - player.y;
+      const eDist = Math.max(0.01, Math.sqrt(edx*edx + edy*edy));
+      if(eDist < dangerRange){
+        // Too close — step back (caster) or strafe (melee)
+        if(isMelee){
+          // Strafe perpendicular so we don't get surrounded while still attacking
+          mx = -edy; my = edx; md = eDist;
+        } else {
+          mx = -edx; my = -edy; md = eDist;
+        }
+      } else if(eDist > idealRange * 1.1){
+        // Close distance — walk straight at them
+        mx = edx; my = edy; md = eDist;
+      } else {
+        // In sweet spot — hold position (near zero velocity) with tiny orbit
+        // so we don't freeze completely and look broken.
+        const hold = Math.sin(now*0.002) * 0.3;
+        mx = -edy * hold; my = edx * hold; md = Math.max(0.1, eDist);
+      }
+    } else if(state === 'reposition'){
+      // Kite away from the cluster center
+      const cx = crowdX/crowdN, cy = crowdY/crowdN;
+      mx = player.x - cx; my = player.y - cy;
+      md = Math.max(0.01, Math.sqrt(mx*mx+my*my));
+    } else {
+      // WANDER — follow the exploration waypoint
+      const tx = player.afkWpX - player.x, ty = player.afkWpY - player.y;
+      mx = tx; my = ty; md = Math.max(0.01, Math.sqrt(tx*tx+ty*ty));
+    }
+    // Rotate waypoint if we've reached it or been committed too long
+    const waypointDist = Math.sqrt(
+      (player.afkWpX-player.x)**2 + (player.afkWpY-player.y)**2
+    );
+    if(waypointDist<80 || player.afkTimer>player.afkCommit){
+      player.visitedSectors[player.sector]=true;
+      setAfkWaypoint();
+    }
     const buffSpdAfk = typeof getActiveBuffValue === 'function' ? getActiveBuffValue('speed') : 0;
     const gearMoveSpdAfk = typeof getGearBonus === 'function' ? getGearBonus('moveSpdPct') : 0;
     const spdMult=(1+(_tb('moveSpdPct')+gearMoveSpdAfk)/100) * classSpdMult * levelSpdBonus * (1 + buffSpdAfk);
-    // Kite mode moves at full speed to escape crowds; otherwise slower so
-    // abilities have time to cycle.
-    const spdBase = inCrowd ? PLAYER_SPEED*1.0 : (ne && md<classAttackRangeAfk+120 ? PLAYER_SPEED*0.9 : PLAYER_SPEED*0.72);
+    // Speed depends on state:
+    //  engage   — slow to let attacks / spirits catch up (0.55x)
+    //  reposition — fast escape (1.0x)
+    //  wander   — exploration pace (0.75x)
+    let spdBase;
+    if(state === 'engage')      spdBase = PLAYER_SPEED * 0.55;
+    else if(state === 'reposition') spdBase = PLAYER_SPEED * 1.0;
+    else                        spdBase = PLAYER_SPEED * 0.75;
     const spd = spdBase * spdMult;
     player.vx=(mx/md)*spd; player.vy=(my/md)*spd;
     player.facing=Math.atan2(my,mx);
-    // Face the nearest enemy even when orbiting/kiting — so auto-attack targets correctly
-    if(ne){
-      const fdx=ne.x-player.x, fdy=ne.y-player.y;
+    // Always face the target while in combat — so auto-attacks + cones hit right
+    if(target){
+      const fdx=target.x-player.x, fdy=target.y-player.y;
       player.facing=Math.atan2(fdy,fdx);
     }
+    // Store current target so AFK ability logic can make smart choices
+    player._afkTarget = target;
+    player._afkState = state;
+    player._afkCrowdCount = crowdCount;
   } else{player.vx*=0.78;player.vy*=0.78;}
 
   // Proposed next position — clamped to world bounds
@@ -7334,8 +7460,17 @@ function update(dt,now){
     }
   }
 
-  // AFK auto-cast
-  if(isAfk){for(let i=0;i<4;i++)if(now>=abilityCDs[i])playerCast(i);}
+  // AFK auto-cast — smart per-ability gating.
+  // Bad: fire every ability on CD (wastes Soul Nova on lone mobs).
+  // Good: each ability only fires when its context is favorable.
+  if(isAfk){
+    const afkTarget = player._afkTarget;
+    const crowd = player._afkCrowdCount || 0;
+    for(let i=0; i<5; i++){
+      if(now < abilityCDs[i]) continue;
+      if(shouldAfkCast(i, afkTarget, crowd, now)) playerCast(i);
+    }
+  }
 
   // Spirits
   spirits=spirits.filter(s=>!s.dead);
