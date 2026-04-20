@@ -2621,9 +2621,8 @@ function findClearPosition(cx,cy,r,maxAttempts=16){
       if(!getPropCollisionAt(nx,ny,r))return {x:nx,y:ny};
     }
   }
-  // Absolute fallback: return a known-clear central zone position
-  // rather than leaving the caller stuck. (2400, 2400) is near-center.
-  return {x:2400,y:2400};
+  // Absolute fallback: return world-center rather than leaving the caller stuck.
+  return {x:WORLD_W/2, y:WORLD_H/2};
 }
 
 function drawEnvironment(now){
