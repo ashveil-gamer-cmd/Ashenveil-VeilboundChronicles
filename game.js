@@ -7779,7 +7779,32 @@ function showLevelUp(){
   setTimeout(()=>b.style.display='none',2600);
   addFeed(`✦ LEVEL ${player.level} ✦`,'#c084fc');
 }
-function respawn(){player.hp=player.maxHp;player.isDead=false;player.iframes=3000;player.x=WORLD_W/2;player.y=WORLD_H/2;const _rc=findClearPosition(player.x,player.y,22);player.x=_rc.x;player.y=_rc.y;enemies=[];spirits=[];player._cheatDeathUsed=false;player._cheatDeathUses=0;document.getElementById('deathScreen').style.display='none';addFeed('RISEN FROM THE VEIL','#9DC4B0');}
+// Death screen presenter — shows stats + 30s auto-respawn countdown.
+// Player can still click Rise Again for instant respawn; countdown cancels
+// if they do. If countdown reaches 0, respawn() is called automatically.
+// This prevents AFK players from being stuck on the death screen forever.
+let _deathCountdownTimer = null;
+function showDeathScreen(){
+  document.getElementById('deathStats').textContent = `${kills} slain · Level ${player.level}`;
+  document.getElementById('deathScreen').style.display = 'flex';
+  if(typeof writeSave === 'function') writeSave();
+  // Start 30-second auto-respawn countdown
+  let remaining = 30;
+  const numEl = document.getElementById('deathCountdownNum');
+  if(numEl) numEl.textContent = String(remaining);
+  if(_deathCountdownTimer) clearInterval(_deathCountdownTimer);
+  _deathCountdownTimer = setInterval(() => {
+    remaining -= 1;
+    if(numEl) numEl.textContent = String(remaining);
+    if(remaining <= 0){
+      clearInterval(_deathCountdownTimer);
+      _deathCountdownTimer = null;
+      if(player.isDead) respawn();
+    }
+  }, 1000);
+}
+
+function respawn(){player.hp=player.maxHp;player.isDead=false;player.iframes=3000;player.x=WORLD_W/2;player.y=WORLD_H/2;const _rc=findClearPosition(player.x,player.y,22);player.x=_rc.x;player.y=_rc.y;enemies=[];spirits=[];player._cheatDeathUsed=false;player._cheatDeathUses=0;document.getElementById('deathScreen').style.display='none';addFeed('RISEN FROM THE VEIL','#9DC4B0');if(_deathCountdownTimer){clearInterval(_deathCountdownTimer);_deathCountdownTimer=null;}}
 
 // ═══════ UPDATE ═════════════════════════════════════════
 function update(dt,now){
@@ -7933,8 +7958,22 @@ function update(dt,now){
       mx = player.x - cx; my = player.y - cy;
       md = Math.max(0.01, Math.sqrt(mx*mx+my*my));
     } else {
-      // WANDER — follow the exploration waypoint
-      const tx = player.afkWpX - player.x, ty = player.afkWpY - player.y;
+      // WANDER — if a portal is active, walk toward it; auto-enter when close.
+      // Otherwise follow the normal exploration waypoint.
+      let targetX = player.afkWpX, targetY = player.afkWpY;
+      if(typeof portalState !== 'undefined' && portalState.active && !dungeonState.active){
+        const p = portalState.active;
+        targetX = p.x;
+        targetY = p.y;
+        // Auto-enter when close enough to trigger the portal prompt radius
+        const pdx = p.x - player.x, pdy = p.y - player.y;
+        const pd2 = pdx*pdx + pdy*pdy;
+        const entryR = (typeof PORTAL_ENTRY_RADIUS !== 'undefined' ? PORTAL_ENTRY_RADIUS : 50);
+        if(pd2 < entryR*entryR){
+          if(typeof confirmPortalEntry === 'function') confirmPortalEntry();
+        }
+      }
+      const tx = targetX - player.x, ty = targetY - player.y;
       mx = tx; my = ty; md = Math.max(0.01, Math.sqrt(tx*tx+ty*ty));
     }
     // Rotate waypoint if we've reached it or been committed too long
@@ -8313,16 +8352,12 @@ function update(dt,now){
               pushGroundFX({type:'ring',x:player.x,y:player.y,maxR:120,r:10,color:'#fff4a0',life:0.8,maxLife:0.8,expand:true});
             } else {
               player.hp=0;player.isDead=true;
-              document.getElementById('deathStats').textContent=`${kills} slain · Level ${player.level}`;
-              document.getElementById('deathScreen').style.display='flex';
-              if(typeof writeSave==='function')writeSave();
+              showDeathScreen();
               if(dungeonState.active)exitDungeon(false);
             }
           } else {
             player.hp=0;player.isDead=true;
-            document.getElementById('deathStats').textContent=`${kills} slain · Level ${player.level}`;
-            document.getElementById('deathScreen').style.display='flex';
-            if(typeof writeSave==='function')writeSave();
+            showDeathScreen();
             // If inside a dungeon, fail the run
             if(dungeonState.active)exitDungeon(false);
           }
@@ -8626,6 +8661,8 @@ function buildSave(){
     zoneId:curZone?.id||1,
     equipped:JSON.parse(JSON.stringify(equipped)),
     inventory:typeof inventory!=='undefined'?JSON.parse(JSON.stringify(inventory)):[],
+    gearStash:typeof gearStash!=='undefined'?JSON.parse(JSON.stringify(gearStash)):[],
+    autoEquipUpgrades:typeof autoEquipUpgrades!=='undefined'?autoEquipUpgrades:false,
     setStash:typeof setStash!=='undefined'?JSON.parse(JSON.stringify(setStash)):[],
     setStashData:typeof setStashData!=='undefined'?JSON.parse(JSON.stringify(setStashData)):{},
     shopState:typeof shopState!=='undefined'?JSON.parse(JSON.stringify(shopState)):null,
@@ -8849,6 +8886,17 @@ function applySave(data){
       data.inventory.forEach(item=>inventory.push(item));
     }
     if(typeof updateInventoryBadge==='function')updateInventoryBadge();
+  }
+  // Gear Stash — unlimited overflow bag. Introduced in the inventory overhaul.
+  if(typeof gearStash!=='undefined'){
+    gearStash.length=0;
+    if(Array.isArray(data.gearStash)){
+      data.gearStash.forEach(item=>gearStash.push(item));
+    }
+  }
+  // Auto-equip upgrades toggle
+  if(typeof autoEquipUpgrades!=='undefined' && typeof data.autoEquipUpgrades === 'boolean'){
+    autoEquipUpgrades = data.autoEquipUpgrades;
   }
   // Set Stash — separate inventory tab for set pieces
   if(typeof setStash!=='undefined'){
@@ -10346,23 +10394,9 @@ function showZTrans(name,sub,color){
 // ════════ MINIMAP ═════════════════════════════════════════════════════
 let _mmT=0;
 function updateMinimapZ(){
-  _mmT+=16;if(_mmT<200)return;_mmT=0;
-  let mc=document.getElementById('minimapCanvas');
-  if(!mc){mc=document.createElement('canvas');mc.id='minimapCanvas';mc.width=80;mc.height=80;mc.style.cssText='border-radius:50%;border:1px solid rgba(192,132,252,0.16);box-shadow:0 2px 10px rgba(0,0,0,0.6)';let wrap=document.getElementById('minimap');if(!wrap){wrap=document.createElement('div');wrap.id='minimap';wrap.style.cssText='position:fixed;top:10px;right:130px;z-index:50;pointer-events:none';document.body.appendChild(wrap);}wrap.appendChild(mc);if(running)wrap.style.display='block';}
-  const mx=mc.getContext('2d'),mw=80,sc=mw/WORLD_W;
-  mx.clearRect(0,0,mw,mw);mx.fillStyle='rgba(5,0,15,0.9)';mx.fillRect(0,0,mw,mw);
-  enemies.forEach(e=>{if(e.dead)return;mx.fillStyle=e.isElite?'#fbbf24':'#ef4444';mx.beginPath();mx.arc(e.x*sc,e.y*sc,1.5,0,Math.PI*2);mx.fill();});
-  spirits.forEach(s=>{if(s.dead)return;mx.fillStyle='#9DC4B0';mx.beginPath();mx.arc(s.x*sc,s.y*sc,1.2,0,Math.PI*2);mx.fill();});
-  // Portal marker — pulsing tier-color dot so player can spot it from afar
-  if(portalState.active){
-    const p=portalState.active;
-    const pulse=0.6+0.4*Math.sin(performance.now()*0.005);
-    mx.fillStyle=p.def.color;mx.shadowColor=p.def.color;mx.shadowBlur=6;
-    mx.beginPath();mx.arc(p.x*sc,p.y*sc,3*pulse+1.5,0,Math.PI*2);mx.fill();
-    mx.shadowBlur=0;
-  }
-  mx.fillStyle='#c084fc';mx.shadowColor='#c084fc';mx.shadowBlur=4;
-  mx.beginPath();mx.arc(player.x*sc,player.y*sc,2.8,0,Math.PI*2);mx.fill();mx.shadowBlur=0;
+  // Minimap disabled — see index.html. Function kept as no-op so any
+  // legacy call sites don't error.
+  return;
 }
 
 // ═══════ SPRITE PRELOAD ═════════════════════════════════════
