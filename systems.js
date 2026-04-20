@@ -231,6 +231,17 @@ let gearStash=[]; // array of full item objects, uncapped
 // (or stash if bag is full). Set Stash items are never touched by this.
 let autoEquipUpgrades=false;
 
+// Check if the player has a unique item with the given effect id equipped.
+// Used by combat hooks to apply unique item mechanics without ugly per-item
+// if-chains scattered across the codebase.
+function hasUniqueEffect(effectId){
+  for(const slot in equipped){
+    const item = equipped[slot];
+    if(item && item.uniqueEffect === effectId) return true;
+  }
+  return false;
+}
+
 // Crude "is this an upgrade?" heuristic — total weighted stat value.
 // Higher value wins. Rarity is included as a tiebreaker weight so a
 // same-stat higher-rarity item still reads as upgrade.
@@ -726,6 +737,9 @@ function renderGearPanel(){
       const uniqueLine = item.unique && item.flavor
         ? `<div class="gear-unique-line">◆ UNIQUE · <em>${item.flavor}</em></div>`
         : '';
+      const uniqueEffectLine = item.uniqueEffectDesc
+        ? `<div class="gear-unique-effect">✦ ${item.uniqueEffectDesc}</div>`
+        : '';
       const craftedBadge=item.crafted?`<span class="gear-crafted-badge">⚒ CRAFTED</span>`:'';
       div.innerHTML=`
         <div class="gear-slot-header">
@@ -737,6 +751,7 @@ function renderGearPanel(){
         <div class="gear-stats-block">${statsHtml}</div>
         ${setLine}
         ${uniqueLine}
+        ${uniqueEffectLine}
       `;
       // Render the gear icon into the canvas
       const iconCanvas = div.querySelector('.gear-slot-icon-canvas');
@@ -1821,6 +1836,7 @@ function renderInventory(){
         <div class="bag-tt-slot">${SLOT_ICONS[item.slot]||'✦'} ${item.slot.toUpperCase()}${item.crafted?' <span class="gear-crafted-badge">⚒ CRAFTED</span>':''}</div>
         ${item.setName?`<div class="bag-tt-set">◈ ${item.setName} set</div>`:''}
         ${item.unique && item.flavor ? `<div class="gear-unique-line">◆ UNIQUE · <em>${item.flavor}</em></div>` : ''}
+        ${item.uniqueEffectDesc ? `<div class="gear-unique-effect">✦ ${item.uniqueEffectDesc}</div>` : ''}
         ${classBanner}
         <div class="bag-tt-section">
           <div class="bag-tt-section-label">Item Stats</div>
@@ -5017,6 +5033,8 @@ const UNIQUE_ITEMS = [
     classLock: 'ironwake',
     flavor: 'Carved from the femur of a giant that died before speech existed.',
     stats: { atk:42, crit:12, lifeOnHit:8 },
+    uniqueEffect: 'whisperbone_heal',
+    uniqueEffectDesc: 'Melee kills restore 4% max HP',
     dropSource: { source:'boss', bossId:'ashen_cathedral' },
   },
   {
@@ -5027,6 +5045,8 @@ const UNIQUE_ITEMS = [
     classLock: 'hollowcaller',
     flavor: 'Three voices bound into one instrument. They sing when the spirits do.',
     stats: { atk:28, sm:32, spiritBonus:2 },
+    uniqueEffect: 'pale_choir_nexus',
+    uniqueEffectDesc: 'Your 3rd spirit summoned is always a Nexus',
     dropSource: { source:'boss', bossId:'wraith_sanctum' },
   },
   {
@@ -5037,6 +5057,8 @@ const UNIQUE_ITEMS = [
     classLock: null,
     flavor: 'Grieves every wound it inflicts. Never dulls.',
     stats: { atk:38, lifeOnHit:12, hp:120 },
+    uniqueEffect: 'mournblade_fear',
+    uniqueEffectDesc: 'Every 5th hit fears the target for 1s',
     dropSource: { source:'boss', bossId:'hollow_crypt' },
   },
   {
