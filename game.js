@@ -5792,6 +5792,10 @@ function completeDungeon(){
   addFeed(`+${reward.bonusGold} gold · +${clearXP} XP`,'#f59e0b');
   // Quest system hook — advance clear_dungeon objectives
   if(typeof questOnDungeonClear === 'function') questOnDungeonClear(def.id);
+  // Veilgate hook — special bonus rewards if this was a Veilgate tier clear
+  if(def.isVeilgate && typeof onVeilgateTierComplete === 'function'){
+    onVeilgateTierComplete(def.veilgateTier);
+  }
   // Save immediately — never lose a dungeon clear
   if(typeof writeSave==='function')writeSave();
   // Exit after a brief celebration pause
@@ -5800,6 +5804,10 @@ function completeDungeon(){
 
 function exitDungeon(success){
   if(!dungeonState.active)return;
+  // Veilgate failure hook — fires when a Veilgate run is abandoned or died
+  if(!success && dungeonState.def?.isVeilgate && typeof onVeilgateTierFailed === 'function'){
+    onVeilgateTierFailed(dungeonState.def.veilgateTier);
+  }
   dungeonState.active=false;
   dungeonState.phase='idle';
   dungeonState.bossEntity=null;
@@ -6799,6 +6807,8 @@ function addXP(amt){
     if(player.level%5===0){creditMaterial('runecore',1);addFeed('+1 Runecore','#c084fc');}
     // Quest system hook — advance reach_level objectives
     if(typeof questOnLevelUp === 'function') questOnLevelUp(player.level);
+    // Veilgate unlock check — level 40+ triggers the endgame dungeon
+    if(typeof checkVeilgateUnlock === 'function') checkVeilgateUnlock();
     leveledUp=true;
   }
   // Save the moment they level up — protect player progress from a closed tab
@@ -7658,6 +7668,8 @@ function buildSave(){
     quests:typeof serializeQuestState==='function' ? serializeQuestState() : null,
     // Veilforge — echo inventory and slotted echoes per ability
     veilforge:typeof serializeVeilforgeState==='function' ? serializeVeilforgeState() : null,
+    // Veilgate — endgame tier progression
+    veilgate:typeof serializeVeilgateState==='function' ? serializeVeilgateState() : null,
   };
 }
 
@@ -7901,6 +7913,10 @@ function applySave(data){
   // Veilforge state — echo inventory + slotted echoes
   if(data.veilforge && typeof hydrateVeilforgeState === 'function'){
     hydrateVeilforgeState(data.veilforge);
+  }
+  // Veilgate state — endgame tier progression
+  if(data.veilgate && typeof hydrateVeilgateState === 'function'){
+    hydrateVeilgateState(data.veilgate);
   }
   // Shop state — restore rotation, buyback, last refresh time
   if(typeof shopState!=='undefined'&&data.shopState){
@@ -8188,7 +8204,7 @@ document.addEventListener('keydown',e=>{
   // Only fires on the initial keydown, not on held repeats.
   if(!wasPressed && (e.key === 'e' || e.key === 'E') && curZone?.isCamp){
     // Don't fire if a panel is already open — prevents double-dip
-    const anyPanelOpen = ['gearPanel','inventoryPanel','shopPanel','talentPanel','profPanel','zoneTravelOverlay','questPanel','processionDialogue','veilforgePanel'].some(id => {
+    const anyPanelOpen = ['gearPanel','inventoryPanel','shopPanel','talentPanel','profPanel','zoneTravelOverlay','questPanel','processionDialogue','veilforgePanel','veilgatePanel'].some(id => {
       const el = document.getElementById(id);
       return el && el.style.display !== 'none' && el.style.display !== '';
     });
@@ -8677,7 +8693,7 @@ function handleTapAt(screenX, screenY){
   if(!curZone?.isCamp) return false;
   // Don't interact if any modal/panel is already open — tapping through them
   // would be confusing
-  const openPanel = ['gearPanel','inventoryPanel','shopPanel','talentPanel','profPanel','zoneTravelOverlay','questPanel','processionDialogue','veilforgePanel'].find(id => {
+  const openPanel = ['gearPanel','inventoryPanel','shopPanel','talentPanel','profPanel','zoneTravelOverlay','questPanel','processionDialogue','veilforgePanel','veilgatePanel'].find(id => {
     const el = document.getElementById(id);
     return el && getComputedStyle(el).display !== 'none' && el.style.display !== '';
   });
