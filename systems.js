@@ -459,8 +459,23 @@ function creditMaterial(material, qty){
 function recalcStats(){
   // Refresh aggregated talent bonuses first — all the layers below query them
   if(typeof computeTalentBonuses==='function')computeTalentBonuses();
-  let sm=0,atk=0,hp=0,sb=0;
-  Object.values(equipped).forEach(i=>{if(!i)return;if(i.stats.sm)sm+=i.stats.sm;if(i.stats.atk)atk+=i.stats.atk;if(i.stats.hp)hp+=i.stats.hp;if(i.stats.spiritBonus)sb+=i.stats.spiritBonus;});
+  // Aggregate all gear stats. Each key sums across equipped items.
+  // Any stat defined on an item is now respected — previously only sm/atk/hp/spiritBonus
+  // were actually applied, leaving crit/cdr/lifeOnHit/etc advertised-but-inert.
+  const gear = {};
+  Object.values(equipped).forEach(item=>{
+    if(!item || !item.stats) return;
+    Object.entries(item.stats).forEach(([k, v])=>{
+      if(typeof v !== 'number') return;
+      gear[k] = (gear[k] || 0) + v;
+    });
+  });
+  // Store for other combat code to read — exposed globally via player.gearBonuses
+  player.gearBonuses = gear;
+  const sm = gear.sm || 0;
+  const atk = gear.atk || 0;
+  const hp = gear.hp || 0;
+  const sb = gear.spiritBonus || 0;
   // Apply talent bonuses
   const hpPct=typeof getTalentBonus==='function'?getTalentBonus('hpPct'):0;
   const spiritCapBonus=typeof getTalentBonus==='function'?getTalentBonus('spiritCap'):0;
@@ -469,6 +484,13 @@ function recalcStats(){
   player.maxHp=Math.floor(baseMaxHp*(1+hpPct/100));
   player.hp=Math.min(player.hp,player.maxHp);
   player.maxBonds=MAX_SPIRITS+sb+spiritCapBonus;
+}
+
+// Gear bonus accessor — returns aggregated bonus from all equipped items
+// for the given stat key. Used alongside _tb() (talents) and echo mods.
+// Example: getGearBonus('crit') returns the sum of +crit from all equipped gear.
+function getGearBonus(key){
+  return (player.gearBonuses && player.gearBonuses[key]) || 0;
 }
 function checkSetBonuses(){
   const cnt=getSetPieceCount('Dirge of Hollows');
@@ -669,6 +691,9 @@ function renderGearPanel(){
       const setLine=item.setName
         ? `<div class="gear-set-line">◆ Part of ${item.setName} set</div>`
         : '';
+      const uniqueLine = item.unique && item.flavor
+        ? `<div class="gear-unique-line">◆ UNIQUE · <em>${item.flavor}</em></div>`
+        : '';
       const craftedBadge=item.crafted?`<span class="gear-crafted-badge">⚒ CRAFTED</span>`:'';
       div.innerHTML=`
         <div class="gear-slot-header">
@@ -679,6 +704,7 @@ function renderGearPanel(){
         <div class="gear-item-name" style="color:${rarityCol};text-shadow:0 0 8px ${rarityCol}44">${itemDisplayName(item)} ${craftedBadge}</div>
         <div class="gear-stats-block">${statsHtml}</div>
         ${setLine}
+        ${uniqueLine}
       `;
       // Render the gear icon into the canvas
       const iconCanvas = div.querySelector('.gear-slot-icon-canvas');
@@ -4796,4 +4822,343 @@ function _pointToSegDist(px, py, ax, ay, bx, by){
   t = Math.max(0, Math.min(1, t));
   const closestX = ax + t*dx, closestY = ay + t*dy;
   return Math.sqrt((px - closestX)**2 + (py - closestY)**2);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// UNIQUE ITEMS — Named items with signature effects
+// ═══════════════════════════════════════════════════════════════════════
+//
+// DESIGN GOAL: Fill the tier between generic rares and set pieces.
+// Each unique has a fixed name, evocative flavor, and one "signature" stat
+// combination that gives it identity without requiring set pieces to activate.
+//
+// RARITY: 'legendary' tier — rarer than rares, less restrictive than sets.
+// DROP SOURCES: bosses (Hollow Crypt, Wraith Sanctum, Ashen Cathedral),
+// named elites (future), and rare world event rewards.
+//
+// Stats use keys that now work in combat via the expanded recalcStats:
+//   atk, hp, sm, spiritBonus — always respected
+//   crit, cdr, lifeOnHit — now respected (gear bonus hooks added)
+//   res, moveSpdPct — stored but not yet wired to combat
+
+const UNIQUE_ITEMS = [
+  // ─── WEAPONS (class-neutral unless otherwise noted) ─────────────
+  {
+    name: 'Whisperbone Cleaver',
+    slot: 'Weapon',
+    rarity: 'legendary',
+    unique: true,
+    classLock: 'ironwake',
+    flavor: 'Carved from the femur of a giant that died before speech existed.',
+    stats: { atk:42, crit:12, lifeOnHit:8 },
+    dropSource: { source:'boss', bossId:'ashen_cathedral' },
+  },
+  {
+    name: 'The Pale Choir',
+    slot: 'Weapon',
+    rarity: 'legendary',
+    unique: true,
+    classLock: 'hollowcaller',
+    flavor: 'Three voices bound into one instrument. They sing when the spirits do.',
+    stats: { atk:28, sm:32, spiritBonus:2 },
+    dropSource: { source:'boss', bossId:'wraith_sanctum' },
+  },
+  {
+    name: 'Mournblade',
+    slot: 'Weapon',
+    rarity: 'legendary',
+    unique: true,
+    classLock: null,
+    flavor: 'Grieves every wound it inflicts. Never dulls.',
+    stats: { atk:38, lifeOnHit:12, hp:120 },
+    dropSource: { source:'boss', bossId:'hollow_crypt' },
+  },
+  {
+    name: 'Hornless Reckoning',
+    slot: 'Weapon',
+    rarity: 'legendary',
+    unique: true,
+    classLock: null,
+    flavor: 'A jagged iron thing. Leaves blanks where its wielder\'s name should be.',
+    stats: { atk:50, crit:18 },
+    dropSource: { source:'elite', zone:'ashen_cathedral' },
+  },
+
+  // ─── HELMETS ────────────────────────────────────────────────────
+  {
+    name: 'Crown of Silent Syllables',
+    slot: 'Helmet',
+    rarity: 'legendary',
+    unique: true,
+    classLock: null,
+    flavor: 'Etched with a name that unmakes itself the moment it is read.',
+    stats: { hp:220, sm:16, cdr:15 },
+    dropSource: { source:'boss', bossId:'wraith_sanctum' },
+  },
+  {
+    name: 'Sibling\'s Regret',
+    slot: 'Helmet',
+    rarity: 'legendary',
+    unique: true,
+    classLock: null,
+    flavor: 'Cracked across the brow. Someone else wore this first. They did not return.',
+    stats: { hp:300, res:8, lifeOnHit:6 },
+    dropSource: { source:'boss', bossId:'hollow_crypt' },
+  },
+
+  // ─── CHEST ──────────────────────────────────────────────────────
+  {
+    name: 'Lungbone Cuirass',
+    slot: 'Chest',
+    rarity: 'legendary',
+    unique: true,
+    classLock: 'ironwake',
+    flavor: 'Taken from a beast that did not need to breathe to speak.',
+    stats: { hp:440, atk:16, res:12 },
+    dropSource: { source:'boss', bossId:'ashen_cathedral' },
+  },
+  {
+    name: 'Vestments of the Unremembered',
+    slot: 'Chest',
+    rarity: 'legendary',
+    unique: true,
+    classLock: 'hollowcaller',
+    flavor: 'Thin as smoke, heavy as old grief.',
+    stats: { hp:280, sm:28, spiritBonus:1 },
+    dropSource: { source:'boss', bossId:'wraith_sanctum' },
+  },
+  {
+    name: 'Scarfold Mantle',
+    slot: 'Chest',
+    rarity: 'legendary',
+    unique: true,
+    classLock: null,
+    flavor: 'Every tear mends itself. Every tear leaves a scar.',
+    stats: { hp:360, lifeOnHit:10, cdr:8 },
+    dropSource: { source:'boss', bossId:'hollow_crypt' },
+  },
+
+  // ─── GLOVES ─────────────────────────────────────────────────────
+  {
+    name: 'The Quick Hands',
+    slot: 'Gloves',
+    rarity: 'legendary',
+    unique: true,
+    classLock: null,
+    flavor: 'They were never caught. Now they are never still.',
+    stats: { cdr:22, atk:14, crit:8 },
+    dropSource: { source:'elite', zone:'wraith_sanctum' },
+  },
+  {
+    name: 'Graveyard Shift Gauntlets',
+    slot: 'Gloves',
+    rarity: 'legendary',
+    unique: true,
+    classLock: 'ironwake',
+    flavor: 'Dug through more dirt than most men walk on.',
+    stats: { atk:26, lifeOnHit:8, hp:100 },
+    dropSource: { source:'boss', bossId:'hollow_crypt' },
+  },
+
+  // ─── BOOTS ──────────────────────────────────────────────────────
+  {
+    name: 'Stridelast',
+    slot: 'Boots',
+    rarity: 'legendary',
+    unique: true,
+    classLock: null,
+    flavor: 'The last pair of boots you will ever need. Or the last you will ever own.',
+    stats: { hp:180, moveSpdPct:15, cdr:10 },
+    dropSource: { source:'boss', bossId:'wraith_sanctum' },
+  },
+  {
+    name: 'Procession-Tread',
+    slot: 'Boots',
+    rarity: 'legendary',
+    unique: true,
+    classLock: null,
+    flavor: 'Worn by the one who walked ahead. You are walking behind them now.',
+    stats: { hp:220, moveSpdPct:10, lifeOnHit:5 },
+    dropSource: { source:'boss', bossId:'ashen_cathedral' },
+  },
+
+  // ─── BELT ───────────────────────────────────────────────────────
+  {
+    name: 'The Counting Chain',
+    slot: 'Belt',
+    rarity: 'legendary',
+    unique: true,
+    classLock: null,
+    flavor: 'Each link is a debt. Each debt is a name you no longer remember.',
+    stats: { hp:240, sm:18, cdr:8 },
+    dropSource: { source:'event', eventId:'crimson_harvest' },
+  },
+  {
+    name: 'Girdle of Offered Things',
+    slot: 'Belt',
+    rarity: 'legendary',
+    unique: true,
+    classLock: null,
+    flavor: 'Everything you bind to it comes back as something else.',
+    stats: { hp:180, atk:12, lifeOnHit:8 },
+    dropSource: { source:'elite', zone:'ashen_cathedral' },
+  },
+
+  // ─── RING ───────────────────────────────────────────────────────
+  {
+    name: 'Ring of the First Hollow',
+    slot: 'Ring',
+    rarity: 'legendary',
+    unique: true,
+    classLock: null,
+    flavor: 'The first to go into the Veil. The first to come back wrong.',
+    stats: { sm:22, crit:14, atk:10 },
+    dropSource: { source:'boss', bossId:'wraith_sanctum' },
+  },
+  {
+    name: 'Oathbreaker\'s Band',
+    slot: 'Ring',
+    rarity: 'legendary',
+    unique: true,
+    classLock: 'ironwake',
+    flavor: 'Cut from a thumb that would not bend. The thumb came with it.',
+    stats: { atk:20, crit:12, lifeOnHit:6 },
+    dropSource: { source:'boss', bossId:'ashen_cathedral' },
+  },
+  {
+    name: 'Veilglass Signet',
+    slot: 'Ring',
+    rarity: 'legendary',
+    unique: true,
+    classLock: 'hollowcaller',
+    flavor: 'A ring of flawed crystal that shows you a face. You have never met them.',
+    stats: { sm:24, spiritBonus:1, cdr:10 },
+    dropSource: { source:'boss', bossId:'hollow_crypt' },
+  },
+
+  // ─── AMULET ─────────────────────────────────────────────────────
+  {
+    name: 'The Hanging Coin',
+    slot: 'Amulet',
+    rarity: 'legendary',
+    unique: true,
+    classLock: null,
+    flavor: 'Minted by a kingdom that agreed to forget itself.',
+    stats: { sm:20, atk:14, crit:10, cdr:8 },
+    dropSource: { source:'boss', bossId:'wraith_sanctum' },
+  },
+  {
+    name: 'Throatchord',
+    slot: 'Amulet',
+    rarity: 'legendary',
+    unique: true,
+    classLock: 'hollowcaller',
+    flavor: 'A single taut wire at your throat. It hums what you will not say.',
+    stats: { sm:30, spiritBonus:2, hp:100 },
+    dropSource: { source:'boss', bossId:'ashen_cathedral' },
+  },
+  {
+    name: 'Widow\'s Last Word',
+    slot: 'Amulet',
+    rarity: 'legendary',
+    unique: true,
+    classLock: null,
+    flavor: 'She said it to the wall. It stayed.',
+    stats: { hp:260, lifeOnHit:10, res:8 },
+    dropSource: { source:'boss', bossId:'hollow_crypt' },
+  },
+];
+
+// Quick lookup by name (uniques are guaranteed unique by name)
+const UNIQUE_BY_NAME = {};
+UNIQUE_ITEMS.forEach(u => { UNIQUE_BY_NAME[u.name] = u; });
+
+// ─── UNIQUE DROP LOGIC ──────────────────────────────────────────────
+// Called from dungeon boss kill handler. Returns either a unique item
+// or null if no unique should drop this time.
+//
+// Drop rate: 35% on any boss kill (rest is set piece / generic rare).
+// Filters by bossId first, then by class lock (null = universal).
+// If player already OWNS this unique (in bag or equipped), rerolls once
+// to avoid repeated drops of the same item.
+
+function rollUniqueDropFromBoss(bossId, level){
+  const baseRate = 0.35;
+  if(Math.random() > baseRate) return null;
+  // Filter: uniques whose dropSource matches this boss
+  const pool = UNIQUE_ITEMS.filter(u => {
+    if(u.dropSource?.source !== 'boss') return false;
+    if(u.dropSource.bossId !== bossId) return false;
+    // Respect class lock
+    if(u.classLock && u.classLock !== player.classId) return false;
+    return true;
+  });
+  if(pool.length === 0) return null;
+  // Try to avoid duplicates — give it one re-roll if the player already has it
+  let picked = pool[Math.floor(Math.random() * pool.length)];
+  if(_playerOwnsUnique(picked.name) && pool.length > 1){
+    // Pick another one (best effort — may still dup if very unlucky)
+    const others = pool.filter(u => u.name !== picked.name);
+    picked = others[Math.floor(Math.random() * others.length)];
+  }
+  return _instantiateUnique(picked, level);
+}
+
+// Drop from elite kills — much lower rate, different pool
+function rollUniqueDropFromElite(zoneId, level){
+  const baseRate = 0.02; // 2% per elite
+  if(Math.random() > baseRate) return null;
+  const pool = UNIQUE_ITEMS.filter(u => {
+    if(u.dropSource?.source !== 'elite') return false;
+    if(u.dropSource.zone && u.dropSource.zone !== zoneId) return false;
+    if(u.classLock && u.classLock !== player.classId) return false;
+    return true;
+  });
+  if(pool.length === 0) return null;
+  let picked = pool[Math.floor(Math.random() * pool.length)];
+  if(_playerOwnsUnique(picked.name) && pool.length > 1){
+    const others = pool.filter(u => u.name !== picked.name);
+    picked = others[Math.floor(Math.random() * others.length)];
+  }
+  return _instantiateUnique(picked, level);
+}
+
+// Check if the player already owns a given unique (bag or equipped)
+function _playerOwnsUnique(uniqueName){
+  // Check equipped
+  for(const slot of GEAR_SLOTS){
+    if(equipped[slot]?.name === uniqueName) return true;
+  }
+  // Check bag
+  if(typeof inventory !== 'undefined'){
+    for(const item of inventory){
+      if(item?.name === uniqueName) return true;
+    }
+  }
+  return false;
+}
+
+// Turn the unique template into an instantiated item with scaled stats
+function _instantiateUnique(unique, level){
+  // Uniques scale slightly with level but less aggressively than generic rares,
+  // because their base stats are already high. +1% per level past 1.
+  const levelBonus = 1 + Math.max(0, level - 1) * 0.01;
+  return {
+    name: unique.name,
+    slot: unique.slot,
+    rarity: unique.rarity,
+    unique: true,
+    flavor: unique.flavor,
+    classLock: unique.classLock,
+    stats: scaleItemStats(unique.stats, levelBonus),
+    upgradeLevel: 0,
+    crafted: false,
+  };
+}
+
+if(typeof window !== 'undefined'){
+  window.UNIQUE_ITEMS = UNIQUE_ITEMS;
+  window.UNIQUE_BY_NAME = UNIQUE_BY_NAME;
+  window.rollUniqueDropFromBoss = rollUniqueDropFromBoss;
+  window.rollUniqueDropFromElite = rollUniqueDropFromElite;
 }
