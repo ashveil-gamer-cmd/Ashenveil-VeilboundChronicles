@@ -1590,7 +1590,7 @@ let player={
   // paths through the world and fights. ALWAYS OFF in camp regardless of flag.
   afkEnabled:false,};
 
-let spirits=[],enemies=[],particles=[],dmgTexts=[],groundFX=[];
+let spirits=[],enemies=[],particles=[],dmgTexts=[],groundFX=[],enemyProjectiles=[];
 // Projectiles — used by Voidweaver Void Bolt and other future projectile abilities.
 // Each: {x, y, vx, vy, life, maxLife, dmg, hitSet:Set, pierces, chains, homing:enemy|null,
 //        type:'voidBolt'|..., color, size, trail:[]}
@@ -5528,6 +5528,283 @@ function spawnDungeonBoss(){
 // Each boss has a signature ability defined in data.js. This function runs each
 // frame for any boss entity and handles the cooldown → warmup → resolve cycle.
 // During warmup, telegraph FX warn the player of what's coming.
+// ═══════════════════════════════════════════════════════════════════
+// PER-TYPE ENEMY AI
+// ═══════════════════════════════════════════════════════════════════
+// Each function handles ONE enemy archetype. Called from the main enemy
+// update loop instead of the generic walk-up-and-hit behavior.
+
+// ─── WRAITH — ranged caster. Keeps distance, fires purple bolts. ───
+function _aiWraith(e, d, dx, dy, now, dt){
+  const preferredRange = 340;
+  const minRange = 220;
+  // Back off if too close, advance if too far
+  if(d < minRange){
+    // Retreat
+    e.x -= (dx/d) * e.speed * 0.9 * dt;
+    e.y -= (dy/d) * e.speed * 0.9 * dt;
+  } else if(d > preferredRange * 1.2){
+    // Close the gap
+    e.x += (dx/d) * e.speed * 0.7 * dt;
+    e.y += (dy/d) * e.speed * 0.7 * dt;
+  } else {
+    // Strafe perpendicular — makes them hard to hit
+    e.x += (-dy/d) * e.speed * 0.45 * dt;
+    e.y += (dx/d) * e.speed * 0.45 * dt;
+  }
+  // Cast interval — 2.4s between bolts, 1.8s for elite
+  const castCd = e.isElite ? 1800 : 2400;
+  if(!e.nextCast) e.nextCast = now + 900 + Math.random()*600; // stagger initial cast
+  if(now >= e.nextCast && d < 450){
+    e.nextCast = now + castCd;
+    // Warmup flash — brief telegraph
+    e.castFlashUntil = now + 180;
+    // Fire after short warmup
+    setTimeout(()=>{
+      if(e.dead) return;
+      const aimDx = player.x - e.x, aimDy = player.y - e.y;
+      const aimD = Math.max(0.01, Math.sqrt(aimDx*aimDx + aimDy*aimDy));
+      enemyProjectiles.push({
+        x: e.x, y: e.y,
+        vx: (aimDx/aimD) * 320, vy: (aimDy/aimD) * 320,
+        life: 2.5, maxLife: 2.5,
+        dmg: e.attack * 0.9, // slightly less than melee
+        radius: 10,
+        color: '#a855f7',
+        source: 'wraith',
+      });
+      if(typeof SFX !== 'undefined' && SFX.veilmark) SFX.veilmark();
+    }, 180);
+  }
+}
+
+// ─── CRAWLER — lunges at player. Fast but predictable. ───
+function _aiCrawler(e, d, dx, dy, now, dt){
+  // If currently mid-lunge, continue lunge
+  if(e.lungeUntil && now < e.lungeUntil){
+    const lx = e.lungeVx || 0, ly = e.lungeVy || 0;
+    e.x += lx * dt;
+    e.y += ly * dt;
+    return;
+  }
+  // Out of lunge — normal approach
+  if(d > e.size + 24){
+    e.x += (dx/d) * e.speed * dt;
+    e.y += (dy/d) * e.speed * dt;
+  }
+  // Start a lunge if in lunge range, not recently used
+  if(!e.nextLunge) e.nextLunge = now + 1500 + Math.random()*800;
+  const lungeRange = 220;
+  if(now >= e.nextLunge && d < lungeRange){
+    e.nextLunge = now + (e.isElite ? 2500 : 3500);
+    // Windup — very brief visual pause
+    e.castFlashUntil = now + 220;
+    setTimeout(()=>{
+      if(e.dead) return;
+      // Lunge directly at player's current position
+      const ldx = player.x - e.x, ldy = player.y - e.y;
+      const ld = Math.max(0.01, Math.sqrt(ldx*ldx + ldy*ldy));
+      e.lungeVx = (ldx/ld) * 520;
+      e.lungeVy = (ldy/ld) * 520;
+      e.lungeUntil = performance.now() + 260;
+      // During the lunge, hitting the player triggers baseline attack logic
+      // (next frame will pick up proximity check). We just set a fast-move state.
+      if(typeof SFX !== 'undefined' && SFX.hit) SFX.hit();
+    }, 220);
+  }
+}
+
+// ─── SHADE — teleports. Flickers in and out. ───
+function _aiShade(e, d, dx, dy, now, dt){
+  // Normal approach — same as baseline but faster
+  if(!e.nextTeleport) e.nextTeleport = now + 2800 + Math.random()*1200;
+  if(now >= e.nextTeleport){
+    e.nextTeleport = now + (e.isElite ? 3000 : 4500);
+    // Teleport to a position BEHIND the player relative to player facing.
+    const behindD = 100 + Math.random() * 60;
+    const facing = player.facing || 0;
+    const tx = player.x - Math.cos(facing) * behindD + (Math.random()-0.5)*60;
+    const ty = player.y - Math.sin(facing) * behindD + (Math.random()-0.5)*60;
+    // VFX at departure
+    pushGroundFX({type:'bloom', x:e.x, y:e.y, r:40, maxR:40, color:'#818cf8', life:0.3, maxLife:0.3});
+    pushGroundFX({type:'ring', x:e.x, y:e.y, maxR:50, r:10, color:'#818cf8', life:0.4, maxLife:0.4, expand:true});
+    // Teleport
+    e.x = tx; e.y = ty;
+    // VFX at arrival
+    pushGroundFX({type:'bloom', x:e.x, y:e.y, r:40, maxR:40, color:'#c4b5fd', life:0.3, maxLife:0.3});
+    pushGroundFX({type:'ring', x:e.x, y:e.y, maxR:50, r:10, color:'#c4b5fd', life:0.4, maxLife:0.4, expand:true});
+    if(typeof SFX !== 'undefined' && SFX.veilmark) SFX.veilmark();
+    // Reset attack timer so they don't instantly attack after teleporting
+    e.lastAttack = now - 600;
+    return;
+  }
+  // Between teleports — approach normally, slightly faster than base
+  if(d > e.size + 24){
+    e.x += (dx/d) * e.speed * 1.15 * dt;
+    e.y += (dy/d) * e.speed * 1.15 * dt;
+  }
+  // Standard attack windup
+  if(d < e.size + 30 && !e.chargingUntil && now - e.lastAttack > 1150){
+    e.chargingUntil = now + 650;
+    e.attackRange = e.size + 40;
+  }
+}
+
+// ─── GOLEM — slow walker, telegraphed ground-pound AOE ───
+function _aiGolem(e, d, dx, dy, now, dt){
+  // Slow approach
+  if(d > e.size + 40 && !e.poundCastUntil){
+    e.x += (dx/d) * e.speed * dt;
+    e.y += (dy/d) * e.speed * dt;
+  }
+  // Ground pound — AOE when in medium range
+  if(!e.nextPound) e.nextPound = now + 3000 + Math.random()*1500;
+  const poundRange = 180;
+  if(now >= e.nextPound && d < poundRange && !e.poundCastUntil){
+    e.nextPound = now + (e.isElite ? 3500 : 5500);
+    // Long telegraph — 1.2s windup, visible warning circle
+    e.poundCastUntil = now + 1200;
+    e.poundRadius = 140;
+    // Spawn a pulsing warning ring
+    pushGroundFX({
+      type:'ring', x:e.x, y:e.y,
+      maxR:e.poundRadius, r:e.poundRadius, // static ring
+      color:'#f59e0b', life:1.2, maxLife:1.2,
+      expand:false,
+    });
+  }
+  // Resolve pound
+  if(e.poundCastUntil && now >= e.poundCastUntil){
+    e.poundCastUntil = 0;
+    // Deal damage if player is in radius
+    const pd2 = (player.x - e.x)**2 + (player.y - e.y)**2;
+    if(pd2 < e.poundRadius**2 && player.iframes <= 0){
+      // Use same damage path as normal attack (with all the reductions)
+      // by injecting a fake "charged attack". Simpler: fake the damage here.
+      const dmg = e.attack * 1.4;
+      // Quick path: apply straight to player hp with minimal flair
+      // — but respects basic reductions. Simpler: call into existing
+      // attack resolution by setting chargingUntil and letting next-frame resolve.
+      // For now, direct: subtract with basic DR
+      const gearRes = typeof getGearBonus === 'function' ? getGearBonus('res') : 0;
+      const dmgReducePct = _tb('dmgReducePct');
+      const finalDmg = dmg * (1 - Math.min(dmgReducePct + gearRes, 80)/100);
+      player.hp -= finalDmg;
+      player.iframes = 400;
+      player.hitFlash = 0.2;
+      spawnDmgText(player.x, player.y - 20, Math.round(finalDmg), '#ef4444', false);
+      if(typeof SFX !== 'undefined' && SFX.playerHit) SFX.playerHit();
+      screenShake(16, 400);
+    }
+    // Visual impact regardless
+    pushGroundFX({type:'bloom', x:e.x, y:e.y, r:e.poundRadius, maxR:e.poundRadius, color:'#f59e0b', life:0.5, maxLife:0.5});
+    pushGroundFX({type:'scorch', x:e.x, y:e.y, r:e.poundRadius-20, maxR:e.poundRadius-20, color:'#7c2d12', life:1.5, maxLife:1.5});
+    screenShake(10, 280);
+  }
+  // Normal melee attack fallback
+  if(d < e.size + 30 && !e.chargingUntil && !e.poundCastUntil && now - e.lastAttack > 1500){
+    e.chargingUntil = now + 900;
+    e.attackRange = e.size + 40;
+  }
+}
+
+// ─── ABOMINATION — spawns 2 crawler minions when first hit below 50% HP ───
+function _aiAbomination(e, d, dx, dy, now, dt){
+  if(!e.spawnedMinions && e.hp < e.maxHp * 0.5){
+    e.spawnedMinions = true;
+    // Spawn 2 crawlers near the abomination
+    for(let i = 0; i < 2; i++){
+      const a = (i/2) * Math.PI * 2 + Math.random();
+      const sx = e.x + Math.cos(a) * 40;
+      const sy = e.y + Math.sin(a) * 40;
+      spawnEnemyAt('crawler', sx, sy);
+    }
+    if(typeof addFeed === 'function'){
+      addFeed('⚠ ABOMINATION SPAWNS CRAWLERS', '#ef4444');
+    }
+    pushGroundFX({type:'ring', x:e.x, y:e.y, maxR:80, r:15, color:'#34d399', life:0.6, maxLife:0.6, expand:true});
+  }
+  // Baseline behavior continues after this (movement + attack)
+}
+
+// Helper to spawn an enemy at specific coords using the same stat formula
+// as the main spawnEnemy path. Used by abomination minion spawns.
+function spawnEnemyAt(typeName, x, y){
+  const td = typeof ENEMY_TYPES !== 'undefined' ? ENEMY_TYPES.find(t=>t.type===typeName) : null;
+  if(!td) return;
+  const hs = enemyHpScale(player.level);
+  const ds = enemyDmgScale(player.level);
+  const base = 200 + player.level * 5;
+  const baseAtk = 20 + player.level * 0.7;
+  enemies.push({
+    id: enemyId++, x, y, vx:0, vy:0,
+    hp: base * hs * td.hp,
+    maxHp: base * hs * td.hp,
+    attack: baseAtk * ds * td.dmg,
+    speed: td.spd,
+    dead: false, isElite: false, typeData: td,
+    lastAttack: 0, hitFlash: 0,
+    veilmarkStacks: 0, veilmarkExpiry: 0,
+    size: td.r,
+    chargingUntil: 0,
+  });
+}
+
+// Enemy projectile tick — moves projectiles, checks collision with player,
+// expires when life runs out. Wraiths are the primary user.
+function updateEnemyProjectiles(now, dt){
+  enemyProjectiles = enemyProjectiles.filter(p => {
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.life -= dt;
+    // Trail particle
+    if(Math.random() < 0.5){
+      particles.push({
+        x:p.x, y:p.y, vx:(Math.random()-0.5)*20, vy:(Math.random()-0.5)*20,
+        life:0.4, maxLife:0.4, color:p.color, size:2+Math.random(), soul:true,
+      });
+    }
+    // Hit the player
+    const pdx = p.x - player.x, pdy = p.y - player.y;
+    const pd2 = pdx*pdx + pdy*pdy;
+    const hitR = (p.radius || 10) + 18;
+    if(pd2 < hitR*hitR && player.iframes <= 0){
+      const gearRes = typeof getGearBonus === 'function' ? getGearBonus('res') : 0;
+      const dmgReducePct = _tb('dmgReducePct');
+      const finalDmg = p.dmg * (1 - Math.min(dmgReducePct + gearRes, 80)/100);
+      player.hp -= finalDmg;
+      player.iframes = 240;
+      player.hitFlash = 0.18;
+      spawnDmgText(player.x, player.y - 20, Math.round(finalDmg), p.color, false);
+      pushGroundFX({type:'bloom', x:p.x, y:p.y, r:40, maxR:40, color:p.color, life:0.3, maxLife:0.3});
+      if(typeof SFX !== 'undefined' && SFX.playerHit) SFX.playerHit();
+      return false; // consumed
+    }
+    return p.life > 0;
+  });
+}
+
+// Render pass for enemy projectiles — simple colored orb with glow
+function drawEnemyProjectiles(){
+  enemyProjectiles.forEach(p => {
+    ctx.save();
+    ctx.shadowColor = p.color;
+    ctx.shadowBlur = 14;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.radius || 10, 0, Math.PI*2);
+    ctx.fill();
+    // Inner bright core
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#ffffff';
+    ctx.globalAlpha = 0.7;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, (p.radius || 10) * 0.35, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  });
+}
+
 function updateBossAbility(boss,now,dt){
   if(!boss.ability||boss.dead)return;
 
@@ -6706,6 +6983,12 @@ function hitEnemy(e,dmg,isCrit=false,fromX,fromY){
     spawnDmgText(e.x,e.y-e.size,'IMMUNE','#60a5fa',false);
     return;
   }
+  // Specter phase — intangible 65% of the time. Damage reduced to 25%
+  // during phase. Full damage only in the brief tangible window.
+  if(e.specterIntangible){
+    dmg *= 0.25;
+    spawnDmgText(e.x, e.y - e.size - 14, 'PHASED', '#9DC4B0', false);
+  }
   const now = performance.now();
   // ─── UNIVERSAL ECHO DAMAGE HOOK ───────────────────────────────
   // If a cast is in progress (set by playerCast), apply its echo dmgMult
@@ -7228,6 +7511,8 @@ function update(dt,now){
   if(typeof updateNecroBanners === 'function') updateNecroBanners(now);
   // Voidweaver preset — tick seals, singularities, rifts
   if(typeof updateVoidweaverEntities === 'function') updateVoidweaverEntities(now);
+  // Enemy projectiles — wraiths cast these. Tick position, check player collision.
+  if(typeof updateEnemyProjectiles === 'function') updateEnemyProjectiles(now, dt);
   // Veilforge damage pools (Lingering Wound echo, etc.) — tick damage,
   // expire when duration is up. Pools are simple {x,y,radius,dmgPerTick,expiresAt,lastTick}.
   if(window.__damagePools && window.__damagePools.length > 0){
@@ -7535,7 +7820,47 @@ function update(dt,now){
       return;
     }
     const dx=player.x-e.x,dy=player.y-e.y,d=Math.sqrt(dx*dx+dy*dy)||1;
-    // Move toward player if out of attack range
+
+    // ═══════════════════════════════════════════════════════════
+    // PER-TYPE ENEMY AI
+    // Each enemy type has a distinct behavior profile. The `etype` field
+    // lets us route behavior without touching the render code.
+    // Bosses bypass this — they have their own updateBossAbility logic.
+    // ═══════════════════════════════════════════════════════════
+    const etype = e.type || e.typeData?.type;
+    if(!e.isBoss){
+      if(etype === 'wraith'){
+        _aiWraith(e, d, dx, dy, now, dt);
+        return;
+      }
+      if(etype === 'crawler'){
+        _aiCrawler(e, d, dx, dy, now, dt);
+        return;
+      }
+      if(etype === 'shade'){
+        _aiShade(e, d, dx, dy, now, dt);
+        return;
+      }
+      if(etype === 'golem'){
+        _aiGolem(e, d, dx, dy, now, dt);
+        return;
+      }
+      if(etype === 'abomination'){
+        _aiAbomination(e, d, dx, dy, now, dt);
+        // Abomination still uses the baseline movement/attack below after
+        // triggering its minion spawn, so no return.
+      }
+      if(etype === 'specter'){
+        // Specter phases — reduce damage when "intangible". Handled in hitEnemy check.
+        // Apply a periodic "tangible window" by clearing the flag.
+        const cycle = 2400; // 2.4s cycle
+        const phase = (now % cycle) / cycle;
+        e.specterIntangible = phase > 0.35; // 65% of the time intangible
+        // Falls through to baseline AI below
+      }
+    }
+
+    // Move toward player if out of attack range (baseline movement)
     if(d>e.size+24)e.chargingUntil=0; // cancel windup if player moves out
     if(d>e.size+24&&!e.chargingUntil){e.x+=dx/d*e.speed*dt;e.y+=dy/d*e.speed*dt;}
     // Begin attack windup when in range
@@ -7543,10 +7868,6 @@ function update(dt,now){
       const windupMs=e.isElite?900:700; // elites take longer to wind up — bigger hit
       e.chargingUntil=now+windupMs;
       e.attackRange=(e.size+40); // snapshot range at cast time
-      // NOTE: Per-enemy attack telegraph circles are intentionally disabled.
-      // With idle-game mob density, 20+ red circles on screen at once was
-      // visually overwhelming. Only boss telegraphs (separately spawned)
-      // remain visible.
     }
     // Resolve attack at end of windup
     if(e.chargingUntil&&now>=e.chargingUntil){
@@ -7783,6 +8104,9 @@ function render(now){
 
   // Projectiles (Voidweaver void bolts, future abilities)
   if(typeof drawProjectiles === 'function') drawProjectiles(now);
+
+  // Enemy projectiles (wraiths cast these)
+  if(typeof drawEnemyProjectiles === 'function') drawEnemyProjectiles();
 
   // Spirits
   spirits.forEach(s=>drawSpirit(s,now));
