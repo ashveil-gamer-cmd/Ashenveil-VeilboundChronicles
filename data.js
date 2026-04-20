@@ -66,51 +66,81 @@ const CAMP_ZONE = {
 // Each NPC is positioned relative to the world center. They render as
 // upright figures with a small label above when the player is near.
 // onInteract is the function called when player presses E in range.
+// Camp NPCs — each represents a different relationship with the Veil.
+// They are Echoes of the Dead who failed to pass through, now serving the
+// living who pass through camp. Every NPC has a UNIQUE role, not just
+// cosmetic variation. Interactions are conversations, not menus.
 const CAMP_NPCS = [
   {
-    id:'marken', name:'Marken, the Pathfinder', role:'pathfinder',
-    x:0, y:-340,   // placed at the TOP-center of the world (north of campfire)
-    color:'#d4a555',
-    accent:'#f4c977',
-    description:'Knows the paths between broken places.',
-    flavor:'"Where do you need to be?"',
+    // The Silent Cartographer — travel between zones.
+    // Instead of a "waypoint menu," she speaks of places you've been and
+    // places that are still lost to you. Her map remembers what you've seen.
+    id:'cartographer', name:'The Silent Cartographer', role:'travel',
+    x:0, y:-340,
+    color:'#d4a555', accent:'#f4c977',
+    description:'She died mapping the zones. Her hands still hold a charcoal pencil.',
+    flavor:'"I remember every road, even the ones that no longer exist. Where are you going?"',
     onInteract:'openZoneTravel',
+    npcType:'ghost-scholar',
   },
   {
-    id:'old_bren', name:'Old Bren, the Toothsmith', role:'weaponsmith',
+    // The Hollowed Warden — weaponsmith. Not a shop — a commission forge.
+    // You bring him materials from fallen enemies; he turns them into gear.
+    // His forge never cools because he can no longer feel heat.
+    id:'warden', name:'The Hollowed Warden', role:'weaponsmith',
     x:-280, y:-120,
-    color:'#c86a32',
-    accent:'#e89458',
-    description:'Forges weapons from what the earth gives back.',
-    flavor:'"Show me what you\'ve brought me, and I\'ll show you what it wants to be."',
+    color:'#c86a32', accent:'#e89458',
+    description:'A warrior who died mid-swing. His hammer still rises and falls.',
+    flavor:'"Bring me what the dead left behind. I\'ll give it a second purpose."',
     onInteract:'openWeaponsmith',
+    npcType:'ghost-warrior',
   },
   {
+    // The Veilbroker — merchant/salvage. Morally gray.
+    // Trades in memories, regrets, and things the world discarded.
+    // Replaces both the shop AND salvage — give him unwanted gear, get scrap.
+    id:'veilbroker', name:'The Veilbroker', role:'merchant',
+    x:-280, y:160,
+    color:'#a89dc4', accent:'#d4c4f0',
+    description:'He came back from the Veil with things he should not have. He trades them.',
+    flavor:'"Everything has a price. Some prices are paid with what you did not know you had."',
+    onInteract:'openMerchant',
+    npcType:'ghost-merchant',
+  },
+  {
+    // The Keeper of Last Words — ritualist/lore collector.
+    // Collects the dying words of slain enemies. Builds a bestiary over time.
+    // Mechanically: lore unlocks as you kill more of each enemy type.
+    id:'keeper', name:'Keeper of Last Words', role:'ritualist',
+    x:280, y:160,
+    color:'#9DC4B0', accent:'#b8e0c8',
+    description:'She hears what the dying say. She is the only one who still listens.',
+    flavor:'"Every death has a sentence. Would you like to read yours early?"',
+    onInteract:'openRitualist',
+    npcType:'ghost-scholar',
+  },
+  {
+    // Seris, the Threadbare — armorer. Kept her as a contrast —
+    // she is the only living one here, which is why she's "threadbare."
     id:'seris', name:'Seris, the Threadbare', role:'armorer',
     x:280, y:-120,
-    color:'#e8d4a0',
-    accent:'#fff2cc',
-    description:'Weaves bone, cloth, and sorrow into armor.',
-    flavor:'"Hands to me, child. Let me feel what you need."',
+    color:'#e8d4a0', accent:'#fff2cc',
+    description:'The only living soul in camp. She is not well. She does not leave.',
+    flavor:'"Hands to me. Let me feel what you need. The dead never tell me."',
     onInteract:'openArmorer',
+    npcType:'living-mender',
   },
   {
-    id:'voryn', name:'Voryn, the Ashkeeper', role:'merchant',
-    x:-280, y:160,
-    color:'#a89dc4',
-    accent:'#d4c4f0',
-    description:'Keeps a cart of what the world discarded.',
-    flavor:'"Something you\'ve outgrown? Something you\'d rather have?"',
-    onInteract:'openMerchant',
-  },
-  {
-    id:'sublime', name:'The Sublime', role:'ritualist',
-    x:280, y:160,
-    color:'#9DC4B0',
-    accent:'#b8e0c8',
-    description:'No one remembers their arrival. No one has heard them speak.',
-    flavor:'"..." (they nod.)',
-    onInteract:'openRitualist',
+    // The Old Procession — quest hub. Currently a stub.
+    // When the quest system ships, this is where quests come from.
+    // Represented as a huddle of three spirits, speaking together.
+    id:'procession', name:'The Old Procession', role:'questhub',
+    x:0, y:80,                              // near the campfire center
+    color:'#8b5cf6', accent:'#c4b5fd',
+    description:'Three spirits who walked the Veil together — and returned together, wrong.',
+    flavor:'"We have been waiting. There are things that must be done. Soon, you will hear them."',
+    onInteract:'openQuestHub',
+    npcType:'ghost-procession',
   },
 ];
 
@@ -241,14 +271,12 @@ function computeAttack(lv){
 // GLOBAL_XP_MULTIPLIER: single knob for retuning the whole curve without
 // rebuilding the table. Default 1.0 means "XP table as written."
 //
-// CURRENT VALUE: 0.5 — TEMPORARY BUFF WHILE QUEST SYSTEM IS MISSING.
-// The base table assumes quests provide ~55-70% of leveling XP. Since
-// quests don't exist yet, combat alone can't hit that pace. We halve the
-// requirement to compensate so combat-only leveling feels reasonable.
-//
-// ROLLBACK TO 1.0 WHEN THE QUEST SYSTEM SHIPS so the intended pacing
-// (quest-driven 60% + combat 40%) takes effect.
-const GLOBAL_XP_MULTIPLIER = 0.5;
+// Was temporarily 0.5 to buff leveling speed during pre-quest development,
+// but test mode grants full epic sets at level 1 which already makes kill
+// rate 3-5x faster than tuning assumed. That stopgap double-counted the
+// buff and made leveling feel trivial. Back to 1.0 — the table is
+// designed to be used as-is.
+const GLOBAL_XP_MULTIPLIER = 1.0;
 
 // XP_TO_NEXT[level] = XP needed to advance FROM that level to the next.
 // Level 100 is the cap; stored as 0 to indicate no further progression.
