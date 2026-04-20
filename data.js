@@ -1,7 +1,7 @@
 // ═══════ ASHENVEIL DATA ═══════
 
 // ═══════ CONSTANTS ═══════════════════════════════════════
-const WORLD_W=5000,WORLD_H=5000;
+const WORLD_W=6500,WORLD_H=6500;
 const PLAYER_SPEED=200;
 const ATTACK_RANGE=230;
 const ATTACK_CD=480;
