@@ -1585,7 +1585,10 @@ let player={
   afkTimer:0,afkCommit:5000,sector:0,
   visitedSectors:new Array(9).fill(false),
   maxBonds:MAX_SPIRITS,
-};
+  // AFK mode — OFF by default. Player toggles via HUD button or 'F' key.
+  // When OFF: player stands still when not providing input. When ON: auto-
+  // paths through the world and fights. ALWAYS OFF in camp regardless of flag.
+  afkEnabled:false,};
 
 let spirits=[],enemies=[],particles=[],dmgTexts=[],groundFX=[];
 // Projectiles — used by Voidweaver Void Bolt and other future projectile abilities.
@@ -5461,12 +5464,10 @@ function spawnDungeonWave(waveIndex){
       const hs=enemyHpScale(player.level),ds=enemyDmgScale(player.level);
       const base = 200 + player.level * 5;
       const baseAtk = 20 + player.level * 0.7;
-      // DUNGEON HP MULTIPLIER: all dungeon mobs get +120% HP over open world
-      // (elites get even more). This makes dungeons feel tough and meaningful
-      // instead of a speed-run clear. Damage not increased to avoid murdering
-      // the player on every wave.
-      const DUNGEON_MOB_HP_MULT = isElite ? 3.0 : 2.2;
-      const DUNGEON_MOB_DMG_MULT = 1.25; // modest damage bump — threatening but fair
+      // DUNGEON HP MULTIPLIER: dungeons should feel genuinely tougher than
+      // open world — each mob is a threat, not a speed bump.
+      const DUNGEON_MOB_HP_MULT = isElite ? 4.5 : 3.0;
+      const DUNGEON_MOB_DMG_MULT = 1.6; // enemies hit hard — player must actively play
       enemies.push({
         id:enemyId++,x,y,vx:0,vy:0,
         hp:base*hs*typeData.hp*(isElite?2.4:1)*DUNGEON_MOB_HP_MULT,
@@ -5506,6 +5507,7 @@ function spawnDungeonBoss(){
     veilmarkStacks:0,veilmarkExpiry:0,
     size:typeData.r*bd.sizeMult,
     isBoss:true,bossName:bd.name,
+    bossTier:bd.bossTier||'minorBoss', // drives XP multiplier (minorBoss/majorBoss/finalBoss)
     // Signature ability state — tracks cooldown + current cast if any
     ability:bd.ability||null,
     abilityNextCast:performance.now()+(bd.ability?.cooldown||6000)*0.5, // first cast half-cd in
@@ -5742,7 +5744,14 @@ function completeDungeon(){
   const reward=def.reward;
   // Bonus rewards
   player.gold+=reward.bonusGold;
-  addXP(reward.bonusXP);
+  // Dungeon clear XP — computed via formula, treated as a "standard quest"
+  // worth of bonus XP (20x normal mob baseline, scaled to current level).
+  // The boss already awarded major-boss XP on its own kill; this is
+  // additional completion reward.
+  const clearXP = (typeof computeKillXP === 'function')
+    ? computeKillXP(player.level, player.level, 'stdQuest')
+    : reward.bonusXP;
+  addXP(clearXP);
   // Guaranteed loot at minimum rarity
   const allRarities=['common','uncommon','rare','epic','legendary','mythic'];
   const minIdx=allRarities.indexOf(reward.minRarity);
@@ -5763,7 +5772,7 @@ function completeDungeon(){
   pushGroundFX({type:'bloom',x:player.x,y:player.y,r:300,maxR:300,color:col,life:0.8,maxLife:0.8});
   screenShake(14,400);
   addFeed(`✦ ${def.name.toUpperCase()} CLEARED!`,def.color);
-  addFeed(`+${reward.bonusGold} gold · +${reward.bonusXP} XP`,'#f59e0b');
+  addFeed(`+${reward.bonusGold} gold · +${clearXP} XP`,'#f59e0b');
   // Save immediately — never lose a dungeon clear
   if(typeof writeSave==='function')writeSave();
   // Exit after a brief celebration pause
@@ -6403,19 +6412,27 @@ function hitEnemy(e,dmg,isCrit=false,fromX,fromY){
 function killEnemy(e){
   e.dead=true;kills++;
   document.getElementById('killCount').textContent=`☠ ${kills}`;
-  // XP and gold rewards — Tier-1 balance rebalance (see user feedback):
-  // - Elite XP reduced from 32 → 20 (4x common → 2.5x common) to stop
-  //   dungeons gaining multiple levels in 30 seconds.
-  // - Boss XP capped at 50% of xpToNext so a boss can't single-handedly
-  //   level the player more than half a bar.
-  // - Common XP stays at 8 so early-game pacing is preserved.
-  let xpG;
-  if(e.isBoss){
-    // Boss — capped at half a level's worth of XP
-    xpG = Math.min(80 + player.level * 6, Math.floor(player.xpToNext * 0.5));
-  } else {
-    xpG = e.isElite ? 20 : 8;
+  // ─── XP REWARD via the new band-rate / activity-multiplier / delta system ───
+  // Enemy level is approximated from current zone's minLv (or player level as fallback).
+  // Activity type drives the multiplier (normal/elite/minor boss/major boss).
+  let enemyLevel = player.level;
+  if(typeof curZone !== 'undefined' && curZone && typeof curZone.minLv === 'number'){
+    enemyLevel = Math.max(1, curZone.minLv);
   }
+  // Determine activity category for the XP formula
+  let activity;
+  if(e.isBoss){
+    // bossTier defaults to 'minorBoss' if not specified. Dungeon boss records
+    // can set bossTier: 'majorBoss' or 'finalBoss' per their design.
+    activity = e.bossTier || 'minorBoss';
+  } else if(e.isElite){
+    activity = 'eliteMob';
+  } else {
+    activity = 'normalMob';
+  }
+  const xpG = (typeof computeKillXP === 'function')
+    ? computeKillXP(player.level, enemyLevel, activity)
+    : (e.isBoss ? 80 : e.isElite ? 20 : 8); // fallback if formula missing
   const goldG = e.isBoss ? (60 + player.level*2) : (e.isElite ? 40 : 8);
   addXP(xpG);player.gold+=goldG;
   SFX[e.isElite?'eliteDeath':'enemyDeath']();
@@ -6729,7 +6746,12 @@ function update(dt,now){
   }
   if(touchJoy.active){ix=touchJoy.dx;iy=touchJoy.dy;}
   if(ix!==0||iy!==0)player.lastInput=now;
-  const isAfk=now-player.lastInput>AFK_IDLE;
+  // AFK only activates when:
+  //   1. Player explicitly enabled it (afkEnabled flag)
+  //   2. Not in camp (camp is always a safe pause zone)
+  //   3. Player has been idle long enough
+  const inCamp = curZone?.isCamp === true;
+  const isAfk = player.afkEnabled && !inCamp && (now - player.lastInput > AFK_IDLE);
   // Class-specific speed multiplier — Ironwake is slower than Hollowcaller
   const classSpdMult = (CLASS_DEFS[player.classId]||CLASS_DEFS.hollowcaller).speedMult || 1.0;
   // Level-based passive speed bonus (idle-game feel — leveling makes you faster).
@@ -7237,7 +7259,10 @@ function buildSave(){
       soulMastery:player.soulMastery,maxBonds:player.maxBonds,
       classId:player.classId||'hollowcaller',
       wrath:player.wrath||0,
-      _testSetsGranted: !!player._testSetsGranted,
+      // _testSetsGranted can be true | 'removed' | false. Preserve string.
+      _testSetsGranted: player._testSetsGranted || false,
+      // AFK mode toggle — persist so it survives reloads
+      afkEnabled: !!player.afkEnabled,
     },
     stats:{kills},
     zoneId:curZone?.id||1,
@@ -7430,6 +7455,11 @@ function applySave(data){
   player.attack=data.player?.attack??computeAttack(player.level);
   player.soulMastery=data.player?.soulMastery??0;
   player.maxBonds=data.player?.maxBonds??MAX_SPIRITS;
+  // AFK toggle persists across reloads so player's preference sticks
+  player.afkEnabled = !!data.player?.afkEnabled;
+  // Test gear state — can be true | 'removed' | false. Preserve string.
+  const rawTestFlag = data.player?._testSetsGranted;
+  player._testSetsGranted = (rawTestFlag === 'removed') ? 'removed' : !!rawTestFlag;
   // Kills
   kills=data.stats?.kills??0;
   // Zone — handle camp specially since it lives outside the ZONES array
@@ -7698,6 +7728,8 @@ function startGame(continueFromSave=false){
   }
   running=true;lastTime=performance.now();
   requestAnimationFrame(loop);
+  // Initial AFK toggle UI sync so button shows correct state (camp = SAFE)
+  if(typeof updateAfkToggleUI === 'function') updateAfkToggleUI();
   if(continueFromSave){
     addFeed(`✦ WELCOME BACK · LV ${player.level}`,'#c084fc');
   } else {
@@ -7768,6 +7800,13 @@ document.addEventListener('keydown',e=>{
     if(!anyPanelOpen && typeof handleCampInteraction === 'function'){
       handleCampInteraction();
     }
+  }
+  // F key toggles AFK mode (edge-triggered). Not usable in camp (camp disables AFK).
+  if(!wasPressed && (e.key === 'f' || e.key === 'F')){
+    // Skip if user is typing in an input field
+    const active = document.activeElement;
+    if(active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
+    if(typeof toggleAfkMode === 'function') toggleAfkMode();
   }
 });
 document.addEventListener('keyup',e=>{keys[e.key]=false;});
@@ -7877,6 +7916,62 @@ function toggleMobileMenu(){
 function closeMobileMenu(){
   document.body.classList.remove('menu-open');
 }
+
+// ─── AFK MODE TOGGLE ──────────────────────────────────────────────
+// Explicit player-controlled AFK. Defaults OFF. F key or UI button toggles.
+// Auto-disables when entering camp. Re-enables nothing — player must choose.
+function toggleAfkMode(){
+  // Cannot enable AFK in camp — camp is always a safe pause zone
+  if(curZone?.isCamp){
+    if(typeof addFeed === 'function') addFeed('AFK disabled in camp', '#9ca3af');
+    return;
+  }
+  player.afkEnabled = !player.afkEnabled;
+  updateAfkToggleUI();
+  if(typeof addFeed === 'function'){
+    if(player.afkEnabled){
+      addFeed('⚙ AFK MODE: ON — auto-fighting enabled', '#f59e0b');
+    } else {
+      addFeed('⚙ AFK MODE: OFF — manual control', '#9ca3af');
+      // Clear AFK movement immediately
+      player.vx = 0; player.vy = 0;
+      player.afkTimer = 0;
+    }
+  }
+  if(typeof writeSave === 'function') writeSave();
+}
+function updateAfkToggleUI(){
+  const btn = document.getElementById('afkToggle');
+  const ind = document.getElementById('afkIndicator');
+  const lbl = document.getElementById('afkLabel');
+  if(!btn) return;
+  const inCamp = curZone?.isCamp === true;
+  if(inCamp){
+    btn.classList.add('afk-disabled');
+    btn.classList.remove('afk-on');
+    if(ind) ind.textContent = '◯';
+    if(lbl) lbl.textContent = 'SAFE';
+    btn.title = 'AFK disabled in camp (safe zone)';
+  } else if(player.afkEnabled){
+    btn.classList.add('afk-on');
+    btn.classList.remove('afk-disabled');
+    if(ind) ind.textContent = '●';
+    if(lbl) lbl.textContent = 'AFK';
+    btn.title = 'AFK mode ON — click to disable (F)';
+  } else {
+    btn.classList.remove('afk-on');
+    btn.classList.remove('afk-disabled');
+    if(ind) ind.textContent = '◯';
+    if(lbl) lbl.textContent = 'AFK';
+    btn.title = 'AFK mode OFF — click to enable (F)';
+  }
+}
+// Call once on init + whenever zone changes — called from checkZone handler
+if(typeof window !== 'undefined'){
+  window.toggleAfkMode = toggleAfkMode;
+  window.updateAfkToggleUI = updateAfkToggleUI;
+}
+
 // Close the mobile menu whenever the player taps a menu button (since it
 // will immediately open a panel). The timeout lets the click register first.
 document.addEventListener('click', e => {
@@ -8164,6 +8259,14 @@ function executeNpcInteraction(npc){
     openWeaponsmith:()=>{ if(typeof openProf === 'function') openProf(); },
     openArmorer:    ()=>{ if(typeof openProf === 'function') openProf(); },
     openRitualist:  ()=>{ if(typeof openProf === 'function') openProf(); },
+    // Quest hub — stub until the quest system ships. Shows a placeholder
+    // message so the player understands what this NPC will do.
+    openQuestHub:   ()=>{
+      if(typeof addFeed === 'function'){
+        addFeed(`"We have been waiting..."`, '#c4b5fd');
+        addFeed(`  └ The Procession stirs. Quests coming soon.`, '#9ca3af');
+      }
+    },
   };
   const fn = handlers[npc.onInteract];
   if(fn){ fn(); return true; }
@@ -8297,100 +8400,258 @@ function getNearbyCampNpc(){
   return closest;
 }
 
-// Draw an NPC figure — simple stylized humanoid silhouette that's
-// distinct enough to recognize from across the camp.
+// Draw an NPC figure — each NPC has a unique silhouette proportions AND a
+// signature accent object. Different enough to identify at a glance.
 function drawCampNpcFigure(npc, pos, now){
   const bob = Math.sin(now*0.001 + (npc.x+npc.y)*0.01) * 1.4;
   const y = pos.y + bob;
   const x = pos.x;
-  // Shadow at feet
+
+  // ─── SILHOUETTE PROPORTIONS PER NPC TYPE ───
+  // Different body shapes so NPCs look distinct even without accents.
+  let bodyW = 14, bodyTop = 10, bodyHeight = 32, headR = 7, headY = -18;
+  const npcType = npc.npcType || 'ghost-scholar';
+  if(npcType === 'ghost-warrior'){
+    // Stocky, broad-shouldered — the Warden
+    bodyW = 18; bodyTop = 14; bodyHeight = 34; headR = 8; headY = -19;
+  } else if(npcType === 'ghost-scholar'){
+    // Tall, slender — Cartographer, Keeper
+    bodyW = 13; bodyTop = 9; bodyHeight = 36; headR = 6.5; headY = -22;
+  } else if(npcType === 'ghost-merchant'){
+    // Hooded, hunched — Veilbroker
+    bodyW = 15; bodyTop = 11; bodyHeight = 30; headR = 7.5; headY = -16;
+  } else if(npcType === 'ghost-procession'){
+    // Three shrouded figures huddled together — draw as one wide shape
+    bodyW = 22; bodyTop = 16; bodyHeight = 32; headR = 0; headY = -18;
+  } else if(npcType === 'living-mender'){
+    // Seris — looks warmer, more human. Slightly shorter.
+    bodyW = 13; bodyTop = 10; bodyHeight = 30; headR = 7; headY = -17;
+  }
+
+  // ─── SHADOW ───
   ctx.fillStyle='rgba(0,0,0,0.38)';
-  ctx.beginPath();ctx.ellipse(x,y+22,18,5,0,0,Math.PI*2);ctx.fill();
-  // Body
+  ctx.beginPath();
+  ctx.ellipse(x, y + bodyHeight*0.65, bodyW*1.25, 5, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // ─── GHOSTLY AURA for dead NPCs (everyone except Seris) ───
+  if(npcType !== 'living-mender'){
+    const auraPulse = 0.5 + Math.sin(now*0.003 + npc.x*0.01)*0.3;
+    const auraR = bodyW * 1.8;
+    const auraGrad = ctx.createRadialGradient(x, y-4, 0, x, y-4, auraR);
+    auraGrad.addColorStop(0, `${npc.accent}22`);
+    auraGrad.addColorStop(0.6, `${npc.color}15`);
+    auraGrad.addColorStop(1, 'transparent');
+    ctx.fillStyle = auraGrad;
+    ctx.globalAlpha = auraPulse * 0.85;
+    ctx.beginPath();ctx.arc(x, y-4, auraR, 0, Math.PI*2);ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // ─── BODY ───
   ctx.fillStyle=npc.color;
   ctx.shadowColor=npc.accent; ctx.shadowBlur=14;
-  // Robed silhouette — tapered trapezoid
   ctx.beginPath();
-  ctx.moveTo(x-14, y+20);
-  ctx.lineTo(x-10, y-12);
-  ctx.lineTo(x+10, y-12);
-  ctx.lineTo(x+14, y+20);
+  ctx.moveTo(x - bodyW, y + bodyHeight*0.5);
+  ctx.lineTo(x - bodyTop, y - bodyHeight*0.35);
+  ctx.lineTo(x + bodyTop, y - bodyHeight*0.35);
+  ctx.lineTo(x + bodyW, y + bodyHeight*0.5);
   ctx.closePath();
   ctx.fill();
   ctx.shadowBlur=0;
-  // Head
-  ctx.fillStyle=npc.accent;
-  ctx.beginPath();ctx.arc(x, y-18, 7, 0, Math.PI*2);ctx.fill();
-  // Inner hood shadow (gives face depth)
-  ctx.fillStyle='rgba(0,0,0,0.35)';
-  ctx.beginPath();ctx.arc(x, y-17, 4.5, 0, Math.PI*2);ctx.fill();
-  // Role-specific accent — a small detail per NPC
+
+  // ─── HEAD ───
+  if(headR > 0){
+    ctx.fillStyle=npc.accent;
+    ctx.beginPath();ctx.arc(x, y + headY, headR, 0, Math.PI*2);ctx.fill();
+    // Inner hood shadow (gives face depth)
+    ctx.fillStyle='rgba(0,0,0,0.4)';
+    ctx.beginPath();ctx.arc(x, y + headY + 1, headR*0.65, 0, Math.PI*2);ctx.fill();
+    // For dead NPCs — glowing eye slits
+    if(npcType !== 'living-mender'){
+      ctx.fillStyle = npc.accent;
+      ctx.shadowColor = npc.accent; ctx.shadowBlur = 6;
+      ctx.beginPath();ctx.arc(x - headR*0.3, y + headY + 1, 1.2, 0, Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.arc(x + headR*0.3, y + headY + 1, 1.2, 0, Math.PI*2);ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  // ─── ROLE-SPECIFIC SIGNATURE OBJECT ───
   ctx.save();
   ctx.translate(x, y);
-  if(npc.role === 'pathfinder'){
-    // Walking stick
-    ctx.strokeStyle=npc.accent;
-    ctx.lineWidth=1.6;
-    ctx.beginPath();ctx.moveTo(12, -20); ctx.lineTo(18, 22); ctx.stroke();
-    // Lantern
-    ctx.fillStyle='#fbbf24';
-    ctx.shadowColor='#fbbf24'; ctx.shadowBlur=12;
-    ctx.beginPath();ctx.arc(17, -8, 3, 0, Math.PI*2);ctx.fill();
+  if(npc.role === 'travel'){
+    // Silent Cartographer — a floating scroll/map beside her
+    ctx.fillStyle='#e8d8a8';
+    ctx.shadowColor='#d4a555'; ctx.shadowBlur=8;
+    ctx.fillRect(14, -8, 10, 14);
+    // Scroll lines
     ctx.shadowBlur=0;
+    ctx.strokeStyle='#6a4a28';
+    ctx.lineWidth=0.5;
+    for(let i=0;i<3;i++){
+      ctx.beginPath();ctx.moveTo(15, -5+i*4); ctx.lineTo(23, -5+i*4); ctx.stroke();
+    }
+    // A drifting pencil/charcoal — animated
+    const penBob = Math.sin(now*0.003)*2;
+    ctx.strokeStyle='#2a1810';
+    ctx.lineWidth=1.2;
+    ctx.beginPath();ctx.moveTo(18, 4+penBob); ctx.lineTo(22, 10+penBob); ctx.stroke();
   } else if(npc.role === 'weaponsmith'){
-    // Anvil at feet
+    // Hollowed Warden — anvil + forever-burning spirit ember
     ctx.fillStyle='#2a1f10';
     ctx.fillRect(-16, 18, 32, 4);
     ctx.fillRect(-12, 22, 24, 3);
-    // Ember glow
+    // Sitting hammer on anvil
+    ctx.fillStyle='#4a3525';
+    ctx.fillRect(-4, 15, 3, 7);
+    ctx.fillRect(-7, 14, 9, 3);
+    // Ghostly ember glow (burns without wood)
+    const emberPulse = 0.7 + Math.sin(now*0.008)*0.3;
     ctx.fillStyle='#ff6b2c';
-    ctx.shadowColor='#ff6b2c'; ctx.shadowBlur=10;
-    ctx.beginPath();ctx.arc(-2, 19, 2, 0, Math.PI*2);ctx.fill();
+    ctx.shadowColor='#ff6b2c'; ctx.shadowBlur=14 * emberPulse;
+    ctx.globalAlpha = emberPulse;
+    ctx.beginPath();ctx.arc(6, 19, 2.5, 0, Math.PI*2);ctx.fill();
+    ctx.globalAlpha = 1;
     ctx.shadowBlur=0;
   } else if(npc.role === 'armorer'){
-    // Loom frame
+    // Seris — loom + threads (still standard needlework)
     ctx.strokeStyle='#6a4a28';
     ctx.lineWidth=1.4;
-    ctx.strokeRect(-16, -6, 10, 22);
-    // Thread lines
+    ctx.strokeRect(-18, -6, 10, 22);
+    // Threads
     ctx.strokeStyle=npc.accent;
     ctx.lineWidth=0.6;
-    for(let i=0;i<3;i++){
-      ctx.beginPath();ctx.moveTo(-16, -4+i*7); ctx.lineTo(-6, -4+i*7); ctx.stroke();
+    for(let i=0;i<4;i++){
+      ctx.beginPath();ctx.moveTo(-18, -4+i*6); ctx.lineTo(-8, -4+i*6); ctx.stroke();
     }
-  } else if(npc.role === 'merchant'){
-    // Cart body
-    ctx.fillStyle='#3a2818';
-    ctx.fillRect(8, -2, 22, 18);
-    // Wheel
-    ctx.strokeStyle='#2a1810';
-    ctx.lineWidth=1.4;
-    ctx.beginPath();ctx.arc(14, 18, 5, 0, Math.PI*2);ctx.stroke();
-    ctx.beginPath();ctx.arc(26, 18, 5, 0, Math.PI*2);ctx.stroke();
-    // Goods hint (dots)
-    ctx.fillStyle='#a89dc4';
-    ctx.beginPath();ctx.arc(16, 3, 1.5, 0, Math.PI*2);ctx.fill();
-    ctx.beginPath();ctx.arc(22, 5, 1.5, 0, Math.PI*2);ctx.fill();
-  } else if(npc.role === 'ritualist'){
-    // Mirrored mask glint
-    ctx.fillStyle='#f0f4ec';
-    ctx.shadowColor='#9DC4B0'; ctx.shadowBlur=14;
-    ctx.beginPath();ctx.arc(0, -17, 4, 0, Math.PI*2);ctx.fill();
+    // Living warmth — small candle (differentiates her as the ONLY living NPC)
+    ctx.fillStyle='#fbbf24';
+    ctx.shadowColor='#fbbf24'; ctx.shadowBlur=10;
+    ctx.beginPath();ctx.arc(14, -12, 2, 0, Math.PI*2);ctx.fill();
     ctx.shadowBlur=0;
-    // Floating rune circle at feet
+    ctx.fillStyle='#7a4a24';
+    ctx.fillRect(13, -10, 2, 6);
+  } else if(npc.role === 'merchant'){
+    // Veilbroker — a small floating cache of regrets (glowing shards)
+    // Instead of a cart. His wares float around him eerily.
+    const shardBob = Math.sin(now*0.004)*2;
+    ctx.fillStyle='#a89dc4';
+    ctx.shadowColor='#c4b5fd'; ctx.shadowBlur=12;
+    // Three floating shards orbiting at different phases
+    for(let i=0;i<3;i++){
+      const ang = now*0.0012 + i*(Math.PI*2/3);
+      const orbX = 18 + Math.cos(ang)*5;
+      const orbY = -2 + shardBob + Math.sin(ang)*5;
+      ctx.globalAlpha = 0.7;
+      ctx.beginPath();
+      ctx.moveTo(orbX, orbY-2.5);
+      ctx.lineTo(orbX+1.5, orbY);
+      ctx.lineTo(orbX, orbY+2.5);
+      ctx.lineTo(orbX-1.5, orbY);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur=0;
+  } else if(npc.role === 'ritualist'){
+    // Keeper of Last Words — floating tome above her, rune circle at feet
+    // (she collects the last words of the dying into a book)
+    const bookBob = Math.sin(now*0.003)*1.5;
+    ctx.fillStyle='#8a6a4a';
+    ctx.shadowColor='#9DC4B0'; ctx.shadowBlur=8;
+    ctx.fillRect(-5, -36+bookBob, 10, 8);
+    // Glowing pages
+    ctx.fillStyle='#e8f4ec';
+    ctx.shadowBlur=12;
+    ctx.fillRect(-4, -35+bookBob, 8, 2);
+    ctx.shadowBlur=0;
+    // Rune circle at feet
     const runeAngle = now*0.0008;
     ctx.strokeStyle='#9DC4B0';
     ctx.lineWidth=0.8;
     ctx.globalAlpha=0.45;
-    ctx.beginPath();ctx.arc(0, 20, 18, 0, Math.PI*2);ctx.stroke();
+    ctx.beginPath();ctx.arc(0, 20, 20, 0, Math.PI*2);ctx.stroke();
     ctx.globalAlpha=1;
-    for(let i=0;i<3;i++){
-      const a = runeAngle + i*(Math.PI*2/3);
+    for(let i=0;i<4;i++){
+      const a = runeAngle + i*(Math.PI*2/4);
       ctx.fillStyle='#9DC4B0';
-      ctx.beginPath();ctx.arc(Math.cos(a)*18, 20+Math.sin(a)*3, 1.4, 0, Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.arc(Math.cos(a)*20, 20+Math.sin(a)*4, 1.4, 0, Math.PI*2);ctx.fill();
     }
+  } else if(npc.role === 'questhub'){
+    // The Old Procession — three huddled shrouded figures instead of one.
+    // Each slightly different to imply they're three distinct spirits.
+    ctx.translate(0, -bodyHeight*0.5);
+    const heads = [
+      {ox:-12, oy:-4, r:5.5, c:'#a78bfa'},
+      {ox:0,   oy:-8, r:6,   c:'#c4b5fd'},
+      {ox:12,  oy:-4, r:5.5, c:'#8b5cf6'},
+    ];
+    heads.forEach((h, i)=>{
+      ctx.fillStyle = h.c;
+      ctx.shadowColor = h.c; ctx.shadowBlur = 10;
+      // Hooded head
+      ctx.beginPath();ctx.arc(h.ox, h.oy, h.r, 0, Math.PI*2);ctx.fill();
+      // Inner shadow (face)
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.beginPath();ctx.arc(h.ox, h.oy+0.5, h.r*0.6, 0, Math.PI*2);ctx.fill();
+      // Glowing eye - one per hood (they speak as one)
+      ctx.fillStyle = h.c;
+      ctx.shadowColor = h.c; ctx.shadowBlur = 6;
+      ctx.beginPath();ctx.arc(h.ox, h.oy, 1, 0, Math.PI*2);ctx.fill();
+      ctx.shadowBlur = 0;
+    });
+    // Floating quest-rune above them (placeholder visual for "they have work for you")
+    const questPulse = 0.6 + Math.sin(now*0.004)*0.4;
+    ctx.globalAlpha = questPulse;
+    ctx.fillStyle = '#fbbf24';
+    ctx.shadowColor = '#fbbf24'; ctx.shadowBlur = 14 * questPulse;
+    // Diamond shape
+    ctx.beginPath();
+    ctx.moveTo(0, -22);
+    ctx.lineTo(4, -18);
+    ctx.lineTo(0, -14);
+    ctx.lineTo(-4, -18);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
   }
   ctx.restore();
+
+  // ─── INTERACTION HINT (above head when player is nearby) ───
+  const isNearby = getNearbyCampNpc() === npc;
+  if(isNearby){
+    ctx.save();
+    // Pulsing hint box
+    const hintPulse = 0.8 + Math.sin(now*0.006)*0.2;
+    ctx.globalAlpha = hintPulse;
+    ctx.font = '600 11px Cinzel, serif';
+    ctx.textAlign = 'center';
+    // Name label
+    const nameY = y + headY - headR - 20;
+    const nameW = ctx.measureText(npc.name).width;
+    ctx.fillStyle = 'rgba(0,0,0,0.82)';
+    ctx.fillRect(x - nameW/2 - 10, nameY - 10, nameW + 20, 16);
+    ctx.strokeStyle = npc.accent;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x - nameW/2 - 10, nameY - 10, nameW + 20, 16);
+    ctx.fillStyle = npc.accent;
+    ctx.fillText(npc.name, x, nameY + 2);
+    // Press E / Tap prompt
+    const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    const prompt = isTouch ? '[Tap to Speak]' : '[E] Speak';
+    ctx.font = '600 9px Cinzel, serif';
+    const promptW = ctx.measureText(prompt).width;
+    ctx.fillStyle = 'rgba(251,191,36,0.95)';
+    ctx.fillRect(x - promptW/2 - 6, nameY + 8, promptW + 12, 13);
+    ctx.fillStyle = '#1a1020';
+    ctx.fillText(prompt, x, nameY + 18);
+    ctx.globalAlpha = 1;
+    ctx.textAlign = 'start';
+    ctx.restore();
+  }
 }
 
 // Draw the central campfire with warm flicker
@@ -8451,34 +8712,20 @@ function drawCampNPCs(now){
   CAMP_NPCS.forEach(npc => {
     const pos = campWorldPos(npc);
     drawCampNpcFigure(npc, pos, now);
-    // Label above NPC — always shown in camp so player knows who's who
-    const labelY = pos.y - 46;
-    ctx.font = 'bold 12px Cinzel, serif';
-    ctx.textAlign = 'center';
-    // Backdrop for readability
-    const textW = ctx.measureText(npc.name).width;
-    ctx.fillStyle = 'rgba(0,0,0,0.65)';
-    ctx.fillRect(pos.x - textW/2 - 8, labelY - 14, textW + 16, 18);
-    // Name text — brighter when player is nearby
-    if(nearby === npc){
-      ctx.fillStyle = npc.accent;
-      ctx.shadowColor = npc.accent; ctx.shadowBlur = 10;
-    } else {
+    // When NOT nearby, show a subtle name label above the NPC so player
+    // can identify everyone at a glance. When nearby, drawCampNpcFigure
+    // handles the richer "name + prompt" UI so we skip the simple label.
+    if(nearby !== npc){
+      const labelY = pos.y - 46;
+      ctx.font = '600 10px Cinzel, serif';
+      ctx.textAlign = 'center';
+      const textW = ctx.measureText(npc.name).width;
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(pos.x - textW/2 - 6, labelY - 10, textW + 12, 14);
       ctx.fillStyle = npc.color;
-    }
-    ctx.fillText(npc.name, pos.x, labelY);
-    ctx.shadowBlur = 0;
-    // Interaction hint when nearby — "Press E"
-    if(nearby === npc){
-      ctx.font = 'bold 11px Cinzel, serif';
-      ctx.fillStyle = '#f2e9d2';
-      const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
-      const hint = isTouch ? '[ TAP ] Interact' : '[ E ] Interact';
-      const hintW = ctx.measureText(hint).width;
-      ctx.fillStyle = 'rgba(0,0,0,0.75)';
-      ctx.fillRect(pos.x - hintW/2 - 10, pos.y + 32, hintW + 20, 18);
-      ctx.fillStyle = '#f2e9d2';
-      ctx.fillText(hint, pos.x, pos.y + 45);
+      ctx.globalAlpha = 0.75;
+      ctx.fillText(npc.name, pos.x, labelY);
+      ctx.globalAlpha = 1;
     }
   });
   ctx.textAlign = 'start';
@@ -8489,17 +8736,7 @@ function handleCampInteraction(){
   if(!curZone?.isCamp) return false;
   const npc = getNearbyCampNpc();
   if(!npc) return false;
-  // Route to the appropriate handler
-  const handlers = {
-    openZoneTravel: ()=>openZoneTravelScreen(),
-    openMerchant:   ()=>{ if(typeof openShop==='function') openShop(); },
-    openWeaponsmith:()=>{ if(typeof openProf==='function') openProf(); },
-    openArmorer:    ()=>{ if(typeof openProf==='function') openProf(); },
-    openRitualist:  ()=>{ if(typeof openProf==='function') openProf(); },
-  };
-  const fn = handlers[npc.onInteract];
-  if(fn){ fn(); return true; }
-  return false;
+  return executeNpcInteraction(npc);
 }
 
 // Zone travel overlay — shown when player interacts with Marken.
@@ -8608,6 +8845,8 @@ function travelToZone(zoneId){
   addFeed('★ ZONE: ' + target.name, '#e8b84b');
   if(typeof writeSave==='function') writeSave();
   setTimeout(()=>zoneTransiting=false, 2600);
+  // Refresh AFK toggle UI — it shows differently in camp vs combat zones
+  if(typeof updateAfkToggleUI === 'function') updateAfkToggleUI();
 }
 
 // Travel back to The Procession camp from any zone
