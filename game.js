@@ -6372,10 +6372,19 @@ function playerCast(idx){
 // taking damage — see applyPlayerHit hook.
 function castIronwake(idx, now){
   const cls = CLASS_DEFS.ironwake;
+  // Ironwake ability IDs in slot order — used to look up echo modifiers
+  const ironwakeIds = ['anchor','bulwark','shatter','retribution','fury'];
+  const abilityId = ironwakeIds[idx];
+  const mods = (typeof getAbilityEchoModifiers === 'function')
+    ? getAbilityEchoModifiers(abilityId) : null;
+  const echoDmg = mods?.dmgMult || 1.0;
+  const echoRadius = mods?.radiusMult || 1.0;
+  const echoCdr = mods?.cdrMult || 1.0;
+
   if(idx===0){
     // Anchor Strike — 180° cleave in facing direction, short range, high damage
-    const range = 120;
-    const dmg = player.attack * 1.8 * damageMult();
+    const range = 120 * echoRadius;
+    const dmg = player.attack * 1.8 * damageMult() * echoDmg;
     const dir = player.facing || 0;
     let hits = 0;
     enemies.forEach(e=>{
@@ -6390,29 +6399,41 @@ function castIronwake(idx, now){
       while(diff < -Math.PI) diff += Math.PI*2;
       if(Math.abs(diff) > Math.PI/2) return; // 180° arc = 90° each side
       hitEnemy(e, dmg, false, player.x, player.y);
+      // Echo-applied veilmark (resonance echo)
+      if(mods?.appliesVeilmark > 0){
+        const vmMax=10+_tb('veilmarkMax');
+        e.veilmarkStacks = Math.min(e.veilmarkStacks + mods.appliesVeilmark, vmMax);
+        e.veilmarkExpiry = now + 8000;
+      }
+      // Echo-granted momentum on hit (Gathering Storm resonance)
+      if(mods?.grantsMomentum > 0 && player.momentumStacks !== undefined){
+        player.momentumStacks = Math.min(20, (player.momentumStacks||0) + mods.grantsMomentum);
+        player.momentumLastGainedAt = now;
+      }
       hits++;
     });
-    abilityCDs[0] = now + effectiveCD(0);
-    // Visual: sweeping arc FX in facing direction
-    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:range, r:30, color:'#ef4444', life:0.4, maxLife:0.4, expand:true});
-    pushGroundFX({type:'bloom', x:player.x+Math.cos(dir)*60, y:player.y+Math.sin(dir)*60, r:90, maxR:90, color:'#ef4444', life:0.35, maxLife:0.35});
+    abilityCDs[0] = now + effectiveCD(0) * echoCdr;
+    const tint = mods?.elementTint || '#ef4444';
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:range, r:30, color:tint, life:0.4, maxLife:0.4, expand:true});
+    pushGroundFX({type:'bloom', x:player.x+Math.cos(dir)*60, y:player.y+Math.sin(dir)*60, r:90*echoRadius, maxR:90*echoRadius, color:tint, life:0.35, maxLife:0.35});
     screenShake(8, 180);
     if(typeof SFX!=='undefined' && SFX.hit) SFX.hit();
-    addFeed(`⚔ ANCHOR STRIKE — ${hits} HIT`, '#ef4444');
+    addFeed(`⚔ ANCHOR STRIKE — ${hits} HIT`, tint);
   }
   else if(idx===1){
     // Bulwark — raise shield. 70% damage reduction for 2s, double wrath gain from hits.
     player.bulwarkUntil = now + 2000;
-    abilityCDs[1] = now + effectiveCD(1);
-    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:120, maxR:120, color:'#8b7355', life:0.5, maxLife:0.5, follow:player});
-    pushGroundFX({type:'rimlight', x:player.x, y:player.y, r:80, maxR:80, color:'#d4c896', life:2, maxLife:2, follow:player});
-    addFeed(`🛡 BULWARK RAISED`, '#d4c896');
+    abilityCDs[1] = now + effectiveCD(1) * echoCdr;
+    const tint = mods?.elementTint || '#d4c896';
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:120*echoRadius, maxR:120*echoRadius, color:'#8b7355', life:0.5, maxLife:0.5, follow:player});
+    pushGroundFX({type:'rimlight', x:player.x, y:player.y, r:80*echoRadius, maxR:80*echoRadius, color:tint, life:2, maxLife:2, follow:player});
+    addFeed(`🛡 BULWARK RAISED`, tint);
     if(typeof SFX!=='undefined' && SFX.hit) SFX.hit();
   }
   else if(idx===2){
-    // Ground Shatter — AoE stun + heavy damage in 280px radius
-    const radius = 280;
-    const dmg = player.attack * 2.2 * damageMult();
+    // Ground Shatter — AoE stun + heavy damage
+    const radius = 280 * echoRadius;
+    const dmg = player.attack * 2.2 * damageMult() * echoDmg;
     let hits = 0;
     enemies.forEach(e=>{
       if(e.dead) return;
@@ -6423,29 +6444,47 @@ function castIronwake(idx, now){
       e.chargingUntil = 0;
       e.lastAttack = now + 200; // delay their next attack window
       e.stunUntil = now + 1200;
+      // Echo-applied veilmark
+      if(mods?.appliesVeilmark > 0){
+        const vmMax=10+_tb('veilmarkMax');
+        e.veilmarkStacks = Math.min(e.veilmarkStacks + mods.appliesVeilmark, vmMax);
+        e.veilmarkExpiry = now + 8000;
+      }
       hits++;
     });
-    abilityCDs[2] = now + effectiveCD(2);
+    abilityCDs[2] = now + effectiveCD(2) * echoCdr;
     screenShake(16, 400);
-    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:radius, r:20, color:'#fbbf24', life:0.6, maxLife:0.6, expand:true});
+    const tint = mods?.elementTint || '#fbbf24';
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:radius, r:20, color:tint, life:0.6, maxLife:0.6, expand:true});
     pushGroundFX({type:'scorch', x:player.x, y:player.y, r:radius-40, maxR:radius-40, color:'#b8860b', life:1.4, maxLife:1.4});
-    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:180, maxR:180, color:'#fff4a0', life:0.3, maxLife:0.3});
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:180*echoRadius, maxR:180*echoRadius, color:'#fff4a0', life:0.3, maxLife:0.3});
+    // Lingering Wound — damage pool
+    if(mods?.leavesPool){
+      if(!window.__damagePools) window.__damagePools = [];
+      window.__damagePools.push({
+        x:player.x, y:player.y, radius:radius*0.85,
+        dmgPerTick: dmg * (mods.poolDmgPerSec || 0.3) * 0.5,
+        expiresAt: now + (mods.poolDuration || 4000),
+        lastTick: now,
+      });
+    }
     if(typeof SFX!=='undefined' && SFX.detonate) SFX.detonate();
-    addFeed(`💥 GROUND SHATTER — ${hits} STUNNED`, '#fbbf24');
+    addFeed(`💥 GROUND SHATTER — ${hits} STUNNED`, tint);
   }
   else if(idx===3){
     // Retribution — reflect 50% damage for 5s
     player.retributionUntil = now + 5000;
-    abilityCDs[3] = now + effectiveCD(3);
-    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:180, maxR:180, color:'#a78bfa', life:0.6, maxLife:0.6});
-    pushGroundFX({type:'rimlight', x:player.x, y:player.y, r:110, maxR:110, color:'#a78bfa', life:5, maxLife:5, follow:player});
-    addFeed(`◈ RETRIBUTION ACTIVE`, '#a78bfa');
+    abilityCDs[3] = now + effectiveCD(3) * echoCdr;
+    const tint = mods?.elementTint || '#a78bfa';
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:180*echoRadius, maxR:180*echoRadius, color:tint, life:0.6, maxLife:0.6});
+    pushGroundFX({type:'rimlight', x:player.x, y:player.y, r:110*echoRadius, maxR:110*echoRadius, color:tint, life:5, maxLife:5, follow:player});
+    addFeed(`◈ RETRIBUTION ACTIVE`, tint);
     if(typeof SFX!=='undefined' && SFX.veilmark) SFX.veilmark();
   }
   else if(idx===4){
     // Ironwake's Fury — charge 400px forward in facing direction, hit all in path
-    const charge = 400;
-    const dmg = player.attack * 3.5 * damageMult();
+    const charge = 400 * echoRadius;
+    const dmg = player.attack * 3.5 * damageMult() * echoDmg;
     const dir = player.facing || 0;
     const startX = player.x, startY = player.y;
     const endX = player.x + Math.cos(dir)*charge;
@@ -6464,6 +6503,11 @@ function castIronwake(idx, now){
         e.chargingUntil = 0;
         e.lastAttack = now + 500;
         e.stunUntil = now + 1800;
+        // Echo momentum grant
+        if(mods?.grantsMomentum > 0 && player.momentumStacks !== undefined){
+          player.momentumStacks = Math.min(20, (player.momentumStacks||0) + mods.grantsMomentum);
+          player.momentumLastGainedAt = now;
+        }
         hits++;
       }
     });
@@ -6476,7 +6520,7 @@ function castIronwake(idx, now){
       player.x = endX; player.y = endY;
     }
     if(typeof camX!=='undefined'){ camX = player.x; camY = player.y; }
-    abilityCDs[4] = now + effectiveCD(4);
+    abilityCDs[4] = now + effectiveCD(4) * echoCdr;
     screenShake(22, 600);
     // Visual trail
     pushGroundFX({type:'line', x:startX, y:startY, endX:player.x, endY:player.y, width:150, color:'#ff4400', life:1.2, maxLife:1.2});
