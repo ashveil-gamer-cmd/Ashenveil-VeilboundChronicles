@@ -2209,25 +2209,30 @@ canvas#c{display:block;position:fixed;top:0;left:0}
 }
 
 /* AFK TOGGLE BUTTON ─────────────────────────────────────────────
-   Lives in the top-right HUD area near volume control. Three visual states:
+   Lives in the right column BELOW the zone label so it doesn't cover the
+   zone name / kill counter. Vertical stack on the right side:
+     zoneLabel     (top:12px,  right:14px)
+     afkToggle     (top:76px,  right:14px)  ← us
+     questTracker  (top:130px, right:14px)  ← further down
+   Three visual states:
    - OFF (idle default): gray outline, hollow circle ◯
    - ON: amber fill, solid circle ●, glowing
    - DISABLED (in camp): dimmed, shows "SAFE" label */
 #afkToggle{
   position:fixed;
-  top:12px;
-  right:72px; /* sits left of volume button */
-  z-index:850;
+  top:76px;
+  right:14px;
+  z-index:60;
   display:flex;
   align-items:center;
   gap:6px;
-  padding:7px 12px;
+  padding:6px 10px;
   background:rgba(18,14,32,0.78);
   border:1px solid rgba(180,160,200,0.25);
   border-radius:8px;
   color:#b4a6c8;
   font-family:'Cinzel',serif;
-  font-size:11px;
+  font-size:10px;
   letter-spacing:1.5px;
   cursor:pointer;
   user-select:none;
@@ -2240,7 +2245,7 @@ canvas#c{display:block;position:fixed;top:0;left:0}
   color:#e4d6f8;
 }
 #afkToggle #afkIndicator{
-  font-size:13px;
+  font-size:12px;
   line-height:1;
   font-weight:bold;
 }
@@ -2266,13 +2271,14 @@ canvas#c{display:block;position:fixed;top:0;left:0}
   opacity:0.72;
 }
 #afkToggle.afk-disabled:hover{
-  background:rgba(18,28,24,0.65); /* no hover change when disabled */
+  background:rgba(18,28,24,0.65);
 }
 @media (max-width:640px){
   #afkToggle{
-    right:64px;
-    padding:6px 10px;
-    font-size:10px;
+    top:64px;
+    right:62px; /* leave room for mobile hamburger at top-right corner */
+    padding:5px 8px;
+    font-size:9px;
     gap:4px;
   }
 }
@@ -2544,9 +2550,9 @@ canvas#c{display:block;position:fixed;top:0;left:0}
 /* ─── HUD QUEST TRACKER ───────────────────────────────────────────── */
 #questTracker{
   position:fixed;
-  top:76px;
+  top:128px; /* below the AFK toggle which sits below zoneLabel */
   right:10px;
-  z-index:800;
+  z-index:55;
   min-width:220px;
   max-width:280px;
   background:linear-gradient(140deg,rgba(18,14,32,0.88),rgba(24,18,38,0.88));
