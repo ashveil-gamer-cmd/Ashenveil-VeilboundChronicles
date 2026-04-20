@@ -136,6 +136,7 @@
   <div class="menu-btn" data-menu="bag" onclick="openInventory()">⚕ BAG</div>
   <div class="menu-btn" data-menu="shop" onclick="openShop()">⚖ SHOP</div>
   <div class="menu-btn" data-menu="talents" onclick="openTalents()">✦ TALENTS</div>
+  <div class="menu-btn" data-menu="veilforge" onclick="openVeilforge()">⚡ VEILFORGE</div>
   <div class="menu-btn" data-menu="quests" onclick="openQuests()">◈ QUESTS</div>
   <div class="menu-btn" onclick="openProf()">♆ PROF</div>
   <div class="menu-btn" onclick="openSettings()">⚙ SETTINGS</div>
@@ -274,6 +275,41 @@
 <div id="questTracker">
   <div class="quest-tracker-title" id="qtTitle">No Active Quest</div>
   <div class="quest-tracker-progress" id="qtProgress"></div>
+</div>
+
+<!-- VEILFORGE PANEL — echo inventory + ability conduit slots -->
+<div id="veilforgePanel">
+  <div class="panel-header">
+    <h2>⚡ THE VEILFORGE</h2>
+    <button class="panel-close" onclick="closeVeilforge()">← BACK</button>
+  </div>
+  <div class="vf-intro">
+    <em>"Every blow you strike echoes in the Veil. Bind those echoes to your conduits, and shape them into what you need."</em>
+  </div>
+  <div class="vf-layout">
+    <!-- LEFT: ability list with their slots -->
+    <div class="vf-abilities">
+      <div class="vf-section-hdr">◈ CONDUITS</div>
+      <div id="vfAbilityList"></div>
+    </div>
+    <!-- RIGHT: echo inventory + echo detail -->
+    <div class="vf-inventory-col">
+      <div class="vf-section-hdr">◇ ECHO INVENTORY <span id="vfInvCount">0</span></div>
+      <div class="vf-type-tabs">
+        <button class="vf-type-tab active" data-vftab="all" onclick="switchVeilforgeTab('all')">ALL</button>
+        <button class="vf-type-tab" data-vftab="shape" onclick="switchVeilforgeTab('shape')">◇ SHAPE</button>
+        <button class="vf-type-tab" data-vftab="element" onclick="switchVeilforgeTab('element')">◆ ELEMENT</button>
+        <button class="vf-type-tab" data-vftab="behavior" onclick="switchVeilforgeTab('behavior')">◈ BEHAVIOR</button>
+        <button class="vf-type-tab" data-vftab="resonance" onclick="switchVeilforgeTab('resonance')">✹ RESONANCE</button>
+      </div>
+      <div id="vfInventoryList" class="vf-inventory-list"></div>
+    </div>
+  </div>
+  <div class="vf-dev-panel">
+    <div class="vf-dev-label">⚠ DEV TOOLS</div>
+    <button class="vf-dev-btn" onclick="devGrantAllEchoes(2); renderVeilforgePanel();">Grant 2 of All Echoes</button>
+    <button class="vf-dev-btn vf-dev-btn-danger" onclick="if(confirm('Clear ALL veilforge state?')){devClearVeilforge(); renderVeilforgePanel();}">Clear All</button>
+  </div>
 </div>
 
 <!-- PROCESSION DIALOGUE — quest-giver interaction panel -->
