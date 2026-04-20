@@ -1330,8 +1330,11 @@ function renderTalentPanel(){
   container.appendChild(header);
   const resetBtn=document.getElementById('_resetTalentsBtn');
   if(resetBtn)resetBtn.addEventListener('click',resetTalents);
-  // Branches
+  // Branches — filter by the player's class so Hollowcaller doesn't see
+  // Ironwake trees and vice versa. Branches without a classId show for all
+  // classes (legacy/safety fallback).
   Object.entries(TALENT_TREE).forEach(([branchName,branch])=>{
+    if(branch.classId && branch.classId !== player.classId) return;
     const spent=pointsInBranch(branchName);
     const branchDiv=document.createElement('div');
     branchDiv.className='talent-branch';
@@ -2317,15 +2320,15 @@ const BUILD_PRESETS = {
     description: 'Pure defensive tank. Pull enemies to you. Absorb pain, return it tenfold.',
     color: '#60a5fa',
     setName: 'Unyielding Bulwark',
-    // Focus: HP + damage reduction + lifesteal
-    // NOTE: Using Hollow-tree talents as placeholders until Ironwake-specific
-    // talents are added. These are generic survival talents that work for tanks.
+    // Focus: Ironclad branch (defense) + a splash of Bloodbound for lifesteal
     talentPoints: {
-      h1: 3,  // Veiled Flesh — +24% max HP
-      h2: 1,  // Hollow Step — small speed (tanks don't need much)
-      h3: 3,  // Pale Vitality — heal per kill
-      h5: 3,  // Hollow Resilience — -15% damage taken
-      h6: 1,  // Everlasting — cheat death
+      i1: 3,   // Anvil Flesh — +30% HP
+      i2: 2,   // Stone Footing — -40% knockback
+      i3: 3,   // Last Breath — +9/sec regen when low
+      i4: 3,   // Ferrous Heart — -18% damage taken
+      i5: 2,   // Steelfall — 12% block
+      i6: 1,   // Unyielding — cheat death
+      bl1: 1,  // Crimson Thirst — 3% lifesteal (flavor, survival)
     },
   },
   juggernaut: {
@@ -2336,13 +2339,15 @@ const BUILD_PRESETS = {
     description: 'Aggressive momentum-based warrior. Charge through enemies, snowball damage.',
     color: '#f59e0b',
     setName: 'Titan\'s Momentum',
-    // Focus: movement speed + crit + lifesteal
+    // Focus: Warborn branch (offense) + some Ironclad for survival
     talentPoints: {
-      h1: 2,  // Some HP — still melee
-      h2: 3,  // Hollow Step — max movement speed
-      h3: 2,  // Pale Vitality — some heal per kill
-      h4: 3,  // Deft Casting — +9% crit chance
-      h5: 1,  // Hollow Resilience — minor DR
+      w1: 3,   // Iron Edge — +24% melee damage
+      w2: 2,   // Splintering Blows — 60% cleave chance
+      w3: 3,   // Savage Strike — +9% crit
+      w4: 2,   // Momentum's Edge — slower decay
+      w5: 3,   // Executioner's Mark — +45% vs low HP
+      w6: 1,   // Warbringer — elite refresh
+      i1: 1,   // Anvil Flesh — some HP
     },
   },
   bloodforged: {
@@ -2353,12 +2358,15 @@ const BUILD_PRESETS = {
     description: 'Glass-tank berserker. Low HP = massive damage. Risk/reward lifesteal.',
     color: '#ef4444',
     setName: 'Bloodforged Harness',
-    // Focus: crit + lifesteal + cheat death (you need it at low HP)
+    // Focus: Bloodbound branch (risk/reward)
     talentPoints: {
-      h2: 2,  // Some speed
-      h3: 3,  // Pale Vitality — heals per kill
-      h4: 3,  // Deft Casting — max crit
-      h6: 1,  // Everlasting — survive a fatal blow
+      bl1: 3,  // Crimson Thirst — 9% lifesteal
+      bl2: 3,  // Pain Offering — +24% dmg low HP
+      bl3: 2,  // Blood Price — +50% next hit after cast
+      bl4: 1,  // Ruinous Strike — every 5th hit
+      bl5: 3,  // Ravage — +12% CDR on kill
+      bl6: 1,  // Crimson Ascendance — fight-saver
+      i6: 1,   // Unyielding — you NEED this for this playstyle
     },
   },
 };
