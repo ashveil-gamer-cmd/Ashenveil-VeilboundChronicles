@@ -2452,6 +2452,12 @@ function buildPresetSetItems(){
 // cases where save migrated from old structure without data).
 function grantAllPresetSetsForTesting(){
   ensureSetStashDataInitialized();
+  // If the player has explicitly removed test gear, don't auto-grant.
+  // They must use enableTestModeAndGrant() to re-enable.
+  if(player._testSetsGranted === 'removed'){
+    console.log('[SET STASH] Test mode disabled by player — skipping grant');
+    return;
+  }
   // Check if stashData is genuinely empty (no items anywhere across all presets)
   let totalItems = 0;
   Object.values(setStashData).forEach(d=>{
@@ -2460,7 +2466,7 @@ function grantAllPresetSetsForTesting(){
   });
   console.log('[SET STASH] Grant check: flag=', player._testSetsGranted, 'totalItems=', totalItems);
   // If the flag says granted AND stash has items — nothing to do
-  if(player._testSetsGranted && totalItems > 0){
+  if(player._testSetsGranted === true && totalItems > 0){
     console.log('[SET STASH] Already granted with items, skipping');
     return;
   }
@@ -2510,6 +2516,73 @@ function resetAndRegrantTestSets(){
   if(typeof renderSetStash === 'function') renderSetStash();
 }
 
+// Strips ALL test-granted gear and disables test mode. Leaves character's
+// level, XP, talents, and gold intact — only gear goes away. Use this to
+// turn a test-geared character into a vanilla playtest character.
+//
+// Removes:
+//   - All pieces in setStashData (chosen + spares) that are part of any
+//     preset set (Bonemarshal/Voidshard/Carmine/Bulwark/Titan/Bloodforged)
+//   - Currently EQUIPPED pieces that belong to those sets
+//   - Sets the _testSetsGranted flag to a new marker 'removed' so the
+//     grant logic knows not to re-grant on next load
+function removeAllTestGear(){
+  ensureSetStashDataInitialized();
+  // Collect all set names we consider test gear
+  const testSetNames = new Set();
+  Object.values(BUILD_PRESETS).forEach(p => testSetNames.add(p.setName));
+  let stashRemoved = 0;
+  let equippedRemoved = 0;
+  // Wipe all stash data for preset sets
+  Object.keys(setStashData).forEach(presetId=>{
+    GEAR_SLOTS.forEach(slot=>{
+      if(setStashData[presetId].chosen[slot]){
+        stashRemoved++;
+        setStashData[presetId].chosen[slot] = null;
+      }
+    });
+    stashRemoved += setStashData[presetId].spares.length;
+    setStashData[presetId].spares = [];
+  });
+  // Strip equipped pieces that are part of a preset set
+  GEAR_SLOTS.forEach(slot=>{
+    const item = equipped[slot];
+    if(item && item.setName && testSetNames.has(item.setName)){
+      equipped[slot] = null;
+      equippedRemoved++;
+    }
+  });
+  // Mark removed — grantAllPresetSetsForTesting checks the flag, and this
+  // "removed" state stops it from auto-regranting on next load/zone-change.
+  player._testSetsGranted = 'removed';
+  // Recalc stats since we stripped gear
+  if(typeof recalcStats === 'function') recalcStats();
+  if(typeof checkSetBonuses === 'function') checkSetBonuses();
+  addFeed(`⚠ TEST GEAR REMOVED — ${equippedRemoved} equipped + ${stashRemoved} stashed stripped`, '#ef4444');
+  addFeed(`  └ You are now a vanilla character. Earn gear through play.`, '#9ca3af');
+  if(typeof writeSave === 'function') writeSave();
+  if(typeof renderSetStash === 'function') renderSetStash();
+  if(typeof renderGearPanel === 'function') renderGearPanel();
+  if(typeof renderPresetSelector === 'function') renderPresetSelector();
+}
+
+// Re-enable test mode on a character that previously had test gear removed.
+// Grants a fresh set of test gear scaled to current level.
+function enableTestModeAndGrant(){
+  player._testSetsGranted = false; // reset flag so grant runs
+  // Clear any existing preset data so grant routes fresh items into chosen
+  ensureSetStashDataInitialized();
+  Object.keys(setStashData).forEach(presetId=>{
+    GEAR_SLOTS.forEach(slot=>{
+      setStashData[presetId].chosen[slot] = null;
+    });
+    setStashData[presetId].spares = [];
+  });
+  grantAllPresetSetsForTesting();
+  if(typeof renderSetStash === 'function') renderSetStash();
+  if(typeof renderPresetSelector === 'function') renderPresetSelector();
+}
+
 // ═══════ PRESET APPLICATION ═══════════════════════════════════════
 // Main entry point: respec talents + auto-equip CHOSEN pieces from this
 // preset's stash tab. If no chosen pieces exist, auto-promotes best spares
@@ -2532,27 +2605,65 @@ function applyPreset(presetId){
   let applied = 0;
   let skipped = 0;
   const skippedIds = [];
+  const gatedIds = [];
+
+  // Build a list of (talentId, rank, branchName, talent) tuples with gate info,
+  // sorted by gate ASC so we fulfill gate requirements in order.
+  const talentQueue = [];
   Object.entries(preset.talentPoints).forEach(([talentId, rank])=>{
     let found = null;
-    Object.values(TALENT_TREE).forEach(branch=>{
+    let foundBranch = null;
+    Object.entries(TALENT_TREE).forEach(([branchName, branch])=>{
       if(found) return;
-      found = branch.talents.find(t=>t.id === talentId);
+      const t = branch.talents.find(t=>t.id === talentId);
+      if(t){ found = t; foundBranch = branchName; }
     });
     if(!found){
       skipped++;
       skippedIds.push(talentId);
       return;
     }
-    const actualRank = Math.min(rank, found.maxRank);
-    if(talentState.points >= actualRank){
-      talentState.learned[talentId] = actualRank;
-      talentState.points -= actualRank;
-      applied += actualRank;
-    } else {
-      console.warn(`[APPLY PRESET] Not enough points for ${talentId} rank ${actualRank} (have ${talentState.points})`);
+    talentQueue.push({
+      talentId, rank: Math.min(rank, found.maxRank),
+      branchName: foundBranch, talent: found,
+    });
+  });
+  // Sort by gate ASC so low-gate talents get points first (unlocks higher tiers)
+  talentQueue.sort((a,b)=> (a.talent.gate||0) - (b.talent.gate||0));
+
+  // Helper: how many points currently spent in a given branch
+  function _pointsInBranch(branchName){
+    const branch = TALENT_TREE[branchName];
+    if(!branch) return 0;
+    let total = 0;
+    branch.talents.forEach(t=>{ total += talentState.learned[t.id] || 0; });
+    return total;
+  }
+
+  // Process each talent — spend rank-by-rank so we can re-check gates after
+  // each point is spent (spending a point in branch X unlocks branch X's next gate)
+  talentQueue.forEach(({talentId, rank, branchName, talent})=>{
+    for(let r = 0; r < rank; r++){
+      if(talentState.points <= 0){
+        console.warn(`[APPLY PRESET] Out of points at ${talentId} r${r+1}/${rank}`);
+        break;
+      }
+      // GATE CHECK — critical: respect the talent tree's progression rules
+      const curBranchPoints = _pointsInBranch(branchName);
+      if(curBranchPoints < (talent.gate || 0)){
+        // Not enough spent in this branch yet — can't take this talent
+        if(!gatedIds.includes(talentId)) gatedIds.push(talentId);
+        break; // skip remaining ranks of this talent
+      }
+      // Spend one point
+      talentState.learned[talentId] = (talentState.learned[talentId] || 0) + 1;
+      talentState.points -= 1;
+      applied += 1;
     }
   });
-  console.log(`[APPLY PRESET] Talents applied: ${applied}, skipped: ${skipped}`, skippedIds.length ? `(skipped IDs: ${skippedIds.join(',')})` : '');
+  console.log(`[APPLY PRESET] Talents applied: ${applied}, skipped: ${skipped}`,
+    skippedIds.length ? `(skipped IDs: ${skippedIds.join(',')})` : '',
+    gatedIds.length ? `(gated IDs: ${gatedIds.join(',')})` : '');
   if(typeof computeTalentBonuses === 'function') computeTalentBonuses();
 
   // ─── STEP 2: AUTO-FILL EMPTY CHOSEN SLOTS FROM SPARES ───
@@ -2813,19 +2924,49 @@ function renderSetStash(){
   }
   grid.appendChild(sparesSection);
 
-  // ─── DEBUG: RESET TEST SETS BUTTON ───
-  // Only shown if _testSetsGranted is true, so it disappears in production.
-  if(player._testSetsGranted){
+  // ─── TEST MODE CONTROLS ─────────────────────────────────────
+  // Three buttons depending on state:
+  //   - If test mode ACTIVE (granted): "Remove Test Gear" + "Reset Test Sets"
+  //   - If test mode REMOVED: "Enable Test Mode" (re-grants sets)
+  //   - If never granted (new char before first grant): nothing yet
+  const testState = player._testSetsGranted; // true | 'removed' | false/undefined
+  if(testState === true){
+    // Active — show remove and reset
     const debugWrap = document.createElement('div');
     debugWrap.className = 'stash-debug-wrap';
     debugWrap.innerHTML = `
-      <button class="stash-debug-btn" title="Wipes test stash and re-grants all 6 sets">
-        ⟲ Reset Test Sets
+      <div class="stash-debug-label">⚠ TEST MODE ACTIVE</div>
+      <button class="stash-debug-btn stash-debug-btn-danger" id="btnRemoveTestGear" title="Strips all test-granted set gear. Your level and talents stay.">
+        ⊗ Remove Test Gear
+      </button>
+      <button class="stash-debug-btn" id="btnResetTestSets" title="Wipes and re-grants all 6 sets at current level">
+        ⟲ Reset & Regrant Sets
       </button>
     `;
-    debugWrap.querySelector('.stash-debug-btn').addEventListener('click', ()=>{
-      if(confirm('Wipe current Set Stash and re-grant all 6 test sets?\n\nYour equipped set gear will remain equipped.')){
+    debugWrap.querySelector('#btnRemoveTestGear').addEventListener('click', ()=>{
+      if(confirm('Remove all test-granted set gear?\n\nThis strips:\n• All 48 pieces from Set Stash\n• Any equipped preset set pieces\n\nYour level, talents, XP, and gold remain.\nYou can re-enable test mode later.')){
+        removeAllTestGear();
+      }
+    });
+    debugWrap.querySelector('#btnResetTestSets').addEventListener('click', ()=>{
+      if(confirm('Wipe and re-grant all 6 test sets?\n\nAll current set stash contents will be replaced.')){
         resetAndRegrantTestSets();
+      }
+    });
+    grid.appendChild(debugWrap);
+  } else if(testState === 'removed'){
+    // Test mode was removed — show enable button
+    const debugWrap = document.createElement('div');
+    debugWrap.className = 'stash-debug-wrap';
+    debugWrap.innerHTML = `
+      <div class="stash-debug-label">◯ Vanilla Mode (no test gear)</div>
+      <button class="stash-debug-btn" id="btnEnableTestMode" title="Re-grant all 6 test sets scaled to your current level">
+        ⚒ Enable Test Mode
+      </button>
+    `;
+    debugWrap.querySelector('#btnEnableTestMode').addEventListener('click', ()=>{
+      if(confirm('Enable Test Mode?\n\nThis will grant all 6 preset sets (48 pieces) scaled to your current level.\nUseful for testing builds without grinding gear.')){
+        enableTestModeAndGrant();
       }
     });
     grid.appendChild(debugWrap);
