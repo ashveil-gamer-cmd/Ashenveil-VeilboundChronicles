@@ -9630,4 +9630,1119 @@ document.getElementById('startBtn').addEventListener('click',()=>{
 const _continueBtn=document.getElementById('continueBtn');
 if(_continueBtn)_continueBtn.addEventListener('click',()=>openCharacterSelect());
 const _newGameBtn=document.getElementById('newGameBtn');
-if(_newGameBtn)_newGameBtn.
+if(_newGameBtn)_newGameBtn.addEventListener('click',()=>openCharacterSelect());
+
+// ═══════ CHARACTER SELECT SCREEN ══════════════════════════════
+function openCharacterSelect(){
+  const titleScr = document.getElementById('titleScreen');
+  const classScr = document.getElementById('classSelectScreen');
+  const charScr  = document.getElementById('characterSelectScreen');
+  if(titleScr) titleScr.style.display='none';
+  if(classScr) classScr.style.display='none';
+  if(charScr)  charScr.style.display='flex';
+  renderCharacterSelect();
+}
+function closeCharacterSelect(){
+  const titleScr = document.getElementById('titleScreen');
+  const charScr  = document.getElementById('characterSelectScreen');
+  if(charScr)  charScr.style.display='none';
+  if(titleScr) titleScr.style.display='flex';
+}
+function renderCharacterSelect(){
+  const grid = document.getElementById('characterSelectGrid');
+  const countEl = document.getElementById('charSelectCount');
+  if(!grid) return;
+  grid.innerHTML='';
+  const characters = profile.characters;
+  if(countEl) countEl.textContent = `${characters.length} / ${MAX_CHARACTERS} slots used`;
+  // Sort by lastPlayedAt DESC so most recent is on top
+  const ordered = characters.map((c,i)=>({chr:c, origIndex:i}))
+    .sort((a,b) => (b.chr.lastPlayedAt||0) - (a.chr.lastPlayedAt||0));
+  // Render existing character cards
+  ordered.forEach(({chr, origIndex})=>{
+    // Classify character by classId (stored on creation) falling back to save if present
+    const chrClassId = chr.classId || chr.save?.player?.classId || 'hollowcaller';
+    const cls = (typeof CLASS_DEFS!=='undefined' && CLASS_DEFS[chrClassId]) || {name:'Unknown',resourceColor:'#9ca3af'};
+    const level = chr.save?.player?.level || 1;
+    const gold = chr.save?.player?.gold || 0;
+    const kills = chr.save?.stats?.kills || 0;
+    const lastPlayedDays = chr.lastPlayedAt ? Math.floor((Date.now() - chr.lastPlayedAt) / 86400000) : 0;
+    const lastPlayedStr = (()=>{
+      if(!chr.lastPlayedAt) return 'Never';
+      const diff = Date.now() - chr.lastPlayedAt;
+      if(diff < 60000) return 'Just now';
+      if(diff < 3600000) return Math.floor(diff/60000) + ' min ago';
+      if(diff < 86400000) return Math.floor(diff/3600000) + ' hrs ago';
+      return lastPlayedDays + ' day' + (lastPlayedDays===1?'':'s') + ' ago';
+    })();
+    const icon = chrClassId === 'ironwake' ? '⚔' : '🜲';
+    const card = document.createElement('div');
+    card.className = 'char-card';
+    card.style.borderColor = cls.resourceColor + '66';
+    card.innerHTML = `
+      <div class="char-card-icon" style="color:${cls.resourceColor};text-shadow:0 0 16px ${cls.resourceColor}88">${icon}</div>
+      <div class="char-card-name">${chr.name}</div>
+      <div class="char-card-class" style="color:${cls.resourceColor}">${cls.name}</div>
+      <div class="char-card-stats">
+        <div class="char-stat"><span class="char-stat-label">LV</span><span class="char-stat-val">${level}</span></div>
+        <div class="char-stat"><span class="char-stat-label">GOLD</span><span class="char-stat-val">${gold}</span></div>
+        <div class="char-stat"><span class="char-stat-label">KILLS</span><span class="char-stat-val">${kills}</span></div>
+      </div>
+      <div class="char-card-lastplayed">${lastPlayedStr}</div>
+      <div class="char-card-actions">
+        <button class="char-action-play" style="color:${cls.resourceColor};border-color:${cls.resourceColor}66">▶ PLAY</button>
+        <button class="char-action-delete">✗ DELETE</button>
+      </div>
+    `;
+    card.querySelector('.char-action-play').addEventListener('click',()=>{
+      selectCharacter(origIndex);
+      const charScr = document.getElementById('characterSelectScreen');
+      if(charScr) charScr.style.display='none';
+      startGame(true); // continue from save
+    });
+    card.querySelector('.char-action-delete').addEventListener('click',()=>{
+      // Confirmation threshold — higher level = more investment lost
+      const lv = chr.save?.player?.level || 1;
+      let msg = `Delete ${chr.name}?\n\nThis character will be permanently removed.`;
+      if(lv >= 10){
+        msg = `⚠ Delete ${chr.name} (Level ${lv})?\n\nThis character has meaningful progress. This action cannot be undone.`;
+      }
+      if(confirm(msg)){
+        deleteCharacterAt(origIndex);
+        renderCharacterSelect();
+      }
+    });
+    grid.appendChild(card);
+  });
+  // Render "create new" card if we have room
+  if(characters.length < MAX_CHARACTERS){
+    const createCard = document.createElement('div');
+    createCard.className = 'char-card char-card-empty';
+    createCard.innerHTML = `
+      <div class="char-card-icon char-card-plus">+</div>
+      <div class="char-card-name">Create New</div>
+      <div class="char-card-class">${MAX_CHARACTERS - characters.length} slot${MAX_CHARACTERS - characters.length===1?'':'s'} remaining</div>
+      <button class="char-action-create">CHOOSE CLASS</button>
+    `;
+    createCard.querySelector('.char-action-create').addEventListener('click',()=>{
+      openClassSelect(); // existing function, chooseClass now creates a new char
+    });
+    grid.appendChild(createCard);
+  }
+  const cancelBtn = document.getElementById('charSelectCancelBtn');
+  if(cancelBtn){
+    cancelBtn.onclick = ()=>closeCharacterSelect();
+  }
+}
+
+// Class-select screen: shows both classes as big cards, player picks one, then starts game.
+function openClassSelect(){
+  const titleScr = document.getElementById('titleScreen');
+  const classScr = document.getElementById('classSelectScreen');
+  const charScr  = document.getElementById('characterSelectScreen');
+  if(titleScr) titleScr.style.display='none';
+  if(charScr)  charScr.style.display='none';
+  if(classScr) classScr.style.display='flex';
+  renderClassSelect();
+}
+function closeClassSelect(){
+  const charScr  = document.getElementById('characterSelectScreen');
+  const classScr = document.getElementById('classSelectScreen');
+  if(classScr) classScr.style.display='none';
+  // Return to character select if we have any chars, else to title
+  if(charScr && profile.characters.length > 0){
+    charScr.style.display='flex';
+    renderCharacterSelect();
+  } else {
+    const titleScr = document.getElementById('titleScreen');
+    if(titleScr) titleScr.style.display='flex';
+  }
+}
+function renderClassSelect(){
+  const grid = document.getElementById('classSelectGrid');
+  if(!grid) return;
+  grid.innerHTML='';
+  Object.values(CLASS_DEFS).forEach(cls=>{
+    const card = document.createElement('div');
+    card.className = 'class-card';
+    card.style.borderColor = cls.resourceColor + '66';
+    card.innerHTML = `
+      <div class="class-card-icon" style="color:${cls.resourceColor};text-shadow:0 0 20px ${cls.resourceColor}88">${cls.id==='hollowcaller'?'🜲':'⚔'}</div>
+      <div class="class-card-name" style="color:${cls.resourceColor}">${cls.name.toUpperCase()}</div>
+      <div class="class-card-tagline">${cls.tagline}</div>
+      <div class="class-card-desc">${cls.description}</div>
+      <div class="class-card-stats">
+        <div class="class-stat"><span class="class-stat-label">HP</span><span class="class-stat-val">${cls.baseHp}</span></div>
+        <div class="class-stat"><span class="class-stat-label">Attack</span><span class="class-stat-val">${cls.baseAtk}</span></div>
+        <div class="class-stat"><span class="class-stat-label">Speed</span><span class="class-stat-val">${Math.round(cls.speedMult*100)}%</span></div>
+        <div class="class-stat"><span class="class-stat-label">Range</span><span class="class-stat-val">${cls.attackRange}px</span></div>
+        <div class="class-stat"><span class="class-stat-label">Resource</span><span class="class-stat-val" style="color:${cls.resourceColor}">${cls.resourceName}</span></div>
+      </div>
+      <button class="class-card-choose" style="color:${cls.resourceColor};border-color:${cls.resourceColor}66">CHOOSE ${cls.name.toUpperCase()}</button>
+    `;
+    card.querySelector('.class-card-choose').addEventListener('click',()=>{
+      chooseClass(cls.id);
+    });
+    grid.appendChild(card);
+  });
+  const cancelBtn = document.getElementById('classSelectCancelBtn');
+  if(cancelBtn){
+    cancelBtn.onclick = ()=>closeClassSelect();
+  }
+}
+function chooseClass(classId){
+  // Check if profile is full before creating
+  if(profile.characters.length >= MAX_CHARACTERS){
+    alert(`Character slots are full (${MAX_CHARACTERS}). Delete a character from the Character Select screen to make room.`);
+    return;
+  }
+  // Create a new character slot for this class — this sets activeSlot to the new char
+  const created = createCharacter(classId);
+  if(!created){
+    alert('Could not create character.');
+    return;
+  }
+  // Initialize live player state for the new character
+  player.classId = classId;
+  player.wrath = 0;
+  player.bulwarkUntil = 0;
+  player.retributionUntil = 0;
+  player.furyChargeUntil = 0;
+  // Hide class-select, start game fresh (no save to load — this is a new char)
+  const classScr = document.getElementById('classSelectScreen');
+  if(classScr) classScr.style.display='none';
+  startGame(false);
+}
+
+// Helper: check if user confirms New Game when a save exists.
+// Returns true if user accepted (proceed with New Game), false if declined.
+function newGameConfirmCheck(){
+  if(!hasSave()) return true;
+  return confirm('Starting a new game will overwrite your current save. Are you sure?');
+}
+// Paint correct buttons on page load
+refreshTitleButtons();
+
+// ═══════ TAP-TO-INTERACT ═══════════════════════════════════════════
+// Mobile-friendly interaction: tap an NPC directly (or near them) to trigger
+// their interaction. Works alongside the touch joystick — a brief tap that
+// doesn't drag is treated as an interaction attempt, not movement.
+// On desktop this also handles mouse clicks in the game world.
+//
+// How it distinguishes tap from joystick:
+//  - Records touch start position + time
+//  - On touch end, if the finger moved less than TAP_MAX_DRIFT and was held
+//    less than TAP_MAX_HOLD_MS, it's a tap
+//  - Tap world coords are checked against all camp NPCs; nearest within
+//    TAP_INTERACT_RADIUS triggers that NPC's interaction
+const TAP_MAX_DRIFT = 35;      // px — finger movement above this = drag, not tap
+const TAP_MAX_HOLD_MS = 600;   // ms — hold time above this = drag, not tap
+const TAP_INTERACT_RADIUS = 120; // world-units radius around tap point to find NPC
+let _tapTracker = { active:false, sx:0, sy:0, startTime:0 };
+
+// Convert a screen position (client coords) to world coords using current camera
+function screenToWorld(sx, sy){
+  // Inverse of the render transform: first subtract screen center, then
+  // divide by zoom (because at higher zoom, a screen pixel covers fewer
+  // world units), then add camera offset.
+  return {
+    x: camX + (sx - W/2) / WORLD_ZOOM,
+    y: camY + (sy - H/2) / WORLD_ZOOM,
+  };
+}
+
+// Find nearest camp NPC within interact range of a given world coord.
+// Returns the NPC object or null.
+function getNpcAtWorld(wx, wy, radius = TAP_INTERACT_RADIUS){
+  if(!curZone?.isCamp || typeof CAMP_NPCS === 'undefined') return null;
+  let closest = null, closestDist = radius;
+  CAMP_NPCS.forEach(npc => {
+    if(!isNpcAvailable(npc)) return; // skip locked NPCs
+    const pos = campWorldPos(npc);
+    const dx = wx - pos.x, dy = wy - pos.y;
+    const d = Math.sqrt(dx*dx + dy*dy);
+    if(d < closestDist){ closest = npc; closestDist = d; }
+  });
+  return closest;
+}
+
+// Returns true if this NPC should be visible/interactable right now.
+// NPCs without unlockCondition are always available. Conditional ones
+// (Veilwarden etc) only show when their gating condition is met.
+function isNpcAvailable(npc){
+  if(!npc.unlockCondition) return true;
+  if(npc.unlockCondition === 'veilgate'){
+    return (typeof veilgateState !== 'undefined') && veilgateState.unlocked;
+  }
+  return true;
+}
+
+// Execute NPC interaction — centralized so touch and keyboard both call it
+function executeNpcInteraction(npc){
+  if(!npc) return false;
+  const handlers = {
+    openZoneTravel: ()=>{ if(typeof openZoneTravelScreen === 'function') openZoneTravelScreen(); },
+    openMerchant:   ()=>{ if(typeof openShop === 'function') openShop(); },
+    openWeaponsmith:()=>{ if(typeof openProf === 'function') openProf(); },
+    openArmorer:    ()=>{ if(typeof openProf === 'function') openProf(); },
+    openRitualist:  ()=>{ if(typeof openProf === 'function') openProf(); },
+    // Quest hub — The Old Procession. Opens the Procession's dialogue
+    // where the player can accept available quests, turn in completed ones,
+    // and review active work.
+    openQuestHub:   ()=>{
+      if(typeof openProcessionDialogue === 'function'){
+        openProcessionDialogue();
+      } else if(typeof addFeed === 'function'){
+        addFeed(`"We have been waiting..."`, '#c4b5fd');
+        addFeed(`  └ The Procession stirs. Quest system not yet loaded.`, '#9ca3af');
+      }
+    },
+    // Veilgate — The Veilwarden. Opens the endgame tier selection panel.
+    // NPC is filtered by isNpcAvailable() so this only fires when unlocked.
+    openVeilgate:   ()=>{
+      if(typeof openVeilgate === 'function'){
+        openVeilgate();
+      } else if(typeof addFeed === 'function'){
+        addFeed(`"You are not ready for what lies beyond."`, '#fbbf24');
+      }
+    },
+  };
+  const fn = handlers[npc.onInteract];
+  if(fn){ fn(); return true; }
+  return false;
+}
+
+// Handle a tap at a given screen position. Returns true if an interaction fired.
+function handleTapAt(screenX, screenY){
+  // Don't interact if any modal/panel is already open — tapping through them
+  // would be confusing
+  const openPanel = ['gearPanel','inventoryPanel','shopPanel','talentPanel','profPanel','zoneTravelOverlay','questPanel','processionDialogue','veilforgePanel','veilgatePanel','zoneNpcDialogue'].find(id => {
+    const el = document.getElementById(id);
+    return el && getComputedStyle(el).display !== 'none' && el.style.display !== '';
+  });
+  if(openPanel) return false;
+  // Convert screen to world
+  const wp = screenToWorld(screenX, screenY);
+  // Camp NPC first (only relevant in camp zone)
+  if(curZone?.isCamp){
+    const campNpc = getNpcAtWorld(wp.x, wp.y);
+    if(campNpc){
+      executeNpcInteraction(campNpc);
+      return true;
+    }
+    return false;
+  }
+  // Outside camp — check for zone NPC at tap location
+  if(!dungeonState.active && typeof getZoneNpcAtWorld === 'function'){
+    const zoneNpc = getZoneNpcAtWorld(wp.x, wp.y);
+    if(zoneNpc){
+      if(typeof openZoneNpcDialogue === 'function') openZoneNpcDialogue(zoneNpc);
+      return true;
+    }
+  }
+  return false;
+}
+
+// Desktop mouse click — triggers tap-to-interact anywhere in the game world
+canvas.addEventListener('click', e => {
+  // Only fires for mouse clicks; touches on mobile dispatch click too but
+  // our touchend handler gets there first with preventDefault. This is a
+  // belt-and-suspenders approach for desktop mouse.
+  if(e.isTrusted === false) return;
+  handleTapAt(e.clientX, e.clientY);
+});
+
+// ═══════ TOUCH HANDLERS ═══════════════════════════════════════════
+// Left-half touch = virtual joystick for movement (original behavior).
+// Right-half touch = handled as potential tap; if the finger doesn't drag,
+// it fires a tap-to-interact at the tap location.
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  for(let i=0; i<e.changedTouches.length; i++){
+    const t = e.changedTouches[i];
+    // Skip touches that originated on a UI element (ability button, menu, etc).
+    // This prevents the joystick from hijacking ability taps.
+    const el = document.elementFromPoint(t.clientX, t.clientY);
+    if(el && (el.closest('#abilityBar') || el.closest('.menu-btn') || el.closest('#afkToggle') || el.closest('#questTracker'))){
+      continue;
+    }
+    if(t.clientX < W/2 && !touchJoy.active){
+      // Left side — joystick for movement
+      joyId = t.identifier;
+      touchJoy.startX = t.clientX;
+      touchJoy.startY = t.clientY;
+      touchJoy.active = true;
+      touchJoy.dx = 0;
+      touchJoy.dy = 0;
+    } else {
+      // Right side OR left side while joystick active — candidate tap
+      _tapTracker = {
+        active: true,
+        id: t.identifier,
+        sx: t.clientX,
+        sy: t.clientY,
+        startTime: performance.now(),
+      };
+    }
+  }
+}, {passive:false});
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  for(let i=0; i<e.changedTouches.length; i++){
+    const t = e.changedTouches[i];
+    if(t.identifier === joyId){
+      const dx = t.clientX - touchJoy.startX;
+      const dy = t.clientY - touchJoy.startY;
+      const m = Math.sqrt(dx*dx + dy*dy) || 1;
+      touchJoy.dx = dx / Math.max(m, 50);
+      touchJoy.dy = dy / Math.max(m, 50);
+      player.lastInput = performance.now();
+    }
+    if(_tapTracker.active && t.identifier === _tapTracker.id){
+      // Check if finger drifted too far — if so, invalidate the tap
+      const dx = t.clientX - _tapTracker.sx;
+      const dy = t.clientY - _tapTracker.sy;
+      if(Math.sqrt(dx*dx + dy*dy) > TAP_MAX_DRIFT){
+        _tapTracker.active = false;
+      }
+    }
+  }
+}, {passive:false});
+canvas.addEventListener('touchend', e => {
+  for(let i=0; i<e.changedTouches.length; i++){
+    const t = e.changedTouches[i];
+    if(t.identifier === joyId){
+      touchJoy.active = false;
+      touchJoy.dx = 0;
+      touchJoy.dy = 0;
+      joyId = null;
+    }
+    if(_tapTracker.active && t.identifier === _tapTracker.id){
+      // Was this a valid brief tap? If so, attempt NPC interaction.
+      const elapsed = performance.now() - _tapTracker.startTime;
+      if(elapsed < TAP_MAX_HOLD_MS){
+        handleTapAt(t.clientX, t.clientY);
+      }
+      _tapTracker.active = false;
+    }
+  }
+});
+
+// ═══════ ABILITY BUTTON TOUCH HANDLERS ════════════════════════════
+// Inline onclick is unreliable on mobile when a joystick finger is already
+// held down (the browser can defer click until joystick releases). Adding
+// touchstart directly fires on first touch, completely independent of other
+// touches. This is why holding movement and tapping an ability can fail —
+// the click event is queued behind the joystick's ongoing touch stream.
+for(let i = 0; i < 5; i++){
+  const btn = document.getElementById(`ab${i}`);
+  if(!btn) continue;
+  const idx = i;
+  btn.addEventListener('touchstart', ev => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    // Fire the cast immediately; onclick as a safety fallback
+    if(typeof playerCast === 'function') playerCast(idx);
+    player.lastInput = performance.now();
+  }, {passive:false});
+}
+
+
+// ════════ ZONE TRANSITIONS ════════════════════════════════════════════
+// ═══════ THE PROCESSION — CAMP RENDERING & INTERACTION ════════════
+// The camp's world-anchored positions are relative to world center. We
+// convert them to absolute world coords on access so rendering and collision
+// use the same coordinate space as everything else in the game.
+
+// Get absolute world coords for a camp element (NPC or campfire).
+function campWorldPos(entry){
+  return { x: WORLD_W/2 + (entry.x||0), y: WORLD_H/2 + (entry.y||0) };
+}
+
+// Returns the NPC the player is currently within interaction range of,
+// or null if none. Used by render to highlight, and by E key to trigger.
+const CAMP_INTERACT_RADIUS = 80;
+function getNearbyCampNpc(){
+  if(!curZone?.isCamp) return null;
+  let closest = null, closestDist = CAMP_INTERACT_RADIUS;
+  CAMP_NPCS.forEach(npc => {
+    if(!isNpcAvailable(npc)) return; // locked NPCs not interactable
+    const pos = campWorldPos(npc);
+    const dx = player.x - pos.x, dy = player.y - pos.y;
+    const d = Math.sqrt(dx*dx + dy*dy);
+    if(d < closestDist){ closest = npc; closestDist = d; }
+  });
+  return closest;
+}
+
+// Draw an NPC figure — each NPC has a unique silhouette proportions AND a
+// signature accent object. Different enough to identify at a glance.
+function drawCampNpcFigure(npc, pos, now){
+  const bob = Math.sin(now*0.001 + (npc.x+npc.y)*0.01) * 1.4;
+  const y = pos.y + bob;
+  const x = pos.x;
+
+  // ─── SILHOUETTE PROPORTIONS PER NPC TYPE ───
+  // Different body shapes so NPCs look distinct even without accents.
+  let bodyW = 14, bodyTop = 10, bodyHeight = 32, headR = 7, headY = -18;
+  const npcType = npc.npcType || 'ghost-scholar';
+  if(npcType === 'ghost-warrior'){
+    // Stocky, broad-shouldered — the Warden
+    bodyW = 18; bodyTop = 14; bodyHeight = 34; headR = 8; headY = -19;
+  } else if(npcType === 'ghost-scholar'){
+    // Tall, slender — Cartographer, Keeper
+    bodyW = 13; bodyTop = 9; bodyHeight = 36; headR = 6.5; headY = -22;
+  } else if(npcType === 'ghost-merchant'){
+    // Hooded, hunched — Veilbroker
+    bodyW = 15; bodyTop = 11; bodyHeight = 30; headR = 7.5; headY = -16;
+  } else if(npcType === 'ghost-procession'){
+    // Three shrouded figures huddled together — draw as one wide shape
+    bodyW = 22; bodyTop = 16; bodyHeight = 32; headR = 0; headY = -18;
+  } else if(npcType === 'living-mender'){
+    // Seris — looks warmer, more human. Slightly shorter.
+    bodyW = 13; bodyTop = 10; bodyHeight = 30; headR = 7; headY = -17;
+  } else if(npcType === 'ghost-warden'){
+    // The Veilwarden — tall, imposing, crowned presence.
+    // Stocky like a warrior but TALLER, signaling elevated status.
+    bodyW = 17; bodyTop = 12; bodyHeight = 42; headR = 8; headY = -26;
+  }
+
+  // ─── SHADOW ───
+  ctx.fillStyle='rgba(0,0,0,0.38)';
+  ctx.beginPath();
+  ctx.ellipse(x, y + bodyHeight*0.65, bodyW*1.25, 5, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // ─── GHOSTLY AURA for dead NPCs (everyone except Seris) ───
+  if(npcType !== 'living-mender'){
+    const auraPulse = 0.5 + Math.sin(now*0.003 + npc.x*0.01)*0.3;
+    const auraR = bodyW * 1.8;
+    const auraGrad = ctx.createRadialGradient(x, y-4, 0, x, y-4, auraR);
+    auraGrad.addColorStop(0, `${npc.accent}22`);
+    auraGrad.addColorStop(0.6, `${npc.color}15`);
+    auraGrad.addColorStop(1, 'transparent');
+    ctx.fillStyle = auraGrad;
+    ctx.globalAlpha = auraPulse * 0.85;
+    ctx.beginPath();ctx.arc(x, y-4, auraR, 0, Math.PI*2);ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // ─── BODY ───
+  ctx.fillStyle=npc.color;
+  ctx.shadowColor=npc.accent; ctx.shadowBlur=14;
+  ctx.beginPath();
+  ctx.moveTo(x - bodyW, y + bodyHeight*0.5);
+  ctx.lineTo(x - bodyTop, y - bodyHeight*0.35);
+  ctx.lineTo(x + bodyTop, y - bodyHeight*0.35);
+  ctx.lineTo(x + bodyW, y + bodyHeight*0.5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.shadowBlur=0;
+
+  // ─── HEAD ───
+  if(headR > 0){
+    ctx.fillStyle=npc.accent;
+    ctx.beginPath();ctx.arc(x, y + headY, headR, 0, Math.PI*2);ctx.fill();
+    // Inner hood shadow (gives face depth)
+    ctx.fillStyle='rgba(0,0,0,0.4)';
+    ctx.beginPath();ctx.arc(x, y + headY + 1, headR*0.65, 0, Math.PI*2);ctx.fill();
+    // For dead NPCs — glowing eye slits
+    if(npcType !== 'living-mender'){
+      ctx.fillStyle = npc.accent;
+      ctx.shadowColor = npc.accent; ctx.shadowBlur = 6;
+      ctx.beginPath();ctx.arc(x - headR*0.3, y + headY + 1, 1.2, 0, Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.arc(x + headR*0.3, y + headY + 1, 1.2, 0, Math.PI*2);ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  // ─── ROLE-SPECIFIC SIGNATURE OBJECT ───
+  ctx.save();
+  ctx.translate(x, y);
+  if(npc.role === 'travel'){
+    // Silent Cartographer — a floating scroll/map beside her
+    ctx.fillStyle='#e8d8a8';
+    ctx.shadowColor='#d4a555'; ctx.shadowBlur=8;
+    ctx.fillRect(14, -8, 10, 14);
+    // Scroll lines
+    ctx.shadowBlur=0;
+    ctx.strokeStyle='#6a4a28';
+    ctx.lineWidth=0.5;
+    for(let i=0;i<3;i++){
+      ctx.beginPath();ctx.moveTo(15, -5+i*4); ctx.lineTo(23, -5+i*4); ctx.stroke();
+    }
+    // A drifting pencil/charcoal — animated
+    const penBob = Math.sin(now*0.003)*2;
+    ctx.strokeStyle='#2a1810';
+    ctx.lineWidth=1.2;
+    ctx.beginPath();ctx.moveTo(18, 4+penBob); ctx.lineTo(22, 10+penBob); ctx.stroke();
+  } else if(npc.role === 'weaponsmith'){
+    // Hollowed Warden — anvil + forever-burning spirit ember
+    ctx.fillStyle='#2a1f10';
+    ctx.fillRect(-16, 18, 32, 4);
+    ctx.fillRect(-12, 22, 24, 3);
+    // Sitting hammer on anvil
+    ctx.fillStyle='#4a3525';
+    ctx.fillRect(-4, 15, 3, 7);
+    ctx.fillRect(-7, 14, 9, 3);
+    // Ghostly ember glow (burns without wood)
+    const emberPulse = 0.7 + Math.sin(now*0.008)*0.3;
+    ctx.fillStyle='#ff6b2c';
+    ctx.shadowColor='#ff6b2c'; ctx.shadowBlur=14 * emberPulse;
+    ctx.globalAlpha = emberPulse;
+    ctx.beginPath();ctx.arc(6, 19, 2.5, 0, Math.PI*2);ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur=0;
+  } else if(npc.role === 'armorer'){
+    // Seris — loom + threads (still standard needlework)
+    ctx.strokeStyle='#6a4a28';
+    ctx.lineWidth=1.4;
+    ctx.strokeRect(-18, -6, 10, 22);
+    // Threads
+    ctx.strokeStyle=npc.accent;
+    ctx.lineWidth=0.6;
+    for(let i=0;i<4;i++){
+      ctx.beginPath();ctx.moveTo(-18, -4+i*6); ctx.lineTo(-8, -4+i*6); ctx.stroke();
+    }
+    // Living warmth — small candle (differentiates her as the ONLY living NPC)
+    ctx.fillStyle='#fbbf24';
+    ctx.shadowColor='#fbbf24'; ctx.shadowBlur=10;
+    ctx.beginPath();ctx.arc(14, -12, 2, 0, Math.PI*2);ctx.fill();
+    ctx.shadowBlur=0;
+    ctx.fillStyle='#7a4a24';
+    ctx.fillRect(13, -10, 2, 6);
+  } else if(npc.role === 'merchant'){
+    // Veilbroker — a small floating cache of regrets (glowing shards)
+    // Instead of a cart. His wares float around him eerily.
+    const shardBob = Math.sin(now*0.004)*2;
+    ctx.fillStyle='#a89dc4';
+    ctx.shadowColor='#c4b5fd'; ctx.shadowBlur=12;
+    // Three floating shards orbiting at different phases
+    for(let i=0;i<3;i++){
+      const ang = now*0.0012 + i*(Math.PI*2/3);
+      const orbX = 18 + Math.cos(ang)*5;
+      const orbY = -2 + shardBob + Math.sin(ang)*5;
+      ctx.globalAlpha = 0.7;
+      ctx.beginPath();
+      ctx.moveTo(orbX, orbY-2.5);
+      ctx.lineTo(orbX+1.5, orbY);
+      ctx.lineTo(orbX, orbY+2.5);
+      ctx.lineTo(orbX-1.5, orbY);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur=0;
+  } else if(npc.role === 'ritualist'){
+    // Keeper of Last Words — floating tome above her, rune circle at feet
+    // (she collects the last words of the dying into a book)
+    const bookBob = Math.sin(now*0.003)*1.5;
+    ctx.fillStyle='#8a6a4a';
+    ctx.shadowColor='#9DC4B0'; ctx.shadowBlur=8;
+    ctx.fillRect(-5, -36+bookBob, 10, 8);
+    // Glowing pages
+    ctx.fillStyle='#e8f4ec';
+    ctx.shadowBlur=12;
+    ctx.fillRect(-4, -35+bookBob, 8, 2);
+    ctx.shadowBlur=0;
+    // Rune circle at feet
+    const runeAngle = now*0.0008;
+    ctx.strokeStyle='#9DC4B0';
+    ctx.lineWidth=0.8;
+    ctx.globalAlpha=0.45;
+    ctx.beginPath();ctx.arc(0, 20, 20, 0, Math.PI*2);ctx.stroke();
+    ctx.globalAlpha=1;
+    for(let i=0;i<4;i++){
+      const a = runeAngle + i*(Math.PI*2/4);
+      ctx.fillStyle='#9DC4B0';
+      ctx.beginPath();ctx.arc(Math.cos(a)*20, 20+Math.sin(a)*4, 1.4, 0, Math.PI*2);ctx.fill();
+    }
+  } else if(npc.role === 'questhub'){
+    // The Old Procession — three huddled shrouded figures instead of one.
+    // Each slightly different to imply they're three distinct spirits.
+    ctx.translate(0, -bodyHeight*0.5);
+    const heads = [
+      {ox:-12, oy:-4, r:5.5, c:'#a78bfa'},
+      {ox:0,   oy:-8, r:6,   c:'#c4b5fd'},
+      {ox:12,  oy:-4, r:5.5, c:'#8b5cf6'},
+    ];
+    heads.forEach((h, i)=>{
+      ctx.fillStyle = h.c;
+      ctx.shadowColor = h.c; ctx.shadowBlur = 10;
+      // Hooded head
+      ctx.beginPath();ctx.arc(h.ox, h.oy, h.r, 0, Math.PI*2);ctx.fill();
+      // Inner shadow (face)
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.beginPath();ctx.arc(h.ox, h.oy+0.5, h.r*0.6, 0, Math.PI*2);ctx.fill();
+      // Glowing eye - one per hood (they speak as one)
+      ctx.fillStyle = h.c;
+      ctx.shadowColor = h.c; ctx.shadowBlur = 6;
+      ctx.beginPath();ctx.arc(h.ox, h.oy, 1, 0, Math.PI*2);ctx.fill();
+      ctx.shadowBlur = 0;
+    });
+    // Floating quest-rune above them (placeholder visual for "they have work for you")
+    const questPulse = 0.6 + Math.sin(now*0.004)*0.4;
+    ctx.globalAlpha = questPulse;
+    ctx.fillStyle = '#fbbf24';
+    ctx.shadowColor = '#fbbf24'; ctx.shadowBlur = 14 * questPulse;
+    // Diamond shape
+    ctx.beginPath();
+    ctx.moveTo(0, -22);
+    ctx.lineTo(4, -18);
+    ctx.lineTo(0, -14);
+    ctx.lineTo(-4, -18);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+  } else if(npc.role === 'veilgate'){
+    // The Veilwarden — halo of golden runic marks rotating above his head.
+    // Signals "he holds the key to something powerful."
+    ctx.translate(0, -bodyHeight*0.55);
+    const spin = now * 0.0012;
+    const glow = 0.75 + Math.sin(now*0.003)*0.25;
+    // Central radiant glyph — diamond with inner cross
+    ctx.save();
+    ctx.rotate(spin * 0.6);
+    ctx.globalAlpha = glow;
+    ctx.fillStyle = '#fbbf24';
+    ctx.shadowColor = '#fbbf24'; ctx.shadowBlur = 18 * glow;
+    ctx.beginPath();
+    ctx.moveTo(0, -14);
+    ctx.lineTo(6, -8);
+    ctx.lineTo(0, -2);
+    ctx.lineTo(-6, -8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    // Four orbiting runic sparks (golden halo)
+    const haloR = 22;
+    for(let i = 0; i < 4; i++){
+      const a = spin + (i * Math.PI / 2);
+      const rx = Math.cos(a) * haloR;
+      const ry = Math.sin(a) * haloR * 0.4 - 10; // flatten into a "crown" ellipse
+      ctx.save();
+      ctx.globalAlpha = glow;
+      ctx.fillStyle = '#fde68a';
+      ctx.shadowColor = '#fbbf24';
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(rx, ry, 1.8, 0, Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+    }
+    // Faint overall aura behind him — golden light bleeding into the air
+    ctx.save();
+    ctx.globalAlpha = 0.18 * glow;
+    ctx.fillStyle = '#fbbf24';
+    ctx.beginPath();
+    ctx.arc(0, -8, 32, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+  }
+  ctx.restore();
+
+  // ─── INTERACTION HINT (above head when player is nearby) ───
+  const isNearby = getNearbyCampNpc() === npc;
+  if(isNearby){
+    ctx.save();
+    // Pulsing hint box
+    const hintPulse = 0.8 + Math.sin(now*0.006)*0.2;
+    ctx.globalAlpha = hintPulse;
+    ctx.font = '600 11px Cinzel, serif';
+    ctx.textAlign = 'center';
+    // Name label
+    const nameY = y + headY - headR - 20;
+    const nameW = ctx.measureText(npc.name).width;
+    ctx.fillStyle = 'rgba(0,0,0,0.82)';
+    ctx.fillRect(x - nameW/2 - 10, nameY - 10, nameW + 20, 16);
+    ctx.strokeStyle = npc.accent;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x - nameW/2 - 10, nameY - 10, nameW + 20, 16);
+    ctx.fillStyle = npc.accent;
+    ctx.fillText(npc.name, x, nameY + 2);
+    // Press E / Tap prompt
+    const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    const prompt = isTouch ? '[Tap to Speak]' : '[E] Speak';
+    ctx.font = '600 9px Cinzel, serif';
+    const promptW = ctx.measureText(prompt).width;
+    ctx.fillStyle = 'rgba(251,191,36,0.95)';
+    ctx.fillRect(x - promptW/2 - 6, nameY + 8, promptW + 12, 13);
+    ctx.fillStyle = '#1a1020';
+    ctx.fillText(prompt, x, nameY + 18);
+    ctx.globalAlpha = 1;
+    ctx.textAlign = 'start';
+    ctx.restore();
+  }
+}
+
+// Draw the central campfire with warm flicker
+function drawCampfire(now){
+  const pos = campWorldPos(CAMP_CAMPFIRE);
+  const x = pos.x, y = pos.y;
+  // Glow pool on ground
+  const g = ctx.createRadialGradient(x, y, 0, x, y, 220);
+  g.addColorStop(0, 'rgba(255,180,80,0.35)');
+  g.addColorStop(0.5, 'rgba(255,140,60,0.15)');
+  g.addColorStop(1, 'rgba(255,140,60,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();ctx.arc(x, y, 220, 0, Math.PI*2);ctx.fill();
+  // Logs
+  ctx.fillStyle='#2a1810';
+  ctx.fillRect(x-20, y, 40, 6);
+  ctx.fillRect(x-14, y-4, 28, 5);
+  // Fire — flickering triangle stack
+  const flickerA = 12 + Math.sin(now*0.015)*3;
+  const flickerB = 18 + Math.sin(now*0.011+1.2)*4;
+  // Outer flame (orange)
+  ctx.fillStyle='#ff7f2a';
+  ctx.shadowColor='#ff7f2a'; ctx.shadowBlur=22;
+  ctx.beginPath();
+  ctx.moveTo(x, y-flickerB);
+  ctx.lineTo(x-10, y);
+  ctx.lineTo(x+10, y);
+  ctx.closePath();
+  ctx.fill();
+  // Inner flame (yellow)
+  ctx.fillStyle='#ffcc44';
+  ctx.shadowColor='#ffcc44'; ctx.shadowBlur=14;
+  ctx.beginPath();
+  ctx.moveTo(x, y-flickerA);
+  ctx.lineTo(x-5, y-2);
+  ctx.lineTo(x+5, y-2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.shadowBlur=0;
+  // Sparks rising
+  for(let i=0;i<3;i++){
+    const sparkT = (now*0.001 + i*0.3) % 1;
+    const sx = x + Math.sin(now*0.004 + i)*8;
+    const sy = y - sparkT*50;
+    ctx.globalAlpha = 1 - sparkT;
+    ctx.fillStyle='#ffd060';
+    ctx.beginPath();ctx.arc(sx, sy, 1.4, 0, Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+}
+
+// Main NPC draw call. Called from render() when in camp zone.
+function drawCampNPCs(now){
+  // Campfire first (behind NPCs in z-order but anchored at y=40)
+  drawCampfire(now);
+  // Draw each NPC
+  const nearby = getNearbyCampNpc();
+  CAMP_NPCS.forEach(npc => {
+    if(!isNpcAvailable(npc)) return; // skip drawing locked NPCs
+    const pos = campWorldPos(npc);
+    drawCampNpcFigure(npc, pos, now);
+    // When NOT nearby, show a subtle name label above the NPC so player
+    // can identify everyone at a glance. When nearby, drawCampNpcFigure
+    // handles the richer "name + prompt" UI so we skip the simple label.
+    if(nearby !== npc){
+      const labelY = pos.y - 46;
+      ctx.font = '600 10px Cinzel, serif';
+      ctx.textAlign = 'center';
+      const textW = ctx.measureText(npc.name).width;
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(pos.x - textW/2 - 6, labelY - 10, textW + 12, 14);
+      ctx.fillStyle = npc.color;
+      ctx.globalAlpha = 0.75;
+      ctx.fillText(npc.name, pos.x, labelY);
+      ctx.globalAlpha = 1;
+    }
+  });
+  ctx.textAlign = 'start';
+}
+
+// Handle E keypress for NPC interaction. Called from key handler.
+function handleCampInteraction(){
+  if(!curZone?.isCamp) return false;
+  const npc = getNearbyCampNpc();
+  if(!npc) return false;
+  return executeNpcInteraction(npc);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ZONE NPCs — quest-giver NPCs scattered throughout overworld zones.
+// Rendered when player is in a non-camp, non-dungeon zone. Uses world
+// coords directly (as opposed to camp NPCs which are relative to center).
+// ═══════════════════════════════════════════════════════════════════
+
+// Get all ZONE_NPCS that belong to the current zone.
+function _getActiveZoneNpcs(){
+  if(typeof ZONE_NPCS === 'undefined' || !curZone?.id) return [];
+  return ZONE_NPCS.filter(n => n.zoneId === curZone.id);
+}
+
+// Zone NPCs use absolute world coords (their x/y is already world-anchored).
+function _zoneNpcWorldPos(npc){
+  return { x: npc.x, y: npc.y };
+}
+
+// Returns the zone NPC the player is within interact range of, or null.
+const ZONE_NPC_INTERACT_RADIUS = 80;
+function getNearbyZoneNpc(){
+  if(curZone?.isCamp || dungeonState.active) return null;
+  const npcs = _getActiveZoneNpcs();
+  if(!npcs.length) return null;
+  let closest = null, closestDist = ZONE_NPC_INTERACT_RADIUS;
+  npcs.forEach(npc => {
+    const pos = _zoneNpcWorldPos(npc);
+    const dx = player.x - pos.x, dy = player.y - pos.y;
+    const d = Math.sqrt(dx*dx + dy*dy);
+    if(d < closestDist){ closest = npc; closestDist = d; }
+  });
+  return closest;
+}
+
+// Zone NPC at given world coords (for tap-to-interact).
+function getZoneNpcAtWorld(wx, wy, radius = TAP_INTERACT_RADIUS){
+  if(curZone?.isCamp || dungeonState.active) return null;
+  const npcs = _getActiveZoneNpcs();
+  if(!npcs.length) return null;
+  let closest = null, closestDist = radius;
+  npcs.forEach(npc => {
+    const pos = _zoneNpcWorldPos(npc);
+    const dx = wx - pos.x, dy = wy - pos.y;
+    const d = Math.sqrt(dx*dx + dy*dy);
+    if(d < closestDist){ closest = npc; closestDist = d; }
+  });
+  return closest;
+}
+
+// Draw all zone NPCs for the current zone.
+function drawZoneNPCs(now){
+  const npcs = _getActiveZoneNpcs();
+  if(!npcs.length) return;
+  const nearby = getNearbyZoneNpc();
+  npcs.forEach(npc => {
+    const pos = _zoneNpcWorldPos(npc);
+    // Cull off-screen
+    const halfVW = W/(2*WORLD_ZOOM), halfVH = H/(2*WORLD_ZOOM);
+    if(pos.x < camX - halfVW - 60 || pos.x > camX + halfVW + 60) return;
+    if(pos.y < camY - halfVH - 60 || pos.y > camY + halfVH + 60) return;
+    // Quest indicator — golden "!" above NPC if they have an available quest.
+    // Used to be always shown; now we check via questGiverHasWork().
+    const hasWork = (typeof questGiverHasWork === 'function') ? questGiverHasWork(npc.id) : true;
+    // Draw NPC figure
+    drawCampNpcFigure(npc, pos, now);
+    // Floating "!" / "?" indicator
+    if(hasWork.available > 0 || hasWork.turnIn > 0){
+      const bob = Math.sin(now*0.003 + npc.x*0.01) * 2.5;
+      const markY = pos.y - 55 + bob;
+      const markColor = hasWork.turnIn > 0 ? '#fbbf24' : '#c4b5fd';
+      const markChar = hasWork.turnIn > 0 ? '?' : '!';
+      ctx.save();
+      ctx.shadowColor = markColor;
+      ctx.shadowBlur = 10;
+      ctx.font = 'bold 22px "Cinzel", serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = markColor;
+      ctx.fillText(markChar, pos.x, markY);
+      ctx.restore();
+    }
+    // Name label when not hovering nearby
+    if(nearby !== npc){
+      const labelY = pos.y - 46;
+      ctx.font = '600 10px Cinzel, serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(220,210,240,0.7)';
+      ctx.shadowColor = 'rgba(0,0,0,0.8)';
+      ctx.shadowBlur = 3;
+      ctx.fillText(npc.name, pos.x, labelY);
+      ctx.shadowBlur = 0;
+    } else {
+      // Nearby — show a "Press E / Tap" prompt
+      const labelY = pos.y - 56;
+      ctx.font = '600 11px Cinzel, serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#c4b5fd';
+      ctx.shadowColor = '#8b5cf6';
+      ctx.shadowBlur = 6;
+      ctx.fillText(npc.name, pos.x, labelY);
+      ctx.font = '600 9px Cinzel, serif';
+      ctx.fillStyle = '#fde68a';
+      ctx.fillText('▸ TAP / E TO TALK', pos.x, labelY + 14);
+      ctx.shadowBlur = 0;
+    }
+  });
+  ctx.textAlign = 'start';
+}
+
+// E keypress handler — opens zone NPC dialogue when nearby.
+function handleZoneNpcInteraction(){
+  const npc = getNearbyZoneNpc();
+  if(!npc) return false;
+  if(typeof openZoneNpcDialogue === 'function'){
+    openZoneNpcDialogue(npc);
+    return true;
+  }
+  return false;
+}
+
+// Zone travel overlay — shown when player interacts with Marken.
+// A modal listing each zone with its level requirement and a teleport button.
+function openZoneTravelScreen(){
+  let overlay = document.getElementById('zoneTravelOverlay');
+  if(!overlay){
+    overlay = document.createElement('div');
+    overlay.id = 'zoneTravelOverlay';
+    overlay.className = 'panel';
+    overlay.style.cssText = 'display:flex;flex-direction:column;z-index:450;';
+    document.body.appendChild(overlay);
+  }
+  const zonesHtml = ZONES.map(z => {
+    const locked = player.level < (z.minLv||0);
+    const cls = locked ? 'zt-card zt-locked' : 'zt-card';
+    const btnCls = locked ? 'zt-btn zt-btn-locked' : 'zt-btn';
+    const btnText = locked ? `Requires LV ${z.minLv}` : '► Travel';
+    return `
+      <div class="${cls}" style="border-color:${z.ambColor}55">
+        <div class="zt-tier" style="color:${z.ambColor}">${z.tier}</div>
+        <div class="zt-name">${z.name}</div>
+        <div class="zt-minlv">Minimum level ${z.minLv || 1}</div>
+        <button class="${btnCls}" data-zone="${z.id}" ${locked?'disabled':''}
+                style="${!locked?`color:${z.ambColor};border-color:${z.ambColor}88;`:''}">
+          ${btnText}
+        </button>
+      </div>`;
+  }).join('');
+  overlay.innerHTML = `
+    <div class="panel-header">
+      <h2 style="color:#d4a555">✦ PATHFINDER</h2>
+      <button class="panel-close" onclick="document.getElementById('zoneTravelOverlay').style.display='none'">← BACK</button>
+    </div>
+    <div style="padding:20px;max-width:900px;width:100%;margin:0 auto">
+      <div class="zt-preface">Marken traces a finger across his compass:</div>
+      <div class="zt-flavor">"Where do you need to be?"</div>
+      <div class="zt-grid">${zonesHtml}</div>
+    </div>
+  `;
+  overlay.style.display = 'flex';
+  // Wire up travel buttons
+  overlay.querySelectorAll('.zt-btn:not(.zt-btn-locked)').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const zoneId = btn.getAttribute('data-zone');
+      overlay.style.display = 'none';
+      travelToZone(zoneId);
+    });
+  });
+}
+
+// Auto-zone-transition on level up. With the new camp model, the player
+// chooses their zone explicitly via Marken the Pathfinder, so this function
+// only has work to do when called from a non-camp zone (e.g. after a level-up
+// in the Ashen Wastes, we don't force-move them to Bone Crypts). In practice
+// this is now a near no-op — kept for compat with existing call sites.
+function checkZone(){
+  // Never auto-transition out of camp — player explicitly travels via Marken
+  if(curZone?.isCamp) return;
+  // Respect player's current zone choice. Only auto-upgrade if they're in
+  // a zone whose min-level they've far exceeded AND they've never visited a higher one.
+  // For session 1, no auto-transition at all — let the player return to camp
+  // and pick their next zone deliberately.
+}
+
+// Menu button wrapper — called by the CAMP button in the HUD.
+// No confirm if already in camp (just flash a hint).
+function returnToCamp(){
+  if(curZone?.isCamp){
+    addFeed('You are already at the Procession', '#c4b8dd');
+    return;
+  }
+  travelToCamp();
+}
+
+// Travel from camp to a named zone. Called by Marken's interaction.
+// Sets curZone to the target, regenerates environment, spawns enemies.
+function travelToZone(zoneId){
+  const target = ZONES.find(z => z.id === zoneId);
+  if(!target){ addFeed('Unknown destination','#ef4444'); return; }
+  // Confirm player meets minimum level
+  if(player.level < (target.minLv||0)){
+    addFeed(`Too weak. Need LV ${target.minLv}`, '#ef4444');
+    return;
+  }
+  curZone = target;
+  zoneTransiting = true;
+  SFX.zoneChange();
+  if(typeof switchAmbientZone==='function') switchAmbientZone(target.id);
+  showZTrans(target.name, target.tier, target.ambColor);
+  // Clear world state — no camp-fire lingering into combat zone
+  enemies = [];
+  particles.length = 0;
+  groundFX.length = 0;
+  if(typeof portals !== 'undefined') portals.length = 0;
+  generateEnvironment();
+  // Place player at world center for a clean start in the new zone
+  player.x = WORLD_W/2;
+  player.y = WORLD_H/2;
+  camX = player.x; camY = player.y;
+  const clear = findClearPosition(player.x, player.y, 24);
+  player.x = clear.x; player.y = clear.y;
+  setAfkWaypoint();
+  // Stagger initial spawns
+  for(let i=0;i<8;i++) trackTimeout(()=>spawnEnemy(), i*350);
+  addFeed('★ ZONE: ' + target.name, '#e8b84b');
+  if(typeof writeSave==='function') writeSave();
+  setTimeout(()=>zoneTransiting=false, 2600);
+  // Refresh AFK toggle UI — it shows differently in camp vs combat zones
+  if(typeof updateAfkToggleUI === 'function') updateAfkToggleUI();
+  // Quest system hook — advance reach_zone objectives
+  if(typeof questOnZoneEnter === 'function') questOnZoneEnter(target.id);
+  // Refresh quest HUD — tracker hides in camp, shows in combat
+  if(typeof updateQuestHUDTracker === 'function') updateQuestHUDTracker();
+}
+
+// Travel back to The Procession camp from any zone
+function travelToCamp(){
+  curZone = CAMP_ZONE;
+  zoneTransiting = true;
+  SFX.zoneChange();
+  if(typeof switchAmbientZone==='function') switchAmbientZone('procession');
+  showZTrans(CAMP_ZONE.name, CAMP_ZONE.tier, CAMP_ZONE.ambColor);
+  // Clear world state
+  enemies = [];
+  particles.length = 0;
+  groundFX.length = 0;
+  if(typeof portals !== 'undefined') portals.length = 0;
+  if(typeof bossTarget !== 'undefined') bossTarget = null;
+  if(typeof dungeonState !== 'undefined' && dungeonState) dungeonState.active = false;
+  generateEnvironment();
+  // Place player at the camp's spawn point (south of campfire)
+  player.x = WORLD_W/2 + CAMP_SPAWN_POINT.x;
+  player.y = WORLD_H/2 + CAMP_SPAWN_POINT.y;
+  camX = player.x; camY = player.y;
+  setAfkWaypoint();
+  addFeed('★ ' + CAMP_ZONE.name, CAMP_ZONE.ambColor);
+  if(typeof writeSave==='function') writeSave();
+  setTimeout(()=>zoneTransiting=false, 2600);
+}
+function showZTrans(name,sub,color){
+  const zt=document.getElementById('zoneTransition');
+  const zn=document.getElementById('lvlUpTxt'),zs=document.getElementById('lvlUpUnlock');
+  // Use a dedicated overlay
+  let overlay=document.getElementById('ztOverlay');
+  if(!overlay){overlay=document.createElement('div');overlay.id='ztOverlay';overlay.style.cssText='position:fixed;inset:0;z-index:350;pointer-events:none;opacity:0;transition:opacity 0.6s;background:rgba(0,0,0,0.92);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px';document.body.appendChild(overlay);}
+  overlay.innerHTML='<div style="font-family:Cinzel,serif;font-size:clamp(1.5rem,5vw,2.8rem);font-weight:900;letter-spacing:0.3em;color:'+color+';filter:drop-shadow(0 0 20px '+color+')">'+name+'</div><div style="font-family:Cinzel,serif;font-size:0.7rem;letter-spacing:4px;color:'+color+';opacity:0.6">'+sub+'</div>';
+  overlay.style.opacity='1';setTimeout(()=>{overlay.style.opacity='0';},2400);
+}
+
+// ════════ MINIMAP ═════════════════════════════════════════════════════
+let _mmT=0;
+function updateMinimapZ(){
+  // Minimap disabled — see index.html. Function kept as no-op so any
+  // legacy call sites don't error.
+  return;
+}
+
+// ═══════ SPRITE PRELOAD ═════════════════════════════════════
+// DISABLED — sprite system paused pending future revisit. When ready to
+// re-enable sprites: uncomment the block below and re-enable rendering in
+// drawEnvironment() and buildPropSpatialGrid().
+// loadSprites().then(() => {
+//   console.log(`[sprites] ${spritesLoaded} loaded, ${spritesFailed} failed of ${spritesTotal}`);
+// });
