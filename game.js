@@ -6177,6 +6177,14 @@ function damageMult(){
     const alive=spirits.filter(s=>!s.dead&&!s.isTemp).length;
     mult+=(alive*perSpiritPct)/100;
   }
+  // AOE damage bonus (Veilcraft Searing Eruption)
+  const aoePct = _tb('aoeDmgPct');
+  if(aoePct>0) mult += aoePct/100;
+  // Legion Mode (Binding capstone) — 8+ spirits grants +50% damage
+  if(_tb('legionMode') > 0){
+    const aliveSpirits = spirits.filter(sp => !sp.dead && !sp.isTemp).length;
+    if(aliveSpirits >= 8) mult += 0.50;
+  }
   // Altar damage buff — adds flat multiplier when active
   if(typeof getActiveBuffValue === 'function'){
     mult += getActiveBuffValue('damage');
@@ -6184,9 +6192,36 @@ function damageMult(){
   return mult;
 }
 
+// ═══════ ABILITY CAST CONTEXT ══════════════════════════════════
+// Set to the ability ID currently being cast. Read by hitEnemy so that
+// echo damage modifiers apply universally — including to preset abilities
+// that never explicitly read getAbilityEchoModifiers themselves.
+//
+// Lifecycle: set at top of playerCast, cleared after the ability finishes.
+// Nested calls are safe — hitEnemy just reads whatever's current.
+let _currentCastAbilityId = null;
+
 function playerCast(idx){
   const now=performance.now();
   if(now<abilityCDs[idx]||player.isDead)return;
+  // Set cast context — hitEnemy will apply echo dmgMult to any hits during this window
+  const cls = CLASS_DEFS[player.classId] || CLASS_DEFS.hollowcaller;
+  _currentCastAbilityId = cls.abilities[idx]?.id || null;
+  // Blood Price talent — set flag; first hit after this cast gets bonus dmg
+  if(_tb('bloodPricePct') > 0) player._bloodPriceReady = true;
+  try {
+    _playerCastDispatch(idx, now);
+  } finally {
+    // Clear context AFTER cast finishes. Any follow-up damage triggered
+    // synchronously (explosions, chains, spirit hits) happens within this
+    // window and inherits the echo mods for the cast. Delayed setTimeout
+    // callbacks (Cataclysm chains) fire later; they don't inherit.
+    _currentCastAbilityId = null;
+  }
+}
+
+// Internal dispatcher — split out so try/finally above can wrap cleanly.
+function _playerCastDispatch(idx, now){
   // Route to class-specific ability handler
   if(player.classId==='ironwake'){
     // ═══ PRESET OVERRIDES (Ironwake) ═══
@@ -6198,21 +6233,24 @@ function playerCast(idx){
     return castIronwake(idx, now);
   }
   // ═══ PRESET OVERRIDES (Hollowcaller) ═══
-  // Check if a preset override should handle this ability instead of default.
-  // Each preset is gated by wearing 4+ pieces of its set. The function
-  // returns true if it handled the ability, false to fall through to default.
   if(typeof castHollowcallerPresetOverride === 'function'){
     if(castHollowcallerPresetOverride(idx, now)) return;
   }
   // Default: Hollowcaller (existing behavior)
+  castHollowcallerBase(idx, now);
+}
+
+function castHollowcallerBase(idx, now){
   if(idx===0){
     // Raise — summon one spirit, or two with Echoing Call talent
     // Echoes can further multiply the count, shorten cooldown, tint visuals.
     const mods = (typeof getAbilityEchoModifiers === 'function')
       ? getAbilityEchoModifiers('raise') : null;
     const doubles=_tb('raiseDoubles')>0;
-    // Base count is 1 (or 2 if talent), modified by echo countMult
+    const plusOne=_tb('raisePlusOne')>0;
+    // Base count is 1 (or 2 if talent), +1 if Greater Summoning, × echo countMult
     let summonCount = doubles ? 2 : 1;
+    if(plusOne) summonCount += 1;
     if(mods && mods.countMult > 1.0){
       summonCount = Math.round(summonCount * mods.countMult);
     }
@@ -6251,7 +6289,7 @@ function playerCast(idx){
       // Base stack is 1, echoes can add more via appliesVeilmark
       const stacksToApply = 1 + (mods?.appliesVeilmark || 0);
       t.veilmarkStacks=Math.min(t.veilmarkStacks + stacksToApply, vmMax);
-      t.veilmarkExpiry=now+8000;
+      t.veilmarkExpiry=now+8000+_tb("veilmarkDurationMs");
       const cd = effectiveCD(1) * (mods?.cdrMult || 1);
       abilityCDs[1]=now+cd;
       SFX.veilmark();
@@ -6267,11 +6305,14 @@ function playerCast(idx){
     const t=getNearestMarkedEnemy();
     if(t&&t.veilmarkStacks>=3){
       const detoDmgMult=1+_tb('detoDmgPct')/100;
-      // Echo dmgMult stacks multiplicatively on top of talent bonus
-      const echoDmg = mods?.dmgMult || 1.0;
+      // Echo dmgMult is now applied universally in hitEnemy via _currentCastAbilityId
       const echoRadius = mods?.radiusMult || 1.0;
-      const radius=(240+_tb('detoRadius')) * echoRadius;
-      const dmg=player.attack*2*t.veilmarkStacks*damageMult()*detoDmgMult*echoDmg;
+      // Final Eruption capstone — triple radius, half damage (zone-clear style)
+      const finalEruption = _tb('finalEruption') > 0;
+      const fr = finalEruption ? 3.0 : 1.0;
+      const fd = finalEruption ? 0.5 : 1.0;
+      const radius=(240+_tb('detoRadius')) * echoRadius * fr;
+      const dmg=player.attack*2*t.veilmarkStacks*damageMult()*detoDmgMult*fd;
       let hits=0;
       const markedForChain = []; // collect other marked enemies for chain-detonate
       enemies.forEach(e=>{
@@ -6330,8 +6371,11 @@ function playerCast(idx){
         });
         addFeed(`  ↳ CATACLYSM — chained ${markedForChain.length}`, '#fbbf24');
       }
-      // Cataclysm talent: 30% chance to echo the detonation
-      if(_tb('detoEcho')>0&&Math.random()<0.3){
+      // Cataclysm talent: 30% chance base, + Endless Harvest stacks additively
+      const baseEchoChance = _tb('detoEcho') > 0 ? 0.3 : 0;
+      const extraEchoChance = _tb('detoEchoChance') / 100;
+      const totalEchoChance = baseEchoChance + extraEchoChance;
+      if(totalEchoChance > 0 && Math.random() < totalEchoChance){
         setTimeout(()=>{
           let hits2=0;
           enemies.forEach(e=>{if(!e.dead&&dist2(t.x,t.y,e.x,e.y)<radius){hitEnemy(e,dmg*0.7,false,t.x,t.y);hits2++;}});
@@ -6344,10 +6388,10 @@ function playerCast(idx){
     // Wrath Tide — AOE around player that also applies Veilmark
     const mods = (typeof getAbilityEchoModifiers === 'function')
       ? getAbilityEchoModifiers('wrath') : null;
-    const echoDmg = mods?.dmgMult || 1.0;
+    // Echo dmgMult applied in hitEnemy universally
     const echoRadius = mods?.radiusMult || 1.0;
     const radius=(340+_tb('wrathRadius')) * echoRadius;
-    const dmg=player.attack*1.6*damageMult()*echoDmg;
+    const dmg=player.attack*1.6*damageMult();
     let hits=0;
     const vmMax=10+_tb('veilmarkMax');
     // Base 1 stack applied, echo appliesVeilmark can add more
@@ -6356,7 +6400,7 @@ function playerCast(idx){
       if(!e.dead&&dist2(player.x,player.y,e.x,e.y)<radius){
         hitEnemy(e,dmg,false,player.x,player.y);
         e.veilmarkStacks=Math.min(e.veilmarkStacks+stacksApplied,vmMax);
-        e.veilmarkExpiry=now+8000;
+        e.veilmarkExpiry=now+8000+_tb("veilmarkDurationMs");
         hits++;
       }
     });
@@ -6372,10 +6416,10 @@ function playerCast(idx){
     // Soul Nova — Hollowcaller ultimate AOE
     const mods = (typeof getAbilityEchoModifiers === 'function')
       ? getAbilityEchoModifiers('nova') : null;
-    const echoDmg = mods?.dmgMult || 1.0;
+    // Echo dmgMult applied in hitEnemy universally
     const echoRadius = mods?.radiusMult || 1.0;
     const radius = 460 * echoRadius;
-    const dmg=player.attack*3.2*damageMult()*echoDmg;
+    const dmg=player.attack*3.2*damageMult();
     let hits=0;
     enemies.forEach(e=>{
       if(!e.dead&&dist2(player.x,player.y,e.x,e.y)<radius){
@@ -6406,14 +6450,14 @@ function castIronwake(idx, now){
   const abilityId = ironwakeIds[idx];
   const mods = (typeof getAbilityEchoModifiers === 'function')
     ? getAbilityEchoModifiers(abilityId) : null;
-  const echoDmg = mods?.dmgMult || 1.0;
+  // echoDmg is now applied universally in hitEnemy via _currentCastAbilityId
   const echoRadius = mods?.radiusMult || 1.0;
   const echoCdr = mods?.cdrMult || 1.0;
 
   if(idx===0){
     // Anchor Strike — 180° cleave in facing direction, short range, high damage
     const range = 120 * echoRadius;
-    const dmg = player.attack * 1.8 * damageMult() * echoDmg;
+    const dmg = player.attack * 1.8 * damageMult();
     const dir = player.facing || 0;
     let hits = 0;
     enemies.forEach(e=>{
@@ -6462,7 +6506,7 @@ function castIronwake(idx, now){
   else if(idx===2){
     // Ground Shatter — AoE stun + heavy damage
     const radius = 280 * echoRadius;
-    const dmg = player.attack * 2.2 * damageMult() * echoDmg;
+    const dmg = player.attack * 2.2 * damageMult();
     let hits = 0;
     enemies.forEach(e=>{
       if(e.dead) return;
@@ -6513,7 +6557,7 @@ function castIronwake(idx, now){
   else if(idx===4){
     // Ironwake's Fury — charge 400px forward in facing direction, hit all in path
     const charge = 400 * echoRadius;
-    const dmg = player.attack * 3.5 * damageMult() * echoDmg;
+    const dmg = player.attack * 3.5 * damageMult();
     const dir = player.facing || 0;
     const startX = player.x, startY = player.y;
     const endX = player.x + Math.cos(dir)*charge;
@@ -6572,14 +6616,41 @@ function hitEnemy(e,dmg,isCrit=false,fromX,fromY){
     return;
   }
   const now = performance.now();
+  // ─── UNIVERSAL ECHO DAMAGE HOOK ───────────────────────────────
+  // If a cast is in progress (set by playerCast), apply its echo dmgMult
+  // to every hit. This makes echoes affect preset abilities without
+  // requiring changes to every preset ability body.
+  if(_currentCastAbilityId && typeof getAbilityEchoModifiers === 'function'){
+    const castMods = getAbilityEchoModifiers(_currentCastAbilityId);
+    if(castMods && castMods.dmgMult && castMods.dmgMult !== 1.0){
+      dmg *= castMods.dmgMult;
+    }
+  }
   // ─── IRONWAKE PRESET DAMAGE BUFFS ─────────────────────────────
   // Juggernaut — Momentum stacks give +5% per stack (max 20 = +100%)
   if(player.momentumStacks && player.momentumStacks > 0){
     dmg *= (1 + player.momentumStacks * 0.05);
   }
-  // Bloodforged — Bloodrush active damage multiplier
-  if(player.bloodrushUntil && now < player.bloodrushUntil){
-    dmg *= (player.bloodrushDmgMult || 2.0);
+  // Blood Price — first hit after cast deals bonus damage.
+  // Flag is set by playerCast; consumed here on first hitEnemy.
+  if(player._bloodPriceReady && _tb('bloodPricePct') > 0){
+    player._bloodPriceReady = false;
+    const pct = _tb('bloodPricePct');
+    dmg *= (1 + pct/100);
+    // Small HP sacrifice — 3% of current
+    const cost = Math.floor(player.hp * 0.03);
+    if(cost > 0) player.hp = Math.max(1, player.hp - cost);
+  }
+  // Ruinous Strike — every Nth hit deals +100% damage
+  // Savage Joy talent lowers N from 5 → 3.
+  if(_tb('ruinousStrike') > 0){
+    player._ruinousCount = (player._ruinousCount || 0) + 1;
+    const every = _tb('ruinousStrikeEvery') || 5;
+    if(player._ruinousCount >= every){
+      player._ruinousCount = 0;
+      dmg *= 2.0;
+      spawnDmgText(e.x, e.y - e.size - 12, 'RUIN', '#ef4444', true);
+    }
   }
   // ─── IRONWAKE TALENT TREE BONUSES ─────────────────────────────
   // Warborn Iron Edge — melee damage (Ironwake only)
@@ -6599,7 +6670,13 @@ function hitEnemy(e,dmg,isCrit=false,fromX,fromY){
   }
   const buffCrit = typeof getActiveBuffValue === 'function' ? getActiveBuffValue('crit') : 0;
   const gearCrit = typeof getGearBonus === 'function' ? getGearBonus('crit') : 0;
-  const critChance=0.12+_tb('critPct')/100 + buffCrit + gearCrit/100;
+  // Bonus crit chance vs wounded enemies (Warborn Executioner's Resolve)
+  let lowHpCritBonus = 0;
+  const lowHpCritPct = _tb('lowHpCritPct');
+  if(lowHpCritPct > 0 && e.hp < e.maxHp * 0.5){
+    lowHpCritBonus = lowHpCritPct / 100;
+  }
+  const critChance=0.12+_tb('critPct')/100 + buffCrit + gearCrit/100 + lowHpCritBonus;
   let critRoll = Math.random() < critChance;
   // ─── Reaver-Saint Bloodvow: force crit + extra lifesteal on empowered hits ───
   let bloodvowBonus = 0;
@@ -6611,7 +6688,15 @@ function hitEnemy(e,dmg,isCrit=false,fromX,fromY){
       bloodvowBonus = bv.healPct; // bonus lifesteal % for this hit only
     }
   }
-  let finalDmg = critRoll ? dmg * 2.2 : dmg;
+  // Crit damage multiplier — base 2.2x, plus talent critDmgPct bonus
+  const critDmgBonus = _tb('critDmgPct');
+  const critMult = 2.2 + critDmgBonus/100;
+  let finalDmg = critRoll ? dmg * critMult : dmg;
+  // Veilmark vulnerability talent — marked enemies take bonus damage per stack
+  const vulnPct = _tb('veilmarkVulnPct');
+  if(vulnPct > 0 && e.veilmarkStacks > 0){
+    finalDmg *= (1 + (vulnPct * e.veilmarkStacks) / 100);
+  }
   // ─── UNBOUND (Bloodforged Ult) — execute enemies below threshold ───
   if(player.unboundUntil && now < player.unboundUntil && !e.isBoss){
     const hpPctAfter = (e.hp - finalDmg) / e.maxHp;
@@ -6690,6 +6775,19 @@ function killEnemy(e){
       const pick = onCooldown[Math.floor(Math.random() * onCooldown.length)];
       abilityCDs[pick] = now;
       addFeed(`⚔ WARBRINGER — ${['Q','W','E','R','ULT'][pick]} refreshed`, '#f59e0b');
+    }
+  }
+  // Warborn capstone — anyKillRefreshChance — any kill has % chance
+  const anyRefreshPct = _tb('anyKillRefreshChance');
+  if(anyRefreshPct > 0 && Math.random() * 100 < anyRefreshPct){
+    const now = performance.now();
+    const onCD = [];
+    for(let i = 0; i < abilityCDs.length; i++){
+      if(abilityCDs[i] > now) onCD.push(i);
+    }
+    if(onCD.length > 0){
+      const pick = onCD[Math.floor(Math.random() * onCD.length)];
+      abilityCDs[pick] = now;
     }
   }
   // ─── XP REWARD via the new band-rate / activity-multiplier / delta system ───
@@ -7025,7 +7123,7 @@ function showLevelUp(){
   setTimeout(()=>b.style.display='none',2600);
   addFeed(`✦ LEVEL ${player.level} ✦`,'#c084fc');
 }
-function respawn(){player.hp=player.maxHp;player.isDead=false;player.iframes=3000;player.x=WORLD_W/2;player.y=WORLD_H/2;const _rc=findClearPosition(player.x,player.y,22);player.x=_rc.x;player.y=_rc.y;enemies=[];spirits=[];player._cheatDeathUsed=false;document.getElementById('deathScreen').style.display='none';addFeed('RISEN FROM THE VEIL','#9DC4B0');}
+function respawn(){player.hp=player.maxHp;player.isDead=false;player.iframes=3000;player.x=WORLD_W/2;player.y=WORLD_H/2;const _rc=findClearPosition(player.x,player.y,22);player.x=_rc.x;player.y=_rc.y;enemies=[];spirits=[];player._cheatDeathUsed=false;player._cheatDeathUses=0;document.getElementById('deathScreen').style.display='none';addFeed('RISEN FROM THE VEIL','#9DC4B0');}
 
 // ═══════ UPDATE ═════════════════════════════════════════
 function update(dt,now){
@@ -7254,7 +7352,18 @@ function update(dt,now){
         const sdx=ne2.x-s.x,sdy=ne2.y-s.y,sd=Math.sqrt(sdx*sdx+sdy*sdy)||1;
         s.x+=sdx/sd*260*dt*_speedMult;s.y+=sdy/sd*260*dt*_speedMult;
         const atkInterval2 = _inBanner ? 800 : 950;
-        if(now-s.lastAttack>atkInterval2&&sd<70){s.lastAttack=now;s.attackCount++;hitEnemy(ne2,player.attack*1.15*(1+_tb('spiritDmgPct')/100)*_bannerDmgMult);}
+        if(now-s.lastAttack>atkInterval2&&sd<70){
+          s.lastAttack=now;s.attackCount++;
+          const spiritDmg = player.attack*1.15*(1+_tb('spiritDmgPct')/100)*_bannerDmgMult;
+          hitEnemy(ne2, spiritDmg);
+          // Sanguine Pact — spirits heal you for % of their damage dealt
+          const spiritLsPct = _tb('spiritLifestealPct');
+          if(spiritLsPct > 0 && !player.isDead){
+            const heal = Math.floor(spiritDmg * spiritLsPct / 100);
+            const actual = Math.min(heal, player.maxHp - player.hp);
+            if(actual > 0) player.hp += actual;
+          }
+        }
       } else {
         s.orbitAngle+=dt*2.4*_speedMult;
         const tx=player.x+Math.cos(s.orbitAngle)*or,ty=player.y+Math.sin(s.orbitAngle)*or;
@@ -7302,10 +7411,30 @@ function update(dt,now){
         // Apply damage reduction talent + gear 'res' stat (both capped together at 80%)
         const dmgReducePct=_tb('dmgReducePct');
         const gearRes = typeof getGearBonus === 'function' ? getGearBonus('res') : 0;
-        let incomingDmg=e.attack*(1-Math.min(dmgReducePct+gearRes,80)/100);
+        // Procession of the Dead — each living permanent spirit grants DR
+        const perSpiritDr = _tb('perSpiritDrPct');
+        let spiritDr = 0;
+        if(perSpiritDr > 0){
+          const aliveSpirits = spirits.filter(sp => !sp.dead && !sp.isTemp).length;
+          spiritDr = aliveSpirits * perSpiritDr;
+        }
+        // Legion Mode — if 8+ spirits alive, bonus 25% DR on top
+        let legionBonus = 0;
+        if(_tb('legionMode') > 0){
+          const aliveSpirits = spirits.filter(sp => !sp.dead && !sp.isTemp).length;
+          if(aliveSpirits >= 8) legionBonus = 25;
+        }
+        let incomingDmg=e.attack*(1-Math.min(dmgReducePct+gearRes+spiritDr+legionBonus,80)/100);
         // ─── IRONCLAD STEELFALL — chance to fully block ───
         const blockPct = _tb('blockChance');
         if(blockPct > 0 && Math.random()*100 < blockPct){
+          // Riposte talent — reflect % of the blocked damage back to attacker
+          const reflectPct = _tb('blockReflectPct');
+          if(reflectPct > 0 && !e.dead){
+            const reflect = incomingDmg * (reflectPct / 100);
+            hitEnemy(e, reflect, false, player.x, player.y);
+            spawnDmgText(e.x, e.y - e.size, 'RIPOSTE', '#60a5fa', true);
+          }
           incomingDmg = 0;
           spawnDmgText(player.x, player.y-20, 'BLOCK', '#60a5fa', true);
         }
@@ -7345,6 +7474,24 @@ function update(dt,now){
           incomingDmg *= (player.bloodrushTakenMult || 1.5);
         }
         player.hp-=incomingDmg;
+        // Crimson Ascendance talent — triggers when HP drops below 20%.
+        // Resets all ability CDs and grants a 4s guaranteed-crit window.
+        // Crimson Sovereign capstone doubles the number of triggers per fight.
+        if(_tb('crimsonAscendance') > 0 && player.hp > 0 && player.hp < player.maxHp * 0.20){
+          const maxTriggers = _tb('crimsonAscendanceCount') || 1;
+          const usedThisFight = player._crimsonAscendanceUses || 0;
+          if(usedThisFight < maxTriggers){
+            player._crimsonAscendanceUses = usedThisFight + 1;
+            // Reset all cooldowns
+            for(let i = 0; i < abilityCDs.length; i++) abilityCDs[i] = now;
+            // Guarantee crits for 4s
+            player.crimsonAscendanceUntil = now + 4000;
+            addFeed('★ CRIMSON ASCENDANCE — CDs reset, guaranteed crits', '#ef4444');
+            pushGroundFX({type:'ring',x:player.x,y:player.y,maxR:300,r:25,color:'#ef4444',life:1.0,maxLife:1.0,expand:true});
+            pushGroundFX({type:'bloom',x:player.x,y:player.y,r:220,maxR:220,color:'#7f1d1d',life:0.7,maxLife:0.7});
+            screenShake(18, 500);
+          }
+        }
         // Ironwake Wrath generation — hits build wrath. Bulwark doubles rate.
         if(player.classId==='ironwake'){
           const wrathGain = (player.bulwarkUntil && now < player.bulwarkUntil) ? 20 : 10;
@@ -7362,12 +7509,28 @@ function update(dt,now){
             pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:200, r:20, color:'#ef4444', life:1.0, maxLife:1.0, expand:true});
             pushGroundFX({type:'bloom', x:player.x, y:player.y, r:150, maxR:150, color:'#7f1d1d', life:0.8, maxLife:0.8});
           }
-          // Everlasting talent: first fatal hit per life is reduced to 1 HP
-          else if(_tb('cheatDeath')>0&&!player._cheatDeathUsed){
-            player._cheatDeathUsed=true;
-            player.hp=1;
-            addFeed('✦ EVERLASTING','#fff4a0');
-            pushGroundFX({type:'ring',x:player.x,y:player.y,maxR:120,r:10,color:'#fff4a0',life:0.8,maxLife:0.8,expand:true});
+          // Everlasting talent: cheat death triggers N times per life.
+          // Deep talents (The Still Heart / Immortal / Crimson Sovereign) extend
+          // both the number of triggers and the heal amount.
+          else if(_tb('cheatDeath')>0){
+            const cheatMax = Math.max(1, _tb('cheatDeathCount') || 1);
+            const cheatUsed = player._cheatDeathUses || 0;
+            if(cheatUsed < cheatMax){
+              player._cheatDeathUses = cheatUsed + 1;
+              player._cheatDeathUsed = true; // legacy flag kept for compat
+              const healPct = _tb('cheatDeathHealPct');
+              player.hp = healPct > 0
+                ? Math.floor(player.maxHp * (healPct / 100))
+                : 1;
+              addFeed('✦ EVERLASTING','#fff4a0');
+              pushGroundFX({type:'ring',x:player.x,y:player.y,maxR:120,r:10,color:'#fff4a0',life:0.8,maxLife:0.8,expand:true});
+            } else {
+              player.hp=0;player.isDead=true;
+              document.getElementById('deathStats').textContent=`${kills} slain · Level ${player.level}`;
+              document.getElementById('deathScreen').style.display='flex';
+              if(typeof writeSave==='function')writeSave();
+              if(dungeonState.active)exitDungeon(false);
+            }
           } else {
             player.hp=0;player.isDead=true;
             document.getElementById('deathStats').textContent=`${kills} slain · Level ${player.level}`;
@@ -8045,7 +8208,7 @@ function stopGame(){
     player.bulwarkUntil=0;
     player.retributionUntil=0;
     player.furyChargeUntil=0;
-    player._cheatDeathUsed=false;
+    player._cheatDeathUsed=false;player._cheatDeathUses=0;
     player.afkTimer=0;
   }
 }
@@ -8101,7 +8264,7 @@ function startGame(continueFromSave=false){
   if(!continueFromSave){
     // Full reset to level 1 baseline
     player.level=1;player.xp=0;player.xpToNext=xpForLevel(1);player.gold=0;
-    player.soulMastery=0;player._cheatDeathUsed=false;
+    player.soulMastery=0;player._cheatDeathUsed=false;player._cheatDeathUses=0;
     kills=0;
     // Wipe equipped gear
     Object.keys(equipped).forEach(k=>{equipped[k]=null;});
