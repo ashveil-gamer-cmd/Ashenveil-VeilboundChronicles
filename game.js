@@ -251,6 +251,30 @@ function drawAbilityIcons(){
       x.fillStyle='#9DC4B0';
       x.beginPath();x.arc(CX-3.5,CY-3,0.8,0,Math.PI*2);x.fill();
       x.beginPath();x.arc(CX+3.5,CY-3,0.8,0,Math.PI*2);x.fill();
+      // ═══ ARCHETYPE CYCLE INDICATOR ═══
+      // Shows which archetype will summon on the NEXT press. Colored gem in
+      // the top-right corner pulses slightly so the player sees the "next" cue.
+      if(typeof SPIRIT_ARCHETYPES !== 'undefined' && typeof player !== 'undefined'){
+        const cycleOrder = ['wailer','reaver','warden'];
+        const idx = (typeof player._raiseCycleIdx === 'number') ? player._raiseCycleIdx : 0;
+        const nextArch = cycleOrder[idx];
+        const archColor = SPIRIT_ARCHETYPES[nextArch]?.color || '#9DC4B0';
+        // Frame
+        x.shadowColor = archColor;
+        x.shadowBlur = 6;
+        x.fillStyle = archColor;
+        x.beginPath();
+        x.arc(S - 8, 8, 4, 0, Math.PI*2);
+        x.fill();
+        // Inner sparkle
+        x.shadowBlur = 0;
+        x.fillStyle = '#ffffff';
+        x.globalAlpha = 0.7;
+        x.beginPath();
+        x.arc(S - 9, 7, 1.2, 0, Math.PI*2);
+        x.fill();
+        x.globalAlpha = 1;
+      }
     },
 
     // ═══ W: VEILMARK — occult targeting sigil ═══
@@ -5050,6 +5074,24 @@ function drawSpirit(s,t){
   ctx.fillStyle='#fff';
   ctx.beginPath();ctx.arc(s.x-2.5*sizeMult,s.y-7*sizeMult,1.1*sizeMult,0,Math.PI*2);ctx.fill();
   ctx.beginPath();ctx.arc(s.x+2.5*sizeMult,s.y-7*sizeMult,1.1*sizeMult,0,Math.PI*2);ctx.fill();
+  // ═══ RANK PIPS ═══
+  // Spirit rank is 1-3. Rank 1 = no pips. Rank 2/3 show gold dots above head.
+  const rank = s.rank || 1;
+  if(rank > 1){
+    ctx.shadowColor = '#fbbf24';
+    ctx.shadowBlur = 6;
+    ctx.fillStyle = '#fbbf24';
+    const pipY = s.y - 18 * sizeMult;
+    const pipSpacing = 3.5;
+    const totalWidth = (rank - 1) * pipSpacing;
+    for(let p = 0; p < rank - 1; p++){
+      const px = s.x - totalWidth/2 + p * pipSpacing;
+      ctx.beginPath();
+      ctx.arc(px, pipY, 1.6, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.shadowBlur = 0;
+  }
   ctx.restore();
 }
 
@@ -6594,12 +6636,13 @@ function _rollSpiritArchetype(){
   return 'wailer';
 }
 
-function spawnSpirit(isTemp=false){
+function spawnSpirit(isTemp=false, archetypeOverride=null){
   const perms=spirits.filter(s=>!s.isTemp&&!s.dead);
   if(!isTemp&&perms.length>=(player.maxBonds||MAX_SPIRITS))return false;
   const a=Math.random()*Math.PI*2;
-  // Roll archetype for this spirit — determines visual + combat role
-  let archetype = _rollSpiritArchetype();
+  // Roll archetype for this spirit — determines visual + combat role.
+  // If an override is passed (from Raise's archetype cycle), use it directly.
+  let archetype = archetypeOverride || _rollSpiritArchetype();
   // ═════ UNIQUE EFFECT: The Pale Choir ═════
   // Every 3rd spirit summoned is forced to be a Nexus (the rare golden one).
   // Counter persists across session but not across character — fine for idle.
@@ -6622,6 +6665,8 @@ function spawnSpirit(isTemp=false){
     attackCount: 0,
     wobble: Math.random() * Math.PI*2,
     empoweredUntil: 0,
+    // Rank — promoted via Raise when at spirit cap. 1-3.
+    rank: 1,
     // Archetype fields
     archetype,
     archColor: arch.color,
@@ -6635,6 +6680,46 @@ function spawnSpirit(isTemp=false){
   // Feed announce rare archetypes so player feels the RNG moment
   if(arch.rare && typeof addFeed === 'function'){
     addFeed(`✦ A ${arch.name.toUpperCase()} ANSWERS THE CALL`, arch.color);
+  }
+  return true;
+}
+
+// Promote an existing spirit to the next rank. Rank 1 → 2 → 3, then caps.
+// Each rank boosts damage multiplier, size, and the archetype's signature stat
+// (Warden DR aura, for example). Visual distinction provided by rank overlay
+// in drawSpirit.
+function promoteSpirit(sp){
+  if(!sp || sp.dead) return false;
+  const curRank = sp.rank || 1;
+  if(curRank >= 3) return false;
+  sp.rank = curRank + 1;
+  // Boost damage + size based on new rank. Rank 1 = 1.0x, Rank 2 = 1.5x, Rank 3 = 2.0x.
+  const rankMult = 1.0 + (sp.rank - 1) * 0.5;
+  // Apply relative to the base archetype stats, not the current inflated values —
+  // so repeated promotes scale consistently.
+  const archDef = SPIRIT_ARCHETYPES[sp.archetype] || SPIRIT_ARCHETYPES.wailer;
+  sp.archSizeMult = archDef.sizeMult * (1 + (sp.rank - 1) * 0.12);        // size nudges up
+  sp.archDmgMult = archDef.dmgMult * rankMult;                            // damage scales hard
+  // Archetype-specific promotion bonuses
+  if(sp.archetype === 'warden'){
+    sp.archDrAura = (archDef.drAura || 0) + (sp.rank - 1) * 2;            // rank 3 warden = 7% DR
+  } else if(sp.archetype === 'nexus'){
+    sp.archReach = (archDef.attackReach || 100) + (sp.rank - 1) * 20;     // rank 3 nexus reaches further
+  } else if(sp.archetype === 'wailer'){
+    sp.archReach = (archDef.attackReach || 110) + (sp.rank - 1) * 15;
+  }
+  // Promotion visual
+  if(typeof pushGroundFX === 'function'){
+    pushGroundFX({
+      type:'ring', x:sp.x, y:sp.y,
+      maxR:70, r:14, color:'#fbbf24',
+      life:0.7, maxLife:0.7, expand:true,
+    });
+    pushGroundFX({
+      type:'bloom', x:sp.x, y:sp.y,
+      r:40, maxR:40, color:'#fbbf24',
+      life:0.5, maxLife:0.5,
+    });
   }
   return true;
 }
@@ -6943,31 +7028,84 @@ function _playerCastDispatch(idx, now){
 
 function castHollowcallerBase(idx, now){
   if(idx===0){
-    // Raise — summon one spirit, or two with Echoing Call talent
-    // Echoes can further multiply the count, shorten cooldown, tint visuals.
+    // ═══════════════════════════════════════════════════════════════
+    // RAISE — decision-heavy ability (reworked)
+    //
+    // Each press cycles the chosen archetype (Wailer → Reaver → Warden)
+    // and either SPAWNS a new spirit of that archetype OR, if the player is
+    // at their spirit cap, PROMOTES a random existing spirit of that
+    // archetype up a rank (1 → 2 → 3). Promotion multiplies damage, size,
+    // and the archetype's signature effect.
+    //
+    // Choice becomes real: "I have 3 Wailers at rank 1. Do I press Raise
+    // to add another? No — at cap, it promotes one to rank 2 instead.
+    // Should I switch to Reaver cycle to grow my melee line? Warden for
+    // the DR aura at rank 3?"
+    // ═══════════════════════════════════════════════════════════════
     const mods = (typeof getAbilityEchoModifiers === 'function')
       ? getAbilityEchoModifiers('raise') : null;
     const doubles=_tb('raiseDoubles')>0;
     const plusOne=_tb('raisePlusOne')>0;
-    // Base count is 1 (or 2 if talent), +1 if Greater Summoning, × echo countMult
     let summonCount = doubles ? 2 : 1;
     if(plusOne) summonCount += 1;
     if(mods && mods.countMult > 1.0){
       summonCount = Math.round(summonCount * mods.countMult);
     }
-    let anySummoned = false;
-    for(let s = 0; s < summonCount; s++){
-      if(spawnSpirit()) anySummoned = true;
+    // Cycle archetype selector. Initialized in init; persists.
+    const cycleOrder = ['wailer','reaver','warden'];
+    if(typeof player._raiseCycleIdx !== 'number') player._raiseCycleIdx = 0;
+    const chosenArch = cycleOrder[player._raiseCycleIdx];
+    player._raiseCycleIdx = (player._raiseCycleIdx + 1) % cycleOrder.length;
+    // Re-render the Q icon so the cycle indicator updates immediately
+    if(typeof drawAbilityIcons === 'function') drawAbilityIcons();
+    // Check cap
+    const perms = spirits.filter(s => !s.isTemp && !s.dead);
+    const cap = player.maxBonds || MAX_SPIRITS;
+    const atCap = perms.length >= cap;
+    let actionTaken = false;
+    let promotedCount = 0;
+    let spawnedCount = 0;
+    if(atCap){
+      // PROMOTE — find a spirit of the chosen archetype and rank it up.
+      // Prefer lowest-rank spirit of the chosen archetype; if none of that
+      // archetype exists, promote any lowest-rank spirit instead.
+      for(let s = 0; s < summonCount; s++){
+        const candidates = perms
+          .filter(sp => !sp.dead && (sp.rank || 1) < 3);
+        if(candidates.length === 0) break;
+        // Prioritize matching archetype, then lowest rank
+        const typed = candidates.filter(sp => sp.archetype === chosenArch);
+        const pool = typed.length > 0 ? typed : candidates;
+        pool.sort((a,b) => (a.rank || 1) - (b.rank || 1));
+        const target = pool[0];
+        promoteSpirit(target);
+        promotedCount++;
+        actionTaken = true;
+      }
+    } else {
+      // SPAWN — new spirits of the chosen archetype
+      for(let s = 0; s < summonCount; s++){
+        if(spawnSpirit(false, chosenArch)){
+          spawnedCount++;
+          actionTaken = true;
+        }
+      }
     }
-    if(anySummoned){
-      // Echo-modified cooldown
+    if(actionTaken){
       const cd = effectiveCD(0) * (mods?.cdrMult || 1);
-      abilityCDs[0]=now+cd;
+      abilityCDs[0] = now + cd;
       SFX.spiritSummon();
-      // Echo-modified visual tint
-      const tint = mods?.elementTint || '#9DC4B0';
-      addFeed(summonCount > 1 ? `✦×${summonCount} SPIRITS RAISED` : '✦ SPIRIT RAISED', tint);
-      emitSpiritBurst(player.x,player.y);
+      const archName = SPIRIT_ARCHETYPES[chosenArch]?.name || chosenArch;
+      const archColor = SPIRIT_ARCHETYPES[chosenArch]?.color || '#9DC4B0';
+      const tint = mods?.elementTint || archColor;
+      if(promotedCount > 0){
+        addFeed(`✦ ${archName} PROMOTED${promotedCount>1?' ×'+promotedCount:''}`, '#fbbf24');
+      } else {
+        addFeed(summonCount > 1
+          ? `✦×${spawnedCount} ${archName.toUpperCase()}S RAISED`
+          : `✦ ${archName.toUpperCase()} RAISED`, tint);
+      }
+      emitSpiritBurst(player.x, player.y);
       pushGroundFX({type:'ring',x:player.x,y:player.y,maxR:110,r:10,color:tint,life:0.55,maxLife:0.55,expand:true});
       pushGroundFX({type:'scorch',x:player.x,y:player.y,r:90,maxR:90,color:tint,life:0.9,maxLife:0.9});
       // Bound Chord resonance — empower spirits for a duration
@@ -6978,6 +7116,9 @@ function castHollowcallerBase(idx, now){
           sp._echoEmpowerPct = mods.spiritEmpowerPct || 50;
         });
       }
+    } else if(atCap){
+      // All spirits already at rank 3 — tell the player
+      addFeed('All spirits at max rank', '#9ca3af');
     }
   } else if(idx===1){
     // Veilmark — apply stacks to nearest enemy (up to 950u range)
@@ -9262,6 +9403,9 @@ function buildSave(){
       afkEnabled: !!player.afkEnabled,
       // Alchemy potion stacks — { 'recipe_t<tier>': count }
       potions: player.potions ? JSON.parse(JSON.stringify(player.potions)) : {},
+      // Raise archetype cycle position — persists so the cycle indicator
+      // reflects last state after reload
+      _raiseCycleIdx: player._raiseCycleIdx || 0,
     },
     stats:{kills},
     zoneId:curZone?.id||1,
@@ -9468,6 +9612,8 @@ function applySave(data){
   player.potions = (data.player?.potions && typeof data.player.potions === 'object')
     ? JSON.parse(JSON.stringify(data.player.potions))
     : {};
+  // Raise archetype cycle position
+  player._raiseCycleIdx = typeof data.player?._raiseCycleIdx === 'number' ? data.player._raiseCycleIdx : 0;
   // Test gear state — can be true | 'removed' | false. Preserve string.
   const rawTestFlag = data.player?._testSetsGranted;
   player._testSetsGranted = (rawTestFlag === 'removed') ? 'removed' : !!rawTestFlag;
