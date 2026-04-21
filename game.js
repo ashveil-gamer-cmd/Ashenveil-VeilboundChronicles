@@ -6751,6 +6751,15 @@ function damageMult(){
   if(typeof getActiveBuffValue === 'function'){
     mult += getActiveBuffValue('damage');
   }
+  // Alchemy Fury Draught — active damage buff from consumed potion
+  const now = performance.now();
+  if(player._alchemyDmgBuff){
+    if(now < player._alchemyDmgBuff.expiresAt){
+      mult += player._alchemyDmgBuff.pct / 100;
+    } else {
+      player._alchemyDmgBuff = null;
+    }
+  }
   return mult;
 }
 
@@ -8147,12 +8156,22 @@ function update(dt,now){
   const levelSpdBonus = (typeof playerSpeedBonus === 'function')
     ? playerSpeedBonus(player.level)
     : 1.0;
+  // Alchemy Swiftness Draught — active speed buff from consumed potion
+  let alchemySpeedBonus = 1.0;
+  if(player._alchemySpeedBuff){
+    const nowMove = performance.now();
+    if(nowMove < player._alchemySpeedBuff.expiresAt){
+      alchemySpeedBonus = 1.0 + player._alchemySpeedBuff.pct / 100;
+    } else {
+      player._alchemySpeedBuff = null;
+    }
+  }
 
   if(ix!==0||iy!==0){
     const m=Math.sqrt(ix*ix+iy*iy)||1;
     const buffSpd = typeof getActiveBuffValue === 'function' ? getActiveBuffValue('speed') : 0;
     const gearMoveSpd = typeof getGearBonus === 'function' ? getGearBonus('moveSpdPct') : 0;
-    const spdMult=(1+(_tb('moveSpdPct')+gearMoveSpd)/100) * classSpdMult * levelSpdBonus * (1 + buffSpd);
+    const spdMult=(1+(_tb('moveSpdPct')+gearMoveSpd)/100) * classSpdMult * levelSpdBonus * alchemySpeedBonus * (1 + buffSpd);
     player.vx=(ix/m)*PLAYER_SPEED*spdMult;player.vy=(iy/m)*PLAYER_SPEED*spdMult;
     player.facing=Math.atan2(iy,ix);
     // Player touched keys — cancel any pending quest auto-walk
@@ -8355,7 +8374,7 @@ function update(dt,now){
     }
     const buffSpdAfk = typeof getActiveBuffValue === 'function' ? getActiveBuffValue('speed') : 0;
     const gearMoveSpdAfk = typeof getGearBonus === 'function' ? getGearBonus('moveSpdPct') : 0;
-    const spdMult=(1+(_tb('moveSpdPct')+gearMoveSpdAfk)/100) * classSpdMult * levelSpdBonus * (1 + buffSpdAfk);
+    const spdMult=(1+(_tb('moveSpdPct')+gearMoveSpdAfk)/100) * classSpdMult * levelSpdBonus * alchemySpeedBonus * (1 + buffSpdAfk);
     // Speed depends on state:
     //  engage   — slow to let attacks / spirits catch up (0.55x)
     //  reposition — fast escape (1.0x)
@@ -8746,7 +8765,16 @@ function update(dt,now){
           const sdx = sp.x - player.x, sdy = sp.y - player.y;
           if(sdx*sdx + sdy*sdy < 200*200) wardenAura += sp.archDrAura;
         });
-        let incomingDmg=e.attack*(1-Math.min(dmgReducePct+gearRes+spiritDr+legionBonus+wardenAura,80)/100);
+        // Alchemy Aegis Draught — active DR buff from consumed potion
+        let alchemyDr = 0;
+        if(player._alchemyDrBuff){
+          if(now < player._alchemyDrBuff.expiresAt){
+            alchemyDr = player._alchemyDrBuff.pct;
+          } else {
+            player._alchemyDrBuff = null;
+          }
+        }
+        let incomingDmg=e.attack*(1-Math.min(dmgReducePct+gearRes+spiritDr+legionBonus+wardenAura+alchemyDr,80)/100);
         // ═════ UNIQUE EFFECT: Amulet of the Hollowed Name ═════
         // Hits below the 10%-max-HP threshold are absorbed entirely.
         // Huge vs chip damage, negligible vs real threats.
