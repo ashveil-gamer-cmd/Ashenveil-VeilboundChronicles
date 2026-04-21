@@ -8998,7 +8998,9 @@ function update(dt,now){
     }
   } else if(inCamp && player._questNavTarget && typeof CAMP_NPCS !== 'undefined'){
     // ═══ CAMP AUTO-WALK (quest navigation) ═══
-    // Walk toward the target NPC. On arrival, fire their interaction handler.
+    // Walks toward the target NPC. Handles prop obstacles by nudging
+    // perpendicular when stuck. Larger arrival radius prevents "almost
+    // there forever" failures when an NPC has props nearby.
     const npc = CAMP_NPCS.find(n => n.id === player._questNavTarget);
     if(!npc){
       player._questNavTarget = null;
@@ -9006,11 +9008,10 @@ function update(dt,now){
       const npcX = WORLD_W/2 + (npc.x||0);
       const npcY = WORLD_H/2 + (npc.y||0);
       const dx = npcX - player.x, dy = npcY - player.y;
-      const d = Math.sqrt(dx*dx + dy*dy);
-      if(d < 60){
+      const d = Math.sqrt(dx*dx + dy*dy) || 1;
+      if(d < 75){                                   // was 60 — more forgiving
         // Arrived — fire interaction
         player.vx = 0; player.vy = 0;
-        const savedTarget = player._questNavTarget;
         player._questNavTarget = null;
         if(typeof executeNpcInteraction === 'function') executeNpcInteraction(npc);
         else if(typeof addFeed === 'function') addFeed(`Reached ${npc.name}`, '#c4b5fd');
@@ -9018,25 +9019,33 @@ function update(dt,now){
         const gearMoveSpd2 = typeof getGearBonus === 'function' ? getGearBonus('moveSpdPct') : 0;
         const spdMult2 = (1+(_tb('moveSpdPct')+gearMoveSpd2)/100) * classSpdMult * levelSpdBonus;
         const spd = PLAYER_SPEED * 0.8 * spdMult2;
-        player.vx = (dx/d) * spd;
-        player.vy = (dy/d) * spd;
-        player.facing = Math.atan2(dy, dx);
+        // Smoothed velocity — same blend as manual/AFK movement
+        const targetVX = (dx/d) * spd;
+        const targetVY = (dy/d) * spd;
+        player.vx = player.vx + (targetVX - player.vx) * 0.35;
+        player.vy = player.vy + (targetVY - player.vy) * 0.35;
+        // Smoothed facing
+        const targetFacing = Math.atan2(dy, dx);
+        if(typeof player.facing !== 'number' || !isFinite(player.facing)){
+          player.facing = targetFacing;
+        } else {
+          let delta = targetFacing - player.facing;
+          while(delta > Math.PI) delta -= Math.PI * 2;
+          while(delta < -Math.PI) delta += Math.PI * 2;
+          player.facing += delta * 0.5;
+        }
       }
     }
   } else if(!inCamp && player._questNavTarget && player._questNavTargetIsZone && typeof ZONE_NPCS !== 'undefined'){
     // ═══ ZONE NPC AUTO-WALK ═══
-    // Walk toward a zone quest-giver NPC in the current zone. Open their
-    // dialogue on arrival. Cancels if player touches movement input.
     const znpc = ZONE_NPCS.find(n => n.id === player._questNavTarget);
     if(!znpc || znpc.zoneId !== curZone?.id){
-      // Wrong zone or NPC unknown — clear
       player._questNavTarget = null;
       player._questNavTargetIsZone = false;
     } else {
       const dx = znpc.x - player.x, dy = znpc.y - player.y;
-      const d = Math.sqrt(dx*dx + dy*dy);
-      if(d < 60){
-        // Arrived — open their dialogue
+      const d = Math.sqrt(dx*dx + dy*dy) || 1;
+      if(d < 75){                                   // was 60
         player.vx = 0; player.vy = 0;
         player._questNavTarget = null;
         player._questNavTargetIsZone = false;
@@ -9046,9 +9055,19 @@ function update(dt,now){
         const gearMoveSpd2 = typeof getGearBonus === 'function' ? getGearBonus('moveSpdPct') : 0;
         const spdMult2 = (1+(_tb('moveSpdPct')+gearMoveSpd2)/100) * classSpdMult * levelSpdBonus;
         const spd = PLAYER_SPEED * 0.8 * spdMult2;
-        player.vx = (dx/d) * spd;
-        player.vy = (dy/d) * spd;
-        player.facing = Math.atan2(dy, dx);
+        const targetVX = (dx/d) * spd;
+        const targetVY = (dy/d) * spd;
+        player.vx = player.vx + (targetVX - player.vx) * 0.35;
+        player.vy = player.vy + (targetVY - player.vy) * 0.35;
+        const targetFacing = Math.atan2(dy, dx);
+        if(typeof player.facing !== 'number' || !isFinite(player.facing)){
+          player.facing = targetFacing;
+        } else {
+          let delta = targetFacing - player.facing;
+          while(delta > Math.PI) delta -= Math.PI * 2;
+          while(delta < -Math.PI) delta += Math.PI * 2;
+          player.facing += delta * 0.5;
+        }
       }
     }
   } else if(isAfk){
@@ -9255,27 +9274,25 @@ function update(dt,now){
   const oldX = player.x, oldY = player.y;
   player.x=resolved.x;
   player.y=resolved.y;
-  // ═════ AFK STUCK DETECTOR ═════
-  // If player is trying to move (vx/vy non-zero) but actually moving near-zero
-  // (blocked by a prop) for 1.0s straight, pick a new waypoint AND nudge the
-  // player a few units perpendicular to the collision so they unstick.
-  // Previous bug: used `now` which wasn't in scope (silently NaN), never fired.
-  if(player.afkEnabled){
+  // ═════ STUCK DETECTOR (AFK + QUEST AUTO-WALK) ═════
+  // If the character is trying to move but actually making near-zero progress
+  // for 1.0s straight, nudge perpendicular to unstick. Fires in AFK mode,
+  // during quest auto-walk, or when any system is driving velocity toward a
+  // waypoint. Manual keyboard/touch input doesn't need this — the player
+  // can steer around obstacles themselves.
+  const isAutoDriving = player.afkEnabled || player.afkMove || !!player._questNavTarget;
+  if(isAutoDriving){
     const nowStuck = performance.now();
     const tryingToMove = Math.abs(player.vx) > 10 || Math.abs(player.vy) > 10;
     const actualMove = Math.sqrt((player.x-oldX)**2 + (player.y-oldY)**2);
     if(tryingToMove && actualMove < 0.5){
       if(!player._afkStuckSince) player._afkStuckSince = nowStuck;
       if(nowStuck - player._afkStuckSince > 1000){
-        // Unstuck response: (1) try a perpendicular nudge to escape the prop,
-        // (2) if still stuck next cycle, pick a new waypoint. Perpendicular
-        // direction is chosen randomly to avoid oscillating between same
-        // left/right unstick attempts.
+        // Try a perpendicular nudge to escape whatever prop we're pinned on.
         const speed = Math.max(1, Math.sqrt(player.vx*player.vx + player.vy*player.vy));
         const perpSign = Math.random() < 0.5 ? 1 : -1;
         const nudgeX = (-player.vy / speed) * 25 * perpSign;
         const nudgeY = ( player.vx / speed) * 25 * perpSign;
-        // Attempt the nudge only if the new position is clear
         const tryX = player.x + nudgeX;
         const tryY = player.y + nudgeY;
         if(typeof getPropCollisionAt !== 'function' || !getPropCollisionAt(tryX, tryY, 18)){
@@ -9283,7 +9300,10 @@ function update(dt,now){
           player.y = Math.max(30, Math.min(WORLD_H-30, tryY));
         }
         player._afkStuckSince = 0;
-        if(typeof setAfkWaypoint === 'function') setAfkWaypoint();
+        // Only reset AFK waypoint; quest nav has its own target
+        if(!player._questNavTarget && typeof setAfkWaypoint === 'function'){
+          setAfkWaypoint();
+        }
       }
     } else {
       player._afkStuckSince = 0;
