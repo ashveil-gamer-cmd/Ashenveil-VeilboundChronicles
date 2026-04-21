@@ -491,12 +491,41 @@ function salvageFromBag(invIndex){
 // Credits materials to professions. All 3 professions share the same material
 // pool so this just adds to all of them — each profession has its own copy of
 // each material (no single shared pool) because save/load treats them per-prof.
+// Classify materials by which profession uses them. Added materials go
+// ONLY to the relevant profession pool instead of every profession.
+const _MATERIAL_OWNER = {
+  // Smithing materials (old system)
+  scrap: ['Weaponsmith','Armorer','Ritualist'],
+  etherDust: ['Weaponsmith','Armorer','Ritualist'],
+  runecore: ['Weaponsmith','Armorer','Ritualist'],
+  soulbond: ['Weaponsmith','Armorer','Ritualist'],
+  // Alchemy materials
+  ashroot: ['Alchemy'],
+  chippedBone: ['Alchemy'],
+  veilsilk: ['Alchemy'],
+  blackbone: ['Alchemy'],
+  mythbone: ['Alchemy'],
+  ashenheart: ['Alchemy'],
+};
+
 function creditMaterial(material, qty){
   if(typeof professions==='undefined')return;
-  Object.values(professions).forEach(p=>{
-    if(!p.materials)p.materials={};
-    p.materials[material] = (p.materials[material]||0) + qty;
-  });
+  // Target only the professions that actually use this material
+  const owners = _MATERIAL_OWNER[material];
+  if(owners){
+    owners.forEach(name => {
+      const p = professions[name];
+      if(!p) return;
+      if(!p.materials) p.materials = {};
+      p.materials[material] = (p.materials[material] || 0) + qty;
+    });
+  } else {
+    // Unknown material — fall back to old behavior for forward-compat
+    Object.values(professions).forEach(p=>{
+      if(!p.materials)p.materials={};
+      p.materials[material] = (p.materials[material]||0) + qty;
+    });
+  }
 }
 
 function recalcStats(){
@@ -1044,6 +1073,10 @@ function craftAlchemyPotion(recipeId){
   }
   // XP gain scales with tier (harder recipes give more)
   addProfXP('Alchemy', 5 + tier * 3);
+  // Quest hook — advance craft_potion objectives
+  if(typeof questOnPotionCrafted === 'function'){
+    questOnPotionCrafted(recipeId);
+  }
   if(typeof writeSave === 'function') writeSave();
   return true;
 }
@@ -1334,6 +1367,10 @@ function harvestNode(node, now){
   // Grant Alchemy XP
   if(typeof addProfXP === 'function'){
     addProfXP('Alchemy', node.nodeData.harvestXp || 3);
+  }
+  // Quest hook — advance gather_material objectives
+  if(typeof questOnMaterialGathered === 'function'){
+    questOnMaterialGathered(node.type, node.nodeData.quantity || 1);
   }
   // Feed message
   if(typeof addFeed === 'function'){
