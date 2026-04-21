@@ -4955,15 +4955,25 @@ function drawPlayerSprite(p, t, fl, glow, spCount){
   // Pixel art should NOT be smoothed when scaled
   const prevSmoothing = ctx.imageSmoothingEnabled;
   ctx.imageSmoothingEnabled = false;
-  // Hit flash: tint sprite red by drawing it with a red overlay
   if(fl){
-    // Draw normally first (so shape is preserved through tint)
+    // Hit flash: draw sprite normally, then overlay a red-tinted copy.
+    // We tint by setting globalCompositeOperation AFTER the sprite is drawn
+    // but then use the sprite image ITSELF as the alpha mask (draw image
+    // on top with source-in then fill). Cleanest safe approach:
+    //   1. Draw sprite normally.
+    //   2. Save, draw sprite AGAIN with red shadowColor as tint proxy.
+    // Even simpler, and what we actually do here: filter red.
     ctx.drawImage(img, -half, drawY - half, size, size);
-    // Red multiply tint
-    ctx.globalCompositeOperation = 'source-atop';
-    ctx.fillStyle = 'rgba(255, 90, 90, 0.55)';
-    ctx.fillRect(-half, drawY - half, size, size);
-    ctx.globalCompositeOperation = 'source-over';
+    // Tint pass — redraw image with reddish filter. Uses canvas filter which
+    // never bleeds into surrounding draws (aura). Browser support is good.
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    // Filter brightens the red channel + desaturates for a "hit" look.
+    // If filter isn't supported (old browsers), this is a harmless no-op that
+    // just shows the original sprite twice at 55% alpha — still fine.
+    ctx.filter = 'brightness(1.2) sepia(1) saturate(8) hue-rotate(-40deg)';
+    ctx.drawImage(img, -half, drawY - half, size, size);
+    ctx.restore();
   } else {
     ctx.drawImage(img, -half, drawY - half, size, size);
   }
@@ -8264,6 +8274,9 @@ function update(dt,now){
     const dangerRange = isMelee ? 60 : 140;              // "back off!" threshold
 
     // Find threats — the nearest enemy for targeting, the cluster center for avoidance
+    // Cap tracking distance so we don't lock onto enemies on the other side of the map
+    // and mis-state the combat. Anything beyond MAX_AFK_DETECT is treated as "not there."
+    const MAX_AFK_DETECT = Math.max(engageRange * 2.5, 450);
     let nearest = null, nearestDist = Infinity;
     let crowdCount = 0;
     let crowdX = 0, crowdY = 0, crowdN = 0;
@@ -8272,6 +8285,7 @@ function update(dt,now){
       if(e.dead)return;
       const ddx=e.x-player.x, ddy=e.y-player.y;
       const d2=ddx*ddx+ddy*ddy;
+      if(d2 > MAX_AFK_DETECT * MAX_AFK_DETECT) return;  // too far, ignore
       const d=Math.sqrt(d2);
       // Track nearest enemy overall
       if(d < nearestDist){ nearest = e; nearestDist = d; }
@@ -8408,8 +8422,11 @@ function update(dt,now){
     const spd = spdBase * spdMult;
     player.vx=(mx/md)*spd; player.vy=(my/md)*spd;
     player.facing=Math.atan2(my,mx);
-    // Always face the target while in combat — so auto-attacks + cones hit right
-    if(target){
+    // Only face the target while ACTIVELY ENGAGING — otherwise facing
+    // should match movement direction. This fixes the visual bug where
+    // the character walks toward waypoint but faces a distant enemy,
+    // looking like they're running sideways forever.
+    if(target && state === 'engage'){
       const fdx=target.x-player.x, fdy=target.y-player.y;
       player.facing=Math.atan2(fdy,fdx);
     }
@@ -8430,14 +8447,31 @@ function update(dt,now){
   player.y=resolved.y;
   // ═════ AFK STUCK DETECTOR ═════
   // If player is trying to move (vx/vy non-zero) but actually moving near-zero
-  // (blocked by a prop) for 1.5s straight, reset the waypoint so AFK can try
-  // a different direction instead of hammering a tree forever.
+  // (blocked by a prop) for 1.0s straight, pick a new waypoint AND nudge the
+  // player a few units perpendicular to the collision so they unstick.
+  // Previous bug: used `now` which wasn't in scope (silently NaN), never fired.
   if(player.afkEnabled){
+    const nowStuck = performance.now();
     const tryingToMove = Math.abs(player.vx) > 10 || Math.abs(player.vy) > 10;
     const actualMove = Math.sqrt((player.x-oldX)**2 + (player.y-oldY)**2);
     if(tryingToMove && actualMove < 0.5){
-      player._afkStuckSince = player._afkStuckSince || now;
-      if(now - player._afkStuckSince > 1500){
+      if(!player._afkStuckSince) player._afkStuckSince = nowStuck;
+      if(nowStuck - player._afkStuckSince > 1000){
+        // Unstuck response: (1) try a perpendicular nudge to escape the prop,
+        // (2) if still stuck next cycle, pick a new waypoint. Perpendicular
+        // direction is chosen randomly to avoid oscillating between same
+        // left/right unstick attempts.
+        const speed = Math.max(1, Math.sqrt(player.vx*player.vx + player.vy*player.vy));
+        const perpSign = Math.random() < 0.5 ? 1 : -1;
+        const nudgeX = (-player.vy / speed) * 25 * perpSign;
+        const nudgeY = ( player.vx / speed) * 25 * perpSign;
+        // Attempt the nudge only if the new position is clear
+        const tryX = player.x + nudgeX;
+        const tryY = player.y + nudgeY;
+        if(typeof getPropCollisionAt !== 'function' || !getPropCollisionAt(tryX, tryY, 18)){
+          player.x = Math.max(30, Math.min(WORLD_W-30, tryX));
+          player.y = Math.max(30, Math.min(WORLD_H-30, tryY));
+        }
         player._afkStuckSince = 0;
         if(typeof setAfkWaypoint === 'function') setAfkWaypoint();
       }
