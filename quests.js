@@ -1026,10 +1026,31 @@ function navigateToActiveQuest(){
   const obj = pinned.objective;
 
   // ═══ READY TO TURN IN ═══
-  // Go to camp, set AFK autowalk destination to the quest giver.
+  // Route to whichever NPC gave the quest — camp NPC or zone NPC.
   if(isReady){
     if(typeof addFeed === 'function'){
       addFeed(`✦ Ready to turn in: ${pinned.title}`, '#22c55e');
+    }
+    // Check if the giver is a zone NPC
+    const zoneNpc = (typeof ZONE_NPCS !== 'undefined')
+      ? ZONE_NPCS.find(n => n.id === pinned.giver)
+      : null;
+    if(zoneNpc){
+      // Zone NPC path — travel to their zone, then auto-walk to their position
+      if(typeof addFeed === 'function'){
+        addFeed(`  ↳ Heading to ${zoneNpc.name}...`, '#c4b5fd');
+      }
+      if(curZone?.id !== zoneNpc.zoneId){
+        // Travel to the NPC's zone first
+        if(typeof travelToZone === 'function') travelToZone(zoneNpc.zoneId);
+      }
+      // Queue auto-walk to the zone NPC — handled in game.js
+      player._questNavTarget = pinned.giver;
+      player._questNavTargetIsZone = true;
+      return;
+    }
+    // Camp NPC path — travel to camp and walk to them
+    if(typeof addFeed === 'function'){
       addFeed('  ↳ Returning to camp...', '#9DC4B0');
     }
     _navTravelToCamp();
@@ -1265,14 +1286,24 @@ function _renderProcessionEntry(q, kind){
   // Action
   const actions = document.createElement('div');
   actions.className = 'quest-card-actions';
+  // Helper: re-render whichever dialogue is currently visible (procession OR zone NPC)
+  const _refreshActiveDialogue = () => {
+    const procPanel = document.getElementById('processionDialogue');
+    const znpcPanel = document.getElementById('zoneNpcDialogue');
+    if(procPanel && procPanel.style.display === 'block'){
+      renderProcessionDialogue();
+    } else if(znpcPanel && znpcPanel.style.display === 'block'){
+      renderZoneNpcDialogue();
+    }
+    updateQuestHUDTracker();
+  };
   if(kind === 'turn_in'){
     const btn = document.createElement('button');
     btn.className = 'quest-action-btn quest-action-turn-in';
     btn.textContent = '★ TURN IN';
     btn.addEventListener('click', ()=>{
       if(turnInQuest(q.id)){
-        renderProcessionDialogue();
-        updateQuestHUDTracker();
+        _refreshActiveDialogue();
       }
     });
     actions.appendChild(btn);
@@ -1282,8 +1313,7 @@ function _renderProcessionEntry(q, kind){
     btn.textContent = '✦ ACCEPT';
     btn.addEventListener('click', ()=>{
       if(acceptQuest(q.id)){
-        renderProcessionDialogue();
-        updateQuestHUDTracker();
+        _refreshActiveDialogue();
       }
     });
     actions.appendChild(btn);
