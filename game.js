@@ -7238,7 +7238,6 @@ function castHollowcallerBase(idx, now){
     const t=getNearestEnemy(950);
     if(t){
       const vmMax=10+_tb('veilmarkMax');
-      // Base stack is 1, echoes can add more via appliesVeilmark
       const stacksToApply = 1 + (mods?.appliesVeilmark || 0);
       t.veilmarkStacks=Math.min(t.veilmarkStacks + stacksToApply, vmMax);
       t.veilmarkExpiry=now+8000+_tb("veilmarkDurationMs");
@@ -7247,7 +7246,36 @@ function castHollowcallerBase(idx, now){
       SFX.veilmark();
       const tint = mods?.elementTint || '#f43f5e';
       addFeed(`VEILMARK ×${t.veilmarkStacks}`, tint);
-      pushGroundFX({type:'bloom',x:t.x,y:t.y,r:80,maxR:80,color:tint,life:0.35,maxLife:0.35});
+      // ═══ VEILMARK VFX — reach-out beam + impact pulse ═══
+      // Purple beam from player to target (as line ground FX)
+      pushGroundFX({
+        type:'line',
+        x:player.x, y:player.y,
+        endX:t.x, endY:t.y,
+        width:14,
+        color:tint,
+        life:0.25, maxLife:0.25,
+      });
+      // Particle trail along the beam
+      const bdx = t.x - player.x, bdy = t.y - player.y;
+      for(let k = 0; k < 8; k++){
+        const tProg = k / 8;
+        particles.push({
+          x: player.x + bdx * tProg,
+          y: player.y + bdy * tProg,
+          vx: (Math.random()-0.5) * 80,
+          vy: (Math.random()-0.5) * 80,
+          life: 0.3 + Math.random()*0.15, maxLife: 0.45,
+          color: tint,
+          size: 2 + Math.random()*2,
+        });
+      }
+      // Impact — ring + bloom at target
+      pushGroundFX({type:'ring', x:t.x, y:t.y, maxR:100, r:20, color:tint, life:0.4, maxLife:0.4, expand:true});
+      pushGroundFX({type:'bloom', x:t.x, y:t.y, r:90, maxR:90, color:tint, life:0.45, maxLife:0.45});
+      // Cast aura at player
+      pushGroundFX({type:'castAura', x:player.x, y:player.y, r:20, maxR:70, color:tint, life:0.4, maxLife:0.4});
+      screenShake(6, 120);
     }
   } else if(idx===2){
     // Detonate — AOE around a marked enemy
@@ -7281,12 +7309,44 @@ function castHollowcallerBase(idx, now){
       const cd = effectiveCD(2) * (mods?.cdrMult || 1);
       abilityCDs[2]=now+cd;
       SFX.detonate();
-      screenShake(14,320);
+      screenShake(22, 450);                                     // was 14/320
       const tint = mods?.elementTint || '#ff6b35';
-      emitExplosion(t.x,t.y,tint);
-      pushGroundFX({type:'ring',x:t.x,y:t.y,maxR:radius,r:20,color:tint,life:0.5,maxLife:0.5,expand:true});
-      pushGroundFX({type:'scorch',x:t.x,y:t.y,r:radius-40,maxR:radius-40,color:tint,life:1.8,maxLife:1.8});
-      pushGroundFX({type:'bloom',x:t.x,y:t.y,r:radius-60,maxR:radius-60,color:'#fff4a0',life:0.25,maxLife:0.25});
+      // ═══ DETONATE VFX — layered explosion ═══
+      // Outer shockwave ring (fast expand)
+      pushGroundFX({type:'ring', x:t.x, y:t.y, maxR:radius*1.15, r:30, color:tint, life:0.55, maxLife:0.55, expand:true});
+      // Inner fire ring (slower, thicker)
+      pushGroundFX({type:'ring', x:t.x, y:t.y, maxR:radius*0.75, r:15, color:'#ffdd55', life:0.4, maxLife:0.4, expand:true});
+      // White-hot core flash
+      pushGroundFX({type:'bloom', x:t.x, y:t.y, r:radius*0.55, maxR:radius*0.55, color:'#fff8cc', life:0.18, maxLife:0.18});
+      // Main bloom (tinted)
+      pushGroundFX({type:'bloom', x:t.x, y:t.y, r:radius*0.85, maxR:radius*0.85, color:tint, life:0.5, maxLife:0.5});
+      // Lingering scorch mark
+      pushGroundFX({type:'scorch', x:t.x, y:t.y, r:radius*0.8, maxR:radius*0.8, color:tint, life:2.4, maxLife:2.4});
+      // Radial explosion particles (larger + more than emitExplosion)
+      emitExplosion(t.x, t.y, tint);
+      for(let k = 0; k < 18; k++){
+        const a = (k/18) * Math.PI * 2;
+        const s = 280 + Math.random() * 140;
+        particles.push({
+          x:t.x, y:t.y,
+          vx:Math.cos(a)*s, vy:Math.sin(a)*s,
+          life:0.55, maxLife:0.55,
+          color:k%2===0 ? '#ffdd55' : tint,
+          size:3 + Math.random()*4,
+        });
+      }
+      // Smoke/ash particles — drifting upward
+      for(let k = 0; k < 10; k++){
+        const a = -Math.PI/2 + (Math.random()-0.5) * 0.8;
+        particles.push({
+          x:t.x + (Math.random()-0.5)*radius*0.4,
+          y:t.y,
+          vx:Math.cos(a)*40, vy:Math.sin(a)*80,
+          life:0.85, maxLife:0.85,
+          color:'rgba(60,30,20,0.6)',
+          size:5 + Math.random()*4,
+        });
+      }
       // Lingering Wound echo — leaves a damaging zone
       if(mods?.leavesPool){
         // Use existing worldCaches/scorch pattern — emit scorch + queue pool damage
@@ -7369,8 +7429,31 @@ function castHollowcallerBase(idx, now){
     SFX.wrathTide();
     emitWave(player.x,player.y);
     const tint = mods?.elementTint || '#a855f7';
-    pushGroundFX({type:'ring',x:player.x,y:player.y,maxR:radius,r:20,color:tint,life:0.6,maxLife:0.6,expand:true});
-    pushGroundFX({type:'scorch',x:player.x,y:player.y,r:radius-20,maxR:radius-20,color:tint,life:1.5,maxLife:1.5});
+    // ═══ WRATH TIDE VFX — purple electric expansion ═══
+    // Double expanding ring (one fast, one slower)
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:radius*1.1, r:30, color:'#e0aaff', life:0.45, maxLife:0.45, expand:true});
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:radius, r:20, color:tint, life:0.7, maxLife:0.7, expand:true});
+    // Central bloom
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:180, maxR:180, color:tint, life:0.4, maxLife:0.4});
+    // Lingering scorch
+    pushGroundFX({type:'scorch', x:player.x, y:player.y, r:radius*0.85, maxR:radius*0.85, color:tint, life:1.7, maxLife:1.7});
+    // Crackling veilmark sparks at each hit enemy
+    enemies.forEach(e=>{
+      if(e.dead) return;
+      if(dist2(player.x,player.y,e.x,e.y) >= radius) return;
+      pushGroundFX({type:'ring', x:e.x, y:e.y, maxR:50, r:8, color:tint, life:0.35, maxLife:0.35, expand:true});
+      for(let k = 0; k < 4; k++){
+        const a = Math.random() * Math.PI * 2;
+        particles.push({
+          x:e.x, y:e.y,
+          vx:Math.cos(a)*100, vy:Math.sin(a)*100,
+          life:0.3, maxLife:0.3,
+          color:tint,
+          size:2 + Math.random()*2,
+        });
+      }
+    });
+    screenShake(10, 220);
     addFeed(`⚡ WRATH TIDE — ${hits} MARKED`, tint);
   } else if(idx===4){
     // Soul Nova — Hollowcaller ultimate AOE
@@ -7390,11 +7473,60 @@ function castHollowcallerBase(idx, now){
     const cd = effectiveCD(4) * (mods?.cdrMult || 1);
     abilityCDs[4]=now+cd;
     if(SFX.eliteDeath)SFX.eliteDeath();
-    screenShake(20,500);
+    screenShake(32, 700);                                        // was 20/500
     const tint = mods?.elementTint || '#fbbf24';
-    pushGroundFX({type:'bloom',x:player.x,y:player.y,r:300,maxR:300,color:tint,life:0.5,maxLife:0.5});
-    pushGroundFX({type:'ring',x:player.x,y:player.y,maxR:radius,r:30,color:tint,life:0.8,maxLife:0.8,expand:true});
-    pushGroundFX({type:'scorch',x:player.x,y:player.y,r:radius-20,maxR:radius-20,color:tint,life:2.2,maxLife:2.2});
+    // ═══ SOUL NOVA VFX — ultimate, maximum drama ═══
+    // Three concentric shockwave rings with different speeds
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:radius*1.2, r:40, color:'#fff8cc', life:0.5, maxLife:0.5, expand:true});
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:radius, r:30, color:tint, life:0.75, maxLife:0.75, expand:true});
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:radius*0.7, r:20, color:'#fff4a0', life:0.5, maxLife:0.5, expand:true});
+    // White-hot core flash
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:260, maxR:260, color:'#ffffff', life:0.22, maxLife:0.22});
+    // Large tinted bloom
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:380, maxR:380, color:tint, life:0.6, maxLife:0.6});
+    // Lingering scorch
+    pushGroundFX({type:'scorch', x:player.x, y:player.y, r:radius*0.75, maxR:radius*0.75, color:tint, life:2.8, maxLife:2.8});
+    // Orbiting soul particles — spawn on the edge of the initial ring, drift outward
+    for(let k = 0; k < 24; k++){
+      const a = (k/24) * Math.PI * 2;
+      const s = 360 + Math.random() * 180;
+      particles.push({
+        x:player.x, y:player.y,
+        vx:Math.cos(a)*s, vy:Math.sin(a)*s,
+        life:0.9, maxLife:0.9,
+        color:k%3===0 ? '#ffffff' : tint,
+        size:4 + Math.random()*4,
+        soul:true,                        // flag for bigger glow
+      });
+    }
+    // Vertical shaft of light — "soul rising" feel (just a bloom stacked tall)
+    for(let y = 0; y < 6; y++){
+      pushGroundFX({
+        type:'bloom',
+        x:player.x, y:player.y - y * 24,
+        r:60 - y*6, maxR:60 - y*6,
+        color:tint,
+        life:0.45 + y*0.08, maxLife:0.45 + y*0.08,
+      });
+    }
+    // Secondary radial burst 150ms later — "aftershock"
+    setTimeout(() => {
+      if(player.isDead) return;
+      pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:radius*0.85, r:15, color:tint, life:0.45, maxLife:0.45, expand:true});
+      for(let k = 0; k < 12; k++){
+        const a = (k/12) * Math.PI * 2 + Math.random()*0.3;
+        const s = 200 + Math.random() * 100;
+        particles.push({
+          x:player.x, y:player.y,
+          vx:Math.cos(a)*s, vy:Math.sin(a)*s,
+          life:0.6, maxLife:0.6,
+          color:tint,
+          size:3 + Math.random()*3,
+          soul:true,
+        });
+      }
+      screenShake(16, 280);
+    }, 180);
     addFeed(`★ SOUL NOVA — ${hits} STRUCK · ${Math.round(dmg)}`, tint);
   }
 }
@@ -7459,9 +7591,54 @@ function castIronwake(idx, now){
       }
     }
     const tint = mods?.elementTint || '#ef4444';
-    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:range, r:30, color:tint, life:0.4, maxLife:0.4, expand:true});
-    pushGroundFX({type:'bloom', x:player.x+Math.cos(dir)*60, y:player.y+Math.sin(dir)*60, r:90*echoRadius, maxR:90*echoRadius, color:tint, life:0.35, maxLife:0.35});
-    screenShake(8, 180);
+    // ═══ ANCHOR STRIKE VFX — cleaving 180° sword sweep ═══
+    // The swingArc is already emitted by auto-attack code; this adds ability-tier impact.
+    // Main ability swing arc — wider, more dramatic than auto-attack
+    pushGroundFX({
+      type:'swingArc', x:player.x, y:player.y,
+      r:range * 0.9, facing:dir,
+      color:tint, life:0.32, maxLife:0.32,
+    });
+    // Shockwave ring in cleave arc direction
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:range, r:25, color:tint, life:0.4, maxLife:0.4, expand:true});
+    // Impact bloom at arc mid-point
+    pushGroundFX({type:'bloom', x:player.x+Math.cos(dir)*60, y:player.y+Math.sin(dir)*60, r:110*echoRadius, maxR:110*echoRadius, color:tint, life:0.4, maxLife:0.4});
+    // Dust plume at player feet (from stomp)
+    for(let k = 0; k < 8; k++){
+      const pa = dir + (Math.random()-0.5) * Math.PI;        // fans to sides
+      const s = 60 + Math.random() * 80;
+      particles.push({
+        x:player.x, y:player.y + 6,
+        vx:Math.cos(pa)*s, vy:Math.sin(pa)*s - 30,
+        life:0.55, maxLife:0.55,
+        color:'rgba(120,95,65,0.6)',
+        size:4 + Math.random()*3,
+      });
+    }
+    // Sparks at each enemy struck — shows where the blade actually connected
+    enemies.forEach(e=>{
+      if(e.dead)return;
+      const dx = e.x - player.x, dy = e.y - player.y;
+      const d = Math.sqrt(dx*dx + dy*dy);
+      if(d > range) return;
+      const ang = Math.atan2(dy, dx);
+      let diff = ang - dir;
+      while(diff > Math.PI) diff -= Math.PI*2;
+      while(diff < -Math.PI) diff += Math.PI*2;
+      if(Math.abs(diff) > Math.PI/2) return;
+      for(let k = 0; k < 5; k++){
+        const pa = ang + (Math.random()-0.5) * 0.7;
+        const s = 120 + Math.random() * 120;
+        particles.push({
+          x:e.x, y:e.y,
+          vx:Math.cos(pa)*s, vy:Math.sin(pa)*s - 30,
+          life:0.4, maxLife:0.4,
+          color:k%2===0 ? '#ffd166' : tint,
+          size:2 + Math.random()*2,
+        });
+      }
+    });
+    screenShake(12, 220);                                     // was 8, 180
     if(typeof SFX!=='undefined' && SFX.hit) SFX.hit();
     addFeed(`⚔ ANCHOR STRIKE — ${hits} HIT`, tint);
   }
@@ -7470,8 +7647,28 @@ function castIronwake(idx, now){
     player.bulwarkUntil = now + 2000;
     abilityCDs[1] = now + effectiveCD(1) * echoCdr;
     const tint = mods?.elementTint || '#d4c896';
-    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:120*echoRadius, maxR:120*echoRadius, color:'#8b7355', life:0.5, maxLife:0.5, follow:player});
+    // ═══ BULWARK VFX — shield slam ═══
+    // Inner bronze bloom (the shield itself)
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:130*echoRadius, maxR:130*echoRadius, color:'#8b7355', life:0.55, maxLife:0.55, follow:player});
+    // Bright gold highlight flash — quick
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:80*echoRadius, maxR:80*echoRadius, color:'#fde68a', life:0.2, maxLife:0.2});
+    // Expanding dust ring (shield planted into the ground)
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:140, r:30, color:'#c4a368', life:0.45, maxLife:0.45, expand:true});
+    // Persistent rim light for the whole 2s duration
     pushGroundFX({type:'rimlight', x:player.x, y:player.y, r:80*echoRadius, maxR:80*echoRadius, color:tint, life:2, maxLife:2, follow:player});
+    // Dust particles kicked up around the player
+    for(let k = 0; k < 10; k++){
+      const a = (k/10) * Math.PI * 2 + Math.random()*0.3;
+      const s = 90 + Math.random() * 60;
+      particles.push({
+        x:player.x, y:player.y + 6,
+        vx:Math.cos(a)*s, vy:Math.sin(a)*s*0.4 - 20,
+        life:0.5, maxLife:0.5,
+        color:'rgba(160,130,90,0.55)',
+        size:3 + Math.random()*2.5,
+      });
+    }
+    screenShake(8, 140);
     addFeed(`🛡 BULWARK RAISED`, tint);
     if(typeof SFX!=='undefined' && SFX.hit) SFX.hit();
   }
@@ -7498,11 +7695,43 @@ function castIronwake(idx, now){
       hits++;
     });
     abilityCDs[2] = now + effectiveCD(2) * echoCdr;
-    screenShake(16, 400);
+    screenShake(24, 520);                                      // was 16, 400
     const tint = mods?.elementTint || '#fbbf24';
-    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:radius, r:20, color:tint, life:0.6, maxLife:0.6, expand:true});
-    pushGroundFX({type:'scorch', x:player.x, y:player.y, r:radius-40, maxR:radius-40, color:'#b8860b', life:1.4, maxLife:1.4});
-    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:180*echoRadius, maxR:180*echoRadius, color:'#fff4a0', life:0.3, maxLife:0.3});
+    // ═══ GROUND SHATTER VFX — earth-rupture impact ═══
+    // THREE expanding rings — fast outer shockwave, mid-speed tinted, slow inner
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:radius*1.15, r:40, color:'#fff4a0', life:0.5, maxLife:0.5, expand:true});
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:radius, r:25, color:tint, life:0.7, maxLife:0.7, expand:true});
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:radius*0.7, r:15, color:'#b8860b', life:0.55, maxLife:0.55, expand:true});
+    // Bright impact flash
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:220*echoRadius, maxR:220*echoRadius, color:'#fff8cc', life:0.28, maxLife:0.28});
+    // Lingering scorch (cracked earth)
+    pushGroundFX({type:'scorch', x:player.x, y:player.y, r:radius*0.9, maxR:radius*0.9, color:'#6b4f1a', life:1.8, maxLife:1.8});
+    // Rock chunks flying outward — big radial burst with irregular arcs
+    for(let k = 0; k < 16; k++){
+      const a = (k/16) * Math.PI * 2 + (Math.random()-0.5)*0.3;
+      const s = 200 + Math.random() * 180;
+      particles.push({
+        x:player.x, y:player.y,
+        vx:Math.cos(a)*s, vy:Math.sin(a)*s - 60,    // slight upward bias
+        life:0.7, maxLife:0.7,
+        color:k%3===0 ? '#fbbf24' : 'rgba(95,70,40,0.85)',  // mix gold sparks with rock
+        size:3 + Math.random()*4,
+      });
+    }
+    // Dust cloud rising from cracks
+    for(let k = 0; k < 12; k++){
+      const a = -Math.PI/2 + (Math.random()-0.5) * Math.PI * 0.8;
+      const dist = Math.random() * radius * 0.5;
+      const ang = Math.random() * Math.PI * 2;
+      particles.push({
+        x:player.x + Math.cos(ang)*dist,
+        y:player.y + Math.sin(ang)*dist,
+        vx:Math.cos(a)*30, vy:Math.sin(a)*60,
+        life:0.9, maxLife:0.9,
+        color:'rgba(120,95,65,0.5)',
+        size:5 + Math.random()*4,
+      });
+    }
     // Lingering Wound — damage pool
     if(mods?.leavesPool){
       if(!window.__damagePools) window.__damagePools = [];
@@ -7521,8 +7750,31 @@ function castIronwake(idx, now){
     player.retributionUntil = now + 5000;
     abilityCDs[3] = now + effectiveCD(3) * echoCdr;
     const tint = mods?.elementTint || '#a78bfa';
-    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:180*echoRadius, maxR:180*echoRadius, color:tint, life:0.6, maxLife:0.6});
+    // ═══ RETRIBUTION VFX — violet aura emergence ═══
+    // Inner flash
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:220*echoRadius, maxR:220*echoRadius, color:tint, life:0.55, maxLife:0.55});
+    // Bright highlight
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:100*echoRadius, maxR:100*echoRadius, color:'#ffffff', life:0.25, maxLife:0.25});
+    // Expanding activation ring
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:200, r:25, color:tint, life:0.5, maxLife:0.5, expand:true});
+    // Persistent aura for duration
     pushGroundFX({type:'rimlight', x:player.x, y:player.y, r:110*echoRadius, maxR:110*echoRadius, color:tint, life:5, maxLife:5, follow:player});
+    // 12 orbital rune particles — look like ward sigils forming
+    for(let k = 0; k < 12; k++){
+      const a = (k/12) * Math.PI * 2;
+      const r = 70 + Math.random()*15;
+      particles.push({
+        x:player.x + Math.cos(a)*r,
+        y:player.y + Math.sin(a)*r,
+        vx:Math.cos(a)*30,
+        vy:Math.sin(a)*30 - 40,
+        life:0.85, maxLife:0.85,
+        color:tint,
+        size:3 + Math.random()*2,
+        soul:true,
+      });
+    }
+    screenShake(6, 120);
     addFeed(`◈ RETRIBUTION ACTIVE`, tint);
     if(typeof SFX!=='undefined' && SFX.veilmark) SFX.veilmark();
   }
@@ -7566,11 +7818,65 @@ function castIronwake(idx, now){
     }
     if(typeof camX!=='undefined'){ camX = player.x; camY = player.y; }
     abilityCDs[4] = now + effectiveCD(4) * echoCdr;
-    screenShake(22, 600);
-    // Visual trail
-    pushGroundFX({type:'line', x:startX, y:startY, endX:player.x, endY:player.y, width:150, color:'#ff4400', life:1.2, maxLife:1.2});
-    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:200, maxR:200, color:'#ff4400', life:0.4, maxLife:0.4});
+    screenShake(32, 720);                                       // was 22, 600
+    // ═══ IRONWAKE'S FURY VFX — charging meteor ═══
+    const chargeDx = player.x - startX, chargeDy = player.y - startY;
+    const chargeLen = Math.sqrt(chargeDx*chargeDx + chargeDy*chargeDy) || 1;
+    // Main charge line — broad, long, fiery
+    pushGroundFX({type:'line', x:startX, y:startY, endX:player.x, endY:player.y, width:180, color:'#ff4400', life:1.4, maxLife:1.4});
+    // Thinner bright inner line (core of the charge)
+    pushGroundFX({type:'line', x:startX, y:startY, endX:player.x, endY:player.y, width:80, color:'#ffcc66', life:1.0, maxLife:1.0});
+    // Starting explosion (where player launched from)
+    pushGroundFX({type:'ring', x:startX, y:startY, maxR:160, r:15, color:'#ff4400', life:0.5, maxLife:0.5, expand:true});
+    pushGroundFX({type:'bloom', x:startX, y:startY, r:140, maxR:140, color:'#ff4400', life:0.4, maxLife:0.4});
+    // Landing explosion — massive at arrival point
+    pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:320, r:30, color:'#ffdd55', life:0.55, maxLife:0.55, expand:true});
     pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:280, r:20, color:'#ff4400', life:0.7, maxLife:0.7, expand:true});
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:250, maxR:250, color:'#ff4400', life:0.45, maxLife:0.45});
+    pushGroundFX({type:'bloom', x:player.x, y:player.y, r:120, maxR:120, color:'#fff8cc', life:0.22, maxLife:0.22});
+    pushGroundFX({type:'scorch', x:player.x, y:player.y, r:220, maxR:220, color:'#6b2a0a', life:2.2, maxLife:2.2});
+    // Dust trail along the charge path — creates a "trail of destruction"
+    for(let k = 0; k < 12; k++){
+      const tProg = k / 12;
+      const tx = startX + chargeDx * tProg;
+      const ty = startY + chargeDy * tProg;
+      const perpAng = Math.atan2(chargeDy, chargeDx) + Math.PI/2;
+      // Spawn dust on both sides of the path
+      for(let side = -1; side <= 1; side += 2){
+        particles.push({
+          x: tx + Math.cos(perpAng)*side*20,
+          y: ty + Math.sin(perpAng)*side*20,
+          vx: Math.cos(perpAng)*side*60 + (Math.random()-0.5)*40,
+          vy: Math.sin(perpAng)*side*60 - 30,
+          life: 0.7 + Math.random()*0.3, maxLife: 1.0,
+          color:'rgba(140,95,60,0.65)',
+          size:4 + Math.random()*3,
+        });
+      }
+    }
+    // Radial burst of sparks at landing
+    for(let k = 0; k < 20; k++){
+      const a = (k/20) * Math.PI * 2;
+      const s = 280 + Math.random() * 180;
+      particles.push({
+        x:player.x, y:player.y,
+        vx:Math.cos(a)*s, vy:Math.sin(a)*s - 80,
+        life:0.65, maxLife:0.65,
+        color:k%2===0 ? '#ffdd55' : '#ff4400',
+        size:3 + Math.random()*4,
+      });
+    }
+    // Crater impact at each struck enemy
+    enemies.forEach(e=>{
+      if(e.dead) return;
+      const px = e.x - startX, py = e.y - startY;
+      const projAlong = px*Math.cos(dir) + py*Math.sin(dir);
+      const perpLine = Math.abs(px*(-Math.sin(dir)) + py*Math.cos(dir));
+      if(projAlong > 0 && projAlong <= charge && perpLine < 100){
+        pushGroundFX({type:'ring', x:e.x, y:e.y, maxR:80, r:12, color:'#ff4400', life:0.35, maxLife:0.35, expand:true});
+        pushGroundFX({type:'bloom', x:e.x, y:e.y, r:60, maxR:60, color:'#ffdd55', life:0.25, maxLife:0.25});
+      }
+    });
     if(typeof SFX!=='undefined' && SFX.eliteDeath) SFX.eliteDeath();
     addFeed(`★ IRONWAKE'S FURY — ${hits} STRUCK`, '#ff4400');
   }
