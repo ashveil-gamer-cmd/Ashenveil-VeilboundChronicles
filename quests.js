@@ -171,6 +171,268 @@ const QUEST_DEFINITIONS = [
     requires: { level: 1 },
     repeatable: false,
   },
+  // ═════════════════════════════════════════════════════════════════
+  // THE SEVEN UNMADE — narrative thread running through the whole game.
+  // Seven fragments of memory, scattered across zones. Each one is a
+  // boss or elite tied to the story. Collecting them all unlocks lore
+  // and (eventually) a final dungeon.
+  //
+  // Because the narrative runs across the whole 1-40 arc, these are
+  // spread through zones by tier. All from zone NPCs — the Procession
+  // is the framing, but each Unmade is witnessed by local eyes.
+  // ═════════════════════════════════════════════════════════════════
+  {
+    id: 'unmade_the_listener',
+    title: 'The First Unmade — The Listener',
+    giver: 'ashen_mourner',
+    tier: 'story',
+    narrative:
+      '"The first one. She listened to the Veil until it listened back. ' +
+      'You will know her by the silence around her. Kill her, and bring me her breath."',
+    objective: { type: 'kill_enemy_type', target: 'wraith', count: 8 },
+    reward: { xp: 'auto', gold: 200, materials: { ether: 4, runecore: 1 } },
+    requires: { level: 4 },
+    repeatable: false,
+  },
+  {
+    id: 'unmade_the_counter',
+    title: 'The Second Unmade — The Counter',
+    giver: 'ashen_scout',
+    tier: 'story',
+    narrative:
+      '"He counted every bone he passed, and he passed many. When the number ' +
+      'was wrong, he made it right. Twelve of him still wander. Unmake them."',
+    objective: { type: 'kill_enemy_type', target: 'skeleton', count: 12 },
+    reward: { xp: 'auto', gold: 180, materials: { bone: 6, runecore: 1 } },
+    requires: { level: 5, prerequisiteId: 'unmade_the_listener' },
+    repeatable: false,
+  },
+  {
+    id: 'unmade_the_crawler',
+    title: 'The Third Unmade — The Child That Crawls',
+    giver: 'ashen_scout',
+    tier: 'story',
+    narrative:
+      '"A child crawled into the ash and never stood up. The crawlers are ' +
+      'her siblings. End the nursery. Ten of them."',
+    objective: { type: 'kill_enemy_type', target: 'crawler', count: 10 },
+    reward: { xp: 'auto', gold: 220, materials: { scrap: 12, runecore: 1 } },
+    requires: { level: 7, prerequisiteId: 'unmade_the_counter' },
+    repeatable: false,
+  },
+  {
+    id: 'unmade_the_witness',
+    title: 'The Fourth Unmade — The Witness',
+    giver: 'crypts_keeper',
+    tier: 'story',
+    narrative:
+      '"She stood at every door and saw every passage. Her sight is now ' +
+      'their sight. Cut away what she showed them."',
+    objective: { type: 'kill_elite', target: 'any', count: 5 },
+    reward: { xp: 'auto', gold: 300, materials: { ether: 6, runecore: 2 } },
+    requires: { level: 10, prerequisiteId: 'unmade_the_crawler' },
+    repeatable: false,
+  },
+  {
+    id: 'unmade_the_architect',
+    title: 'The Fifth Unmade — The Architect',
+    giver: 'crypts_scribe',
+    tier: 'story',
+    narrative:
+      '"He built the rooms beneath the crypts. Every wall is his mouth. ' +
+      'Break his work. Close the Sanctum."',
+    objective: { type: 'clear_dungeon', target: 'wraith_sanctum', count: 1 },
+    reward: { xp: 'auto', gold: 500, materials: { runecore: 3, ether: 8 } },
+    requires: { level: 14, prerequisiteId: 'unmade_the_witness' },
+    repeatable: false,
+  },
+  {
+    id: 'unmade_the_pyre',
+    title: 'The Sixth Unmade — The Pyre',
+    giver: 'ember_warden',
+    tier: 'story',
+    narrative:
+      '"She caught fire and stayed lit. The embers you walk on are still her. ' +
+      'Stand on her long enough to break the burning."',
+    objective: { type: 'kill_enemy_type', target: 'shade', count: 10 },
+    reward: { xp: 'auto', gold: 600, materials: { ether: 10, runecore: 3 } },
+    requires: { level: 20, prerequisiteId: 'unmade_the_architect' },
+    repeatable: false,
+  },
+  {
+    id: 'unmade_the_last',
+    title: 'The Seventh Unmade — The Last',
+    giver: 'ember_pilgrim',
+    tier: 'story',
+    narrative:
+      '"We do not speak her name. She is the one we made ourselves. Find her ' +
+      'boss and end this. Bring the last crown."',
+    objective: { type: 'kill_boss', target: 'any', count: 3 },
+    reward: { xp: 'auto', gold: 1200, materials: { runecore: 6, ether: 15 } },
+    requires: { level: 28, prerequisiteId: 'unmade_the_pyre' },
+    repeatable: false,
+  },
+
+  // ═════════════════════════════════════════════════════════════════
+  // BOUNTY BOARD — repeatable zone bounties. Meant to be the "daily"
+  // content. Short, focused, moderate rewards. Scales with level.
+  // ═════════════════════════════════════════════════════════════════
+  {
+    id: 'bounty_ashen_crawlers',
+    title: 'Bounty: Crawler Nest',
+    giver: 'ashen_scout',
+    tier: 'bounty',
+    narrative:
+      '"They breed in the cracks. Thin them before they teach each other to stand."',
+    objective: { type: 'kill_enemy_type', target: 'crawler', count: 12 },
+    reward: { xp: 'auto', gold: 80, materials: { scrap: 4 } },
+    requires: { level: 3 },
+    repeatable: true,
+  },
+  {
+    id: 'bounty_ashen_bones',
+    title: 'Bounty: Bonemeal Harvest',
+    giver: 'ashen_mourner',
+    tier: 'bounty',
+    narrative:
+      '"Bring me bones. The cairn needs them. Fifteen."',
+    objective: { type: 'kill_enemy_type', target: 'skeleton', count: 15 },
+    reward: { xp: 'auto', gold: 90, materials: { bone: 5 } },
+    requires: { level: 2 },
+    repeatable: true,
+  },
+  {
+    id: 'bounty_crypts_whispers',
+    title: 'Bounty: Silence the Whispers',
+    giver: 'crypts_keeper',
+    tier: 'bounty',
+    narrative:
+      '"Wraiths thicken at the gate. I cannot count them all. Cut eight."',
+    objective: { type: 'kill_enemy_type', target: 'wraith', count: 8 },
+    reward: { xp: 'auto', gold: 110, materials: { ether: 3 } },
+    requires: { level: 9 },
+    repeatable: true,
+  },
+  {
+    id: 'bounty_crypts_scribes_task',
+    title: "Bounty: The Scribe's List",
+    giver: 'crypts_scribe',
+    tier: 'bounty',
+    narrative:
+      '"Each elite that falls is a name I can finally write. Bring me five names."',
+    objective: { type: 'kill_elite', target: 'any', count: 5 },
+    reward: { xp: 'auto', gold: 180, materials: { runecore: 1, ether: 4 } },
+    requires: { level: 12 },
+    repeatable: true,
+  },
+  {
+    id: 'bounty_ember_shade',
+    title: 'Bounty: Shadow Culling',
+    giver: 'ember_warden',
+    tier: 'bounty',
+    narrative:
+      '"The shades leak out when the fires dim. Cull six before the night thickens."',
+    objective: { type: 'kill_enemy_type', target: 'shade', count: 6 },
+    reward: { xp: 'auto', gold: 220, materials: { ether: 5 } },
+    requires: { level: 20 },
+    repeatable: true,
+  },
+  {
+    id: 'bounty_ember_pilgrim_hunt',
+    title: 'Bounty: A Pilgrim\'s Prayer',
+    giver: 'ember_pilgrim',
+    tier: 'bounty',
+    narrative:
+      '"Slay two of the strongest. Their deaths answer my prayer."',
+    objective: { type: 'kill_boss', target: 'any', count: 2 },
+    reward: { xp: 'auto', gold: 500, materials: { runecore: 3, ether: 6 } },
+    requires: { level: 25 },
+    repeatable: true,
+  },
+
+  // ═════════════════════════════════════════════════════════════════
+  // SIDE QUESTS — non-critical story beats that color the world.
+  // Each one is a small piece of lore told through the task.
+  // ═════════════════════════════════════════════════════════════════
+  {
+    id: 'side_the_sleepless_watch',
+    title: 'The Sleepless Watch',
+    giver: 'ashen_scout',
+    tier: 'zone',
+    narrative:
+      '"I have not slept since I died. The golems keep me awake — they ' +
+      'grind all night. Silence four of them, just for one evening."',
+    objective: { type: 'kill_enemy_type', target: 'golem', count: 4 },
+    reward: { xp: 'auto', gold: 140, materials: { scrap: 10 } },
+    requires: { level: 6 },
+    repeatable: false,
+  },
+  {
+    id: 'side_the_counting_game',
+    title: 'The Counting Game',
+    giver: 'ashen_mourner',
+    tier: 'zone',
+    narrative:
+      '"I count the skulls. I always miss. Find thirty of the wandering ones ' +
+      'and the number will be right again. Maybe then I can rest."',
+    objective: { type: 'kill_enemy_type', target: 'skeleton', count: 30 },
+    reward: { xp: 'auto', gold: 200, materials: { bone: 8 } },
+    requires: { level: 7 },
+    repeatable: false,
+  },
+  {
+    id: 'side_the_scribes_ink',
+    title: "The Scribe's Ink",
+    giver: 'crypts_scribe',
+    tier: 'zone',
+    narrative:
+      '"My ink has run dry. The wraiths weep something close to it — their ' +
+      'tears. Bring me twelve, however you must."',
+    objective: { type: 'kill_enemy_type', target: 'wraith', count: 12 },
+    reward: { xp: 'auto', gold: 180, materials: { ether: 5 } },
+    requires: { level: 11 },
+    repeatable: false,
+  },
+  {
+    id: 'side_the_keepers_door',
+    title: "The Keeper's Door",
+    giver: 'crypts_keeper',
+    tier: 'major',
+    narrative:
+      '"Three bosses guard three doors. Break one and I will show you what ' +
+      'I have been keeping from you."',
+    objective: { type: 'kill_boss', target: 'any', count: 1 },
+    reward: { xp: 'auto', gold: 400, materials: { runecore: 2, bone: 10 } },
+    requires: { level: 13 },
+    repeatable: false,
+  },
+  {
+    id: 'side_the_wardens_vigil',
+    title: "The Warden's Vigil",
+    giver: 'ember_warden',
+    tier: 'zone',
+    narrative:
+      '"The abominations crawl from the deeper places. Three crawl each night. ' +
+      'Kill six and I will grant you a night of peace."',
+    objective: { type: 'kill_enemy_type', target: 'abomination', count: 6 },
+    reward: { xp: 'auto', gold: 350, materials: { runecore: 2, ether: 4 } },
+    requires: { level: 22 },
+    repeatable: false,
+  },
+  {
+    id: 'side_the_pilgrims_rest',
+    title: "The Pilgrim's Rest",
+    giver: 'ember_pilgrim',
+    tier: 'major',
+    narrative:
+      '"I walk in circles. Break the circle by reaching the thirtieth level of living. ' +
+      'Then I may stop."',
+    objective: { type: 'reach_level', target: 30, count: 1 },
+    reward: { xp: 'auto', gold: 800, materials: { runecore: 4, ether: 8 } },
+    requires: { level: 20 },
+    repeatable: false,
+  },
+
   {
     id: 'milestone_lv25',
     title: 'Beyond the Wastes',
@@ -356,8 +618,15 @@ function questOnAccept(quest){
     if(player.level >= obj.target){
       questState.active[quest.id].progress = obj.count;
     }
+  } else if(obj.type === 'reach_zone'){
+    // If player is already in the target zone when accepting, auto-complete.
+    // Previously this only fired via travelToZone(), which meant accepting
+    // a reach_zone quest while already there made it impossible to complete.
+    if(typeof curZone !== 'undefined' && curZone?.id === obj.target){
+      questState.active[quest.id].progress = obj.count;
+    }
   }
-  // Other types require an actual event, so they start at 0.
+  // Other types (kill, clear_dungeon) require an actual event, so they start at 0.
 }
 
 // Called from game.js killEnemy() — advances kill_enemy_type and kill_elite quests
@@ -776,9 +1045,17 @@ function navigateToActiveQuest(){
       if(typeof addFeed === 'function') addFeed(`Zone "${obj.target}" not found`, '#ef4444');
       return;
     }
-    // If already in the target zone, nothing to do
+    // If already in the target zone, auto-complete the objective and notify
     if(curZone?.id === obj.target){
-      if(typeof addFeed === 'function') addFeed(`Already in ${targetZone.name}`, '#9DC4B0');
+      // Force progress to completion — handles legacy saves where the quest
+      // was accepted while already in-zone and never completed.
+      if(questState.active[pinned.id] && questState.active[pinned.id].progress < pinned.objective.count){
+        questState.active[pinned.id].progress = pinned.objective.count;
+        _questNotifyProgress(pinned, questState.active[pinned.id]);
+        if(typeof updateQuestHUDTracker === 'function') updateQuestHUDTracker();
+        if(typeof writeSave === 'function') writeSave();
+      }
+      if(typeof addFeed === 'function') addFeed(`✓ Objective complete: ${targetZone.name}`, '#22c55e');
       return;
     }
     // If in camp, open travel screen directly
