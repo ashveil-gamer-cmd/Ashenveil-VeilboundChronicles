@@ -2,7 +2,7 @@
 
 // ═══════ CONSTANTS ═══════════════════════════════════════
 const WORLD_W=6500,WORLD_H=6500;
-const PLAYER_SPEED=200;
+const PLAYER_SPEED=140;
 const ATTACK_RANGE=230;
 const ATTACK_CD=480;
 const AFK_IDLE=2800;
@@ -497,10 +497,11 @@ function enemyDmgScale(lv){
 // leveling *feel* like something even before gear enters the picture.
 
 // Movement speed multiplier based on level.
-// Level 1: 1.00x (baseline). Level 50: 1.25x. Level 100: 1.50x.
-// Applied on top of class.speedMult.
+// Level 1: 1.00x (baseline). Level 50: 1.49x. Level 100: 1.99x.
+// Applied on top of class.speedMult. Increased from 0.5%/lv to 1%/lv
+// because new base (140) is slower and players need more reward for leveling.
 function playerSpeedBonus(lv){
-  return 1.0 + 0.005 * (lv - 1); // 0.5% per level past 1
+  return 1.0 + 0.01 * (lv - 1); // 1% per level past 1
 }
 
 // Attack speed multiplier based on level.
