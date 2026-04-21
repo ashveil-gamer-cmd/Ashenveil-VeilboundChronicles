@@ -1619,6 +1619,10 @@ let worldAltars=[];
 // Bone caches — small reward nodes that give gold + crafting scrap when touched.
 // Destroyed on pickup. Structure: {x, y, looted, lootedTime, seed}
 let worldCaches=[];
+// Gathering nodes — herbs, reagents, essences that the player can harvest
+// by walking near. Each node has a material type, quality tier, respawn timer.
+// Spawned per-zone; regen after a delay once harvested.
+let gatherNodes=[];
 // Active temporary buffs from altars. Each: {type, expires, value}
 // type: 'damage', 'speed', 'regen', 'crit'. value is the magnitude.
 let activeBuffs=[];
@@ -1843,6 +1847,8 @@ function generateEnvironment(){
   // Generate world altars (buff shrines) and caches (gold nodes)
   generateWorldAltars(seedBase);
   generateWorldCaches(seedBase);
+  // Generate gathering nodes (herbs/reagents) — skipped in camp + dungeons
+  if(typeof generateGatherNodes === 'function') generateGatherNodes();
 }
 
 // ═══════ WORLD CHESTS ════════════════════════════════════
@@ -2642,6 +2648,7 @@ function drawEnvironment(now){
   drawWorldChests(now, vl, vr, vt, vb);
   drawWorldAltars(now, vl, vr, vt, vb);
   drawWorldCaches(now, vl, vr, vt, vb);
+  if(typeof drawGatherNodes === 'function') drawGatherNodes(now);
   // Necrolord banners — drawn last so they sit on top of everything
   if(typeof drawNecroBanners === 'function') drawNecroBanners(now);
   // Voidweaver entities — seals, singularities, rifts
@@ -8104,6 +8111,7 @@ function update(dt,now){
   if(typeof updateWorldChests === 'function') updateWorldChests(now);
   if(typeof updateWorldAltars === 'function') updateWorldAltars(now);
   if(typeof updateWorldCaches === 'function') updateWorldCaches(now);
+  if(typeof updateGatherNodes === 'function') updateGatherNodes(now);
   if(typeof updateActiveBuffs === 'function') updateActiveBuffs(now);
   // Necrolord preset — tick active banners (damage enemies in radius, expire)
   if(typeof updateNecroBanners === 'function') updateNecroBanners(now);
@@ -8342,23 +8350,37 @@ function update(dt,now){
           if(typeof confirmPortalEntry === 'function') confirmPortalEntry();
         }
       } else if(typeof worldCaches !== 'undefined'){
-        // Find the nearest un-looted cache within detour range (400 units).
-        // Walking to it is worthwhile gold; ignores further caches.
-        let nearestCache = null;
-        let nearestCD2 = 400*400;
+        // Find the nearest un-looted cache OR un-harvested gather node
+        // within detour range (400 units). Either pulls the player toward
+        // passive rewards without a player needing to steer.
+        let nearestPickup = null;
+        let nearestD2 = 400*400;
         for(let ci = 0; ci < worldCaches.length; ci++){
           const c = worldCaches[ci];
           if(c.looted) continue;
           const cdx = c.x - player.x, cdy = c.y - player.y;
           const cd2 = cdx*cdx + cdy*cdy;
-          if(cd2 < nearestCD2){
-            nearestCD2 = cd2;
-            nearestCache = c;
+          if(cd2 < nearestD2){
+            nearestD2 = cd2;
+            nearestPickup = c;
           }
         }
-        if(nearestCache){
-          targetX = nearestCache.x;
-          targetY = nearestCache.y;
+        // Gather nodes — same distance threshold, closest wins
+        if(typeof gatherNodes !== 'undefined'){
+          for(let gi = 0; gi < gatherNodes.length; gi++){
+            const g = gatherNodes[gi];
+            if(g.harvested) continue;
+            const gdx = g.x - player.x, gdy = g.y - player.y;
+            const gd2 = gdx*gdx + gdy*gdy;
+            if(gd2 < nearestD2){
+              nearestD2 = gd2;
+              nearestPickup = g;
+            }
+          }
+        }
+        if(nearestPickup){
+          targetX = nearestPickup.x;
+          targetY = nearestPickup.y;
         }
       }
       const tx = targetX - player.x, ty = targetY - player.y;
