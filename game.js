@@ -1588,7 +1588,7 @@ let player={
   isDead:false,iframes:0,
   soulMastery:0,glowPulse:0,hitFlash:0,walkCycle:0,
   afkWpX:WORLD_W/2,afkWpY:WORLD_H/2,
-  afkTimer:0,afkCommit:5000,sector:0,
+  afkTimer:0,afkCommit:12000,sector:0,
   visitedSectors:new Array(9).fill(false),
   maxBonds:MAX_SPIRITS,
   // AFK mode — OFF by default. Player toggles via HUD button or 'F' key.
@@ -6625,27 +6625,83 @@ function spawnSpirit(isTemp=false){
 // ═══════ AFK PATHFINDING ════════════════════════════════
 function setAfkWaypoint(){
   player.afkTimer=0;
-  let next=-1;
-  for(let i=0;i<9;i++){const c=(player.sector+i+1)%9;if(!player.visitedSectors[c]){next=c;break;}}
-  if(next===-1){player.visitedSectors.fill(false);next=Math.floor(Math.random()*9);}
-  player.sector=next;
-  const col=next%3,row=Math.floor(next/3),sw=WORLD_W/3,sh=WORLD_H/3;
-  // Try up to 16 points within the chosen sector for a clear one
-  let wx=col*sw+100+Math.random()*(sw-200);
-  let wy=row*sh+100+Math.random()*(sh-200);
-  let found = false;
-  for(let tries=0;tries<16;tries++){
-    if(!getPropCollisionAt(wx,wy,18)){ found = true; break; }
-    wx=col*sw+100+Math.random()*(sw-200);
-    wy=row*sh+100+Math.random()*(sh-200);
+  // ═══ Dungeon waypoints — stay in the arena ═══
+  if(dungeonState.active){
+    const cx = WORLD_W/2, cy = WORLD_H/2;
+    for(let tries = 0; tries < 16; tries++){
+      const a = Math.random() * Math.PI*2;
+      const r = 150 + Math.random() * 450;
+      const wx = cx + Math.cos(a) * r;
+      const wy = cy + Math.sin(a) * r;
+      if(!getPropCollisionAt(wx, wy, 18)){
+        player.afkWpX = wx;
+        player.afkWpY = wy;
+        return;
+      }
+    }
+    player.afkWpX = cx;
+    player.afkWpY = cy;
+    return;
   }
-  // Last resort — use findClearPosition to guarantee a clear point
-  if(!found){
-    const safe = findClearPosition(wx, wy, 18);
-    wx = safe.x; wy = safe.y;
+  // ═══ Open world — zone loop + path-aware waypoints ═══
+  // Sectors are laid out 0-8 in row-major order (0-2 top, 3-5 middle, 6-8 bottom).
+  // The loop [0,1,2,5,8,7,6,3,4] walks the perimeter clockwise then ends center.
+  // This gives AFK a predictable "tour the zone" pattern.
+  const SECTOR_LOOP = [0, 1, 2, 5, 8, 7, 6, 3, 4];
+  const curLoopIdx = (player._afkLoopIdx || 0);
+  const nextLoopIdx = (curLoopIdx + 1) % SECTOR_LOOP.length;
+  player._afkLoopIdx = nextLoopIdx;
+  const sector = SECTOR_LOOP[nextLoopIdx];
+  player.sector = sector;
+  const col = sector%3, row = Math.floor(sector/3), sw = WORLD_W/3, sh = WORLD_H/3;
+  // Pick waypoint that (1) is clear of props and (2) is near a path if available
+  let bestWx = col*sw + sw*0.5;
+  let bestWy = row*sh + sh*0.5;
+  let bestScore = -Infinity;
+  // Gather path points for THIS sector for proximity scoring
+  const sectorPathPoints = [];
+  if(typeof terrainFeatures !== 'undefined' && terrainFeatures && terrainFeatures.paths){
+    terrainFeatures.paths.forEach(path => {
+      if(!path.points) return;
+      path.points.forEach(pt => {
+        if(pt.x >= col*sw && pt.x < (col+1)*sw &&
+           pt.y >= row*sh && pt.y < (row+1)*sh){
+          sectorPathPoints.push(pt);
+        }
+      });
+    });
   }
-  player.afkWpX=wx;
-  player.afkWpY=wy;
+  // Try 16 candidates — score = proximity to path (if any) minus prop collision penalty
+  for(let tries = 0; tries < 16; tries++){
+    const wx = col*sw + 100 + Math.random()*(sw-200);
+    const wy = row*sh + 100 + Math.random()*(sh-200);
+    if(getPropCollisionAt(wx, wy, 18)) continue;
+    let score = 0;
+    if(sectorPathPoints.length > 0){
+      // Find closest path point — score inversely with distance
+      let closestD2 = Infinity;
+      for(let i = 0; i < sectorPathPoints.length; i++){
+        const pt = sectorPathPoints[i];
+        const dx = wx-pt.x, dy = wy-pt.y;
+        const d2 = dx*dx + dy*dy;
+        if(d2 < closestD2) closestD2 = d2;
+      }
+      // Prefer within 200 of a path; further = negative score
+      score = -Math.sqrt(closestD2);
+    }
+    if(score > bestScore){
+      bestScore = score;
+      bestWx = wx;
+      bestWy = wy;
+    }
+  }
+  // Final safety — use findClearPosition if somehow still blocked
+  if(getPropCollisionAt(bestWx, bestWy, 18)){
+    const safe = findClearPosition(bestWx, bestWy, 18);
+    bestWx = safe.x; bestWy = safe.y;
+  }
+  player.afkWpX = bestWx;
+  player.afkWpY = bestWy;
 }
 
 // ═══════ ABILITY CASTS ══════════════════════════════════
@@ -8120,10 +8176,19 @@ function update(dt,now){
       targetDist = nearestEliteDist;
     }
 
-    const inCrowd = crowdCount >= 4;
+    // Crowd threshold — raise in dungeons where arenas are compact and
+    // "flee to edge" is worse than just fighting.
+    const crowdThreshold = dungeonState.active ? 6 : 4;
+    const inCrowd = crowdCount >= crowdThreshold;
+    // If we're already near the world edge, REPOSITION will just paste us
+    // against a wall. Force ENGAGE in that case.
+    const nearEdge = (
+      player.x < 300 || player.x > WORLD_W - 300 ||
+      player.y < 300 || player.y > WORLD_H - 300
+    );
     let state = 'wander';
     if(target && targetDist < engageRange) state = 'engage';
-    if(inCrowd && !isMelee) state = 'reposition'; // only caster-classes kite out
+    if(inCrowd && !isMelee && !nearEdge) state = 'reposition';
     // Melee Bloodforged/Juggernaut WANT to be in the crowd — override
     if(isMelee && state === 'reposition') state = 'engage';
 
@@ -8154,8 +8219,7 @@ function update(dt,now){
       mx = player.x - cx; my = player.y - cy;
       md = Math.max(0.01, Math.sqrt(mx*mx+my*my));
     } else {
-      // WANDER — if a portal is active, walk toward it; auto-enter when close.
-      // Otherwise follow the normal exploration waypoint.
+      // WANDER — priority: portal > nearby cache/chest > sector waypoint
       let targetX = player.afkWpX, targetY = player.afkWpY;
       if(typeof portalState !== 'undefined' && portalState.active && !dungeonState.active){
         const p = portalState.active;
@@ -8167,6 +8231,25 @@ function update(dt,now){
         const entryR = (typeof PORTAL_ENTRY_RADIUS !== 'undefined' ? PORTAL_ENTRY_RADIUS : 50);
         if(pd2 < entryR*entryR){
           if(typeof confirmPortalEntry === 'function') confirmPortalEntry();
+        }
+      } else if(typeof worldCaches !== 'undefined'){
+        // Find the nearest un-looted cache within detour range (400 units).
+        // Walking to it is worthwhile gold; ignores further caches.
+        let nearestCache = null;
+        let nearestCD2 = 400*400;
+        for(let ci = 0; ci < worldCaches.length; ci++){
+          const c = worldCaches[ci];
+          if(c.looted) continue;
+          const cdx = c.x - player.x, cdy = c.y - player.y;
+          const cd2 = cdx*cdx + cdy*cdy;
+          if(cd2 < nearestCD2){
+            nearestCD2 = cd2;
+            nearestCache = c;
+          }
+        }
+        if(nearestCache){
+          targetX = nearestCache.x;
+          targetY = nearestCache.y;
         }
       }
       const tx = targetX - player.x, ty = targetY - player.y;
@@ -8214,6 +8297,23 @@ function update(dt,now){
   const oldX = player.x, oldY = player.y;
   player.x=resolved.x;
   player.y=resolved.y;
+  // ═════ AFK STUCK DETECTOR ═════
+  // If player is trying to move (vx/vy non-zero) but actually moving near-zero
+  // (blocked by a prop) for 1.5s straight, reset the waypoint so AFK can try
+  // a different direction instead of hammering a tree forever.
+  if(player.afkEnabled){
+    const tryingToMove = Math.abs(player.vx) > 10 || Math.abs(player.vy) > 10;
+    const actualMove = Math.sqrt((player.x-oldX)**2 + (player.y-oldY)**2);
+    if(tryingToMove && actualMove < 0.5){
+      player._afkStuckSince = player._afkStuckSince || now;
+      if(now - player._afkStuckSince > 1500){
+        player._afkStuckSince = 0;
+        if(typeof setAfkWaypoint === 'function') setAfkWaypoint();
+      }
+    } else {
+      player._afkStuckSince = 0;
+    }
+  }
   player.glowPulse+=dt*2.2;
   if(player.iframes>0)player.iframes-=dt*1000;
   if(player.hitFlash>0)player.hitFlash-=dt;
@@ -8307,11 +8407,35 @@ function update(dt,now){
     const dmgMultArch = s.archDmgMult || 1.0;
     const reachArch = s.archReach || 70;
     const isDefender = s.archStyle === 'defender';
+    // ═══ Spirit hunt range cap ═══
+    // Spirits should stay near player, not fly offscreen. Cap haunt/engage
+    // distance relative to player position rather than spirit position so
+    // they never wander further than the player can see.
+    const MAX_HUNT_FROM_PLAYER = 450;
     // Defenders ignore haunt targets — they stay near player as bodyguards
     let haunt = null;
     if(!isDefender){
       haunt = s.hauntTarget && !s.hauntTarget.dead && s.hauntTarget.veilmarkStacks>0 ? s.hauntTarget : null;
-      if(!haunt){s.hauntTarget=null;let bd=950;enemies.forEach(e=>{if(e.dead||e.veilmarkStacks<=0)return;const d=dist2(s.x,s.y,e.x,e.y);if(d<bd){bd=d;haunt=e;}});s.hauntTarget=haunt;}
+      // Drop haunt target if it's too far from player
+      if(haunt){
+        const hdx = haunt.x - player.x, hdy = haunt.y - player.y;
+        if(hdx*hdx + hdy*hdy > MAX_HUNT_FROM_PLAYER*MAX_HUNT_FROM_PLAYER){
+          haunt = null;
+          s.hauntTarget = null;
+        }
+      }
+      if(!haunt){
+        s.hauntTarget=null;
+        let bd=MAX_HUNT_FROM_PLAYER*MAX_HUNT_FROM_PLAYER;
+        enemies.forEach(e=>{
+          if(e.dead||e.veilmarkStacks<=0)return;
+          // distance from PLAYER (not spirit) — keeps spirits on-screen
+          const pdx = e.x - player.x, pdy = e.y - player.y;
+          const d = pdx*pdx + pdy*pdy;
+          if(d<bd){bd=d;haunt=e;}
+        });
+        s.hauntTarget=haunt;
+      }
     }
     // Necrolord preset bonuses
     const _inBanner = (typeof isSpiritInBanner === 'function') ? isSpiritInBanner(s) : false;
@@ -8345,11 +8469,20 @@ function update(dt,now){
           hitEnemy(ne2, spiritDmg);
         }
       } else {
-        let ne2=null,nd=720;
-        enemies.forEach(e=>{if(e.dead)return;const d=dist2(s.x,s.y,e.x,e.y);if(d<nd){nd=d;ne2=e;}});
-        if(ne2&&nd<340){
+        // Hunt targets ONLY within MAX_HUNT_FROM_PLAYER of player.
+        // Previous code would let spirits fly 720 units from themselves,
+        // causing them to kill enemies off-screen.
+        let ne2=null,nd=MAX_HUNT_FROM_PLAYER*MAX_HUNT_FROM_PLAYER;
+        enemies.forEach(e=>{
+          if(e.dead)return;
+          const pdx = e.x - player.x, pdy = e.y - player.y;
+          const d = pdx*pdx + pdy*pdy;
+          if(d<nd){nd=d;ne2=e;}
+        });
+        if(ne2){
           const sdx=ne2.x-s.x,sdy=ne2.y-s.y,sd=Math.sqrt(sdx*sdx+sdy*sdy)||1;
-          s.x+=sdx/sd*260*dt*_speedMult;s.y+=sdy/sd*260*dt*_speedMult;
+          // Chase speed dropped from 260 to 180 so spirits don't teleport
+          s.x+=sdx/sd*180*dt*_speedMult;s.y+=sdy/sd*180*dt*_speedMult;
           const atkInterval2 = _inBanner ? 800 : 950;
           if(now-s.lastAttack>atkInterval2&&sd<reachArch){
             s.lastAttack=now;s.attackCount++;
