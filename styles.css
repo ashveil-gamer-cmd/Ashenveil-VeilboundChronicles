@@ -187,7 +187,12 @@ canvas#c{display:block;position:fixed;top:0;left:0}
 
 /* ─── MENU BTNS (RIGHT COLUMN above ability bar, clear of play area) ─── */
 #menuBar{
-  position:fixed;bottom:120px;right:12px;display:none;flex-direction:column;gap:6px;
+  position:fixed;
+  /* Bottom-right stack — sits above AFK toggle. Buttons stack upward from
+     here so the first button is at ~270px, subsequent buttons go higher.
+     On mobile this element is hidden and replaced by a toggle drawer. */
+  bottom:270px;right:12px;
+  display:none;flex-direction:column;gap:6px;
   pointer-events:all;z-index:50
 }
 .menu-btn{
@@ -201,22 +206,28 @@ canvas#c{display:block;position:fixed;top:0;left:0}
 
 /* ─── FEED LOG ─── */
 #feedLog{
-  position:fixed;bottom:120px;left:16px;pointer-events:none;display:none;
+  position:fixed;
+  /* Bottom-left, above the ability bar. Pairs with the right-side
+     AFK/quest/menu stack. */
+  bottom:100px;left:16px;
+  pointer-events:none;display:none;
   flex-direction:column-reverse;gap:4px;max-height:200px;overflow:hidden;z-index:40;
-  max-width:calc(100vw - 140px)
+  max-width:calc(100vw - 340px)
 }
 .feed{font-family:'Cinzel',serif;font-size:var(--fs-meta);letter-spacing:1.5px;opacity:0;animation:fa 3.8s forwards;text-shadow:0 1px 4px rgba(0,0,0,0.85);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
 @keyframes fa{0%{opacity:0;transform:translateX(-6px)}8%{opacity:1;transform:translateX(0)}75%{opacity:1}100%{opacity:0}}
 
 /* ─── MUSIC LABEL ─── */
 #musicLabel{
-  position:fixed;bottom:98px;right:100px;display:none;pointer-events:none;
+  position:fixed;
+  /* Bottom-left, above the feed log. Keeps the right-side stack clean. */
+  bottom:300px;left:16px;display:none;pointer-events:none;
   font-family:'Cinzel',serif;font-size:var(--fs-tiny);color:var(--text-muted);letter-spacing:1px;
-  text-align:right;z-index:30;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
+  text-align:left;z-index:30;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
 }
 
 /* ─── BOSS HEALTHBAR ─── */
-#bossBar{position:fixed;bottom:108px;left:50%;transform:translateX(-50%);display:none;flex-direction:column;align-items:center;gap:4px;z-index:60;pointer-events:none}
+#bossBar{position:fixed;bottom:210px;left:50%;transform:translateX(-50%);display:none;flex-direction:column;align-items:center;gap:4px;z-index:60;pointer-events:none}
 .boss-name{font-family:'Cinzel',serif;font-size:var(--fs-body);color:var(--acc-amber);letter-spacing:3px;text-shadow:0 0 10px rgba(251,191,36,0.5);font-weight:700}
 .boss-bar-bg{width:280px;height:10px;background:rgba(0,0,0,0.7);border:1px solid rgba(251,191,36,0.4);border-radius:4px;overflow:hidden}
 .boss-bar-fill{height:100%;background:linear-gradient(90deg,#7f1d1d,#dc2626,#fbbf24);border-radius:3px;transition:width 0.2s}
@@ -1584,9 +1595,9 @@ canvas#c{display:block;position:fixed;top:0;left:0}
   }
   body.menu-open #menuBar{display:flex !important}
   .menu-btn{padding:6px 12px;font-size:10px;min-width:80px;text-align:left}
-  #feedLog{bottom:70px;left:10px;max-width:calc(50vw - 80px)}
+  #feedLog{bottom:85px;left:10px;max-width:calc(100vw - 220px)}
   .feed{font-size:9px}
-  #musicLabel{bottom:66px;right:56px;font-size:8px}
+  #musicLabel{bottom:200px;left:10px;right:auto;font-size:8px;text-align:left}
 }
 
 /* ─── PHONE PORTRAIT — fullscreen world, collapsible menu ─── */
@@ -1773,7 +1784,7 @@ canvas#c{display:block;position:fixed;top:0;left:0}
 /* ─── LANDSCAPE: same elite bar adjustment so it doesn't cover ability bar ─── */
 @media (max-height: 500px) and (orientation: landscape){
   #bossBar{
-    bottom:92px;
+    bottom:150px;
   }
   .boss-bar-bg{
     width:220px;height:7px;
@@ -2225,7 +2236,10 @@ canvas#c{display:block;position:fixed;top:0;left:0}
    - DISABLED (in camp): dimmed, shows "SAFE" label */
 #afkToggle{
   position:fixed;
-  /* Bottom-right above ability bar — nudged higher so it clears UI below */
+  /* UI STACK — bottom right column:
+     ─ ability bar at bottom 0 (~75-80px tall)
+     ─ quest tracker at bottom ~100px (~70-80px tall)
+     ─ AFK toggle at bottom ~220px (this element) */
   bottom:220px;
   right:14px;
   z-index:60;
@@ -2282,11 +2296,21 @@ canvas#c{display:block;position:fixed;top:0;left:0}
 }
 @media (max-width:640px){
   #afkToggle{
-    /* Mobile: bottom-right above the ability bar, same as desktop */
-    bottom:150px;
+    bottom:200px;
     right:10px;
     top:auto;
     padding:6px 10px;
+    font-size:10px;
+    gap:4px;
+  }
+}
+/* Landscape mobile — smaller stack since screen is short */
+@media (max-height: 500px) and (orientation: landscape){
+  #afkToggle{
+    bottom:165px;
+    right:10px;
+    top:auto;
+    padding:5px 9px;
     font-size:10px;
     gap:4px;
   }
@@ -2559,8 +2583,12 @@ canvas#c{display:block;position:fixed;top:0;left:0}
 /* ─── HUD QUEST TRACKER ───────────────────────────────────────────── */
 #questTracker{
   position:fixed;
-  top:128px; /* below the AFK toggle which sits below zoneLabel */
-  right:10px;
+  /* UI STACK — sits just above the ability bar on all viewports
+     so the bottom-right column reads consistently:
+     AFK toggle → quest tracker → ability bar */
+  bottom:110px;
+  right:14px;
+  top:auto;
   z-index:55;
   min-width:220px;
   max-width:280px;
@@ -2664,12 +2692,29 @@ canvas#c{display:block;position:fixed;top:0;left:0}
   .quest-tab{padding:8px 10px;font-size:10px;letter-spacing:1px;}
   .quest-card-title{font-size:14px;}
   #questTracker{
+    /* Mobile portrait — right-anchored, slightly narrower to fit phone screens.
+       Stays in the bottom-right stack with the AFK toggle above. */
+    bottom:90px;
+    right:10px;
     top:auto;
+    left:auto;
+    min-width:180px;
+    max-width:calc(100vw - 20px);
+  }
+}
+/* Landscape mobile — shorter screen, reduced stack spacing */
+@media (max-height: 500px) and (orientation: landscape){
+  #questTracker{
     bottom:80px;
     right:10px;
-    left:10px;
-    max-width:none;
+    top:auto;
+    left:auto;
+    min-width:180px;
+    max-width:240px;
+    padding:6px 10px;
   }
+  .quest-tracker-title{font-size:11px;}
+  .quest-tracker-progress{font-size:9px;}
 }
 
 /* ═══════════════════════════════════════════════════════════════════
