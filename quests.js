@@ -445,9 +445,120 @@ const QUEST_DEFINITIONS = [
     requires: { level: 10 },
     repeatable: false,
   },
+  // ═══════════════════════════════════════════════════════════════
+  // ALCHEMY PROFESSION QUESTS
+  // ═══════════════════════════════════════════════════════════════
+  // These scale the Alchemy profession. Each one requires gathering or
+  // crafting, and rewards Alchemy XP + mats for continued progression.
+  // Giver: 'alchemist' (new NPC in camp — The Veiled Alchemist).
+  // Progression is gated so players don't skip — each quest unlocks the
+  // next. Quests are REPEATABLE because they're the profession's daily grind.
+  {
+    id: 'alchemy_first_step',
+    title: 'First Steps in Alchemy',
+    giver: 'alchemist',
+    tier: 'zone',
+    narrative:
+      '"You think you can learn my craft? Show me you can find what grows. ' +
+      'Bring me ten ashroots from the Wastes. Simple. Yes?"',
+    objective: { type: 'gather_material', target: 'ashroot', count: 10 },
+    reward: { xp: 'auto', gold: 60, alchemyXp: 30 },
+    requires: { level: 3 },
+    repeatable: true,
+  },
+  {
+    id: 'alchemy_brittle_bones',
+    title: 'Brittle Things',
+    giver: 'alchemist',
+    tier: 'zone',
+    narrative:
+      '"Bone, too. The chipped sort. Don\'t bring me whole bones — I want the broken ones. ' +
+      'The broken ones remember more."',
+    objective: { type: 'gather_material', target: 'chippedBone', count: 15 },
+    reward: { xp: 'auto', gold: 80, alchemyXp: 45 },
+    requires: { level: 4, prerequisiteId: 'alchemy_first_step' },
+    repeatable: true,
+  },
+  {
+    id: 'alchemy_first_craft',
+    title: 'Make Something',
+    giver: 'alchemist',
+    tier: 'zone',
+    narrative:
+      '"Enough gathering. Craft me three Healing Draughts. ' +
+      'Yes, yours. No, I will not do it for you."',
+    objective: { type: 'craft_potion', target: 'healing_draught', count: 3 },
+    reward: { xp: 'auto', gold: 100, alchemyXp: 75, materials: { chippedBone: 20 } },
+    requires: { level: 5, prerequisiteId: 'alchemy_brittle_bones' },
+    repeatable: true,
+  },
+  {
+    id: 'alchemy_veilsilk_hunt',
+    title: 'The Silk of Passage',
+    giver: 'alchemist',
+    tier: 'major',
+    narrative:
+      '"The Crypts have veilsilk. Yes, dangerous. Yes, worth it. ' +
+      'Bring me five strands. Try not to die."',
+    objective: { type: 'gather_material', target: 'veilsilk', count: 5 },
+    reward: { xp: 'auto', gold: 250, alchemyXp: 180, materials: { veilsilk: 3 } },
+    requires: { level: 10, prerequisiteId: 'alchemy_first_craft' },
+    repeatable: true,
+  },
+  {
+    id: 'alchemy_full_set',
+    title: 'A Full Cabinet',
+    giver: 'alchemist',
+    tier: 'major',
+    narrative:
+      '"A proper alchemist has all the basics. ' +
+      'One of each draught — Healing, Aegis, Fury, Swiftness. Four in total. ' +
+      'You pick the tier. I\'ll know."',
+    objective: { type: 'craft_potion', target: 'any', count: 4 },
+    reward: { xp: 'auto', gold: 400, alchemyXp: 250, materials: { veilsilk: 5, blackbone: 3 } },
+    requires: { level: 12, prerequisiteId: 'alchemy_first_craft' },
+    repeatable: true,
+  },
+  {
+    id: 'alchemy_deep_harvest',
+    title: 'The Deep Harvest',
+    giver: 'alchemist',
+    tier: 'major',
+    narrative:
+      '"Blackbone. The Mire has it. It will cost you. Thirty pieces. ' +
+      'If you come back missing a finger, I\'ll trade you a potion for it."',
+    objective: { type: 'gather_material', target: 'blackbone', count: 30 },
+    reward: { xp: 'auto', gold: 600, alchemyXp: 400, materials: { blackbone: 10, veilsilk: 5 } },
+    requires: { level: 20, prerequisiteId: 'alchemy_veilsilk_hunt' },
+    repeatable: true,
+  },
+  {
+    id: 'alchemy_mythic_reagent',
+    title: 'Bone of What Was Never',
+    giver: 'alchemist',
+    tier: 'story',
+    narrative:
+      '"Mythbone. You\'ve heard of it. I\'ve only handled three in my life. ' +
+      'Bring me three of your own. From the Spire, where nothing should live but does."',
+    objective: { type: 'gather_material', target: 'mythbone', count: 3 },
+    reward: { xp: 'auto', gold: 2000, alchemyXp: 1000, materials: { mythbone: 1, ashenheart: 1 } },
+    requires: { level: 32, prerequisiteId: 'alchemy_deep_harvest' },
+    repeatable: true,
+  },
+  {
+    id: 'alchemy_master_craft',
+    title: 'Peerless Potioncraft',
+    giver: 'alchemist',
+    tier: 'story',
+    narrative:
+      '"Craft twenty potions. Any kind, any tier — but twenty. ' +
+      'I want to see that you do not flinch from the work. That is the difference."',
+    objective: { type: 'craft_potion', target: 'any', count: 20 },
+    reward: { xp: 'auto', gold: 3000, alchemyXp: 2500, materials: { mythbone: 3, ashenheart: 2 } },
+    requires: { level: 40, prerequisiteId: 'alchemy_mythic_reagent' },
+    repeatable: true,
+  },
 ];
-
-// ─── QUEST STATE ────────────────────────────────────────────────────
 // Single source of truth for what the player has accepted, completed, etc.
 // Serialized to save file. Structure:
 //   active:     {questId: {progress: currentCount, acceptedAt: ms}}
@@ -582,6 +693,13 @@ function turnInQuest(questId){
       }
     });
   }
+  // Alchemy profession XP — profession quests feed the new system
+  if(reward.alchemyXp && typeof addProfXP === 'function'){
+    addProfXP('Alchemy', reward.alchemyXp);
+    if(typeof addFeed === 'function'){
+      addFeed(`  └ +${reward.alchemyXp} Alchemy XP`, '#86efac');
+    }
+  }
   // Gear drop (future — wire to loot pool)
   // if(reward.gear){ ... }
 
@@ -678,6 +796,67 @@ function questOnDungeonClear(dungeonId){
         updated = true;
         _questNotifyProgress(q, active);
       }
+    }
+  });
+  if(updated) _updateQuestHUD();
+}
+
+// Called from harvestNode() in systems.js — advances gather_material objectives.
+// Progress increments by the quantity harvested.
+function questOnMaterialGathered(materialId, quantity){
+  if(!materialId) return;
+  let updated = false;
+  Object.keys(questState.active).forEach(qid => {
+    const q = QUEST_BY_ID[qid];
+    if(!q) return;
+    const active = questState.active[qid];
+    if(active.progress >= q.objective.count) return;
+    const obj = q.objective;
+    if(obj.type === 'gather_material' && obj.target === materialId){
+      active.progress = Math.min(obj.count, active.progress + (quantity || 1));
+      updated = true;
+      _questNotifyProgress(q, active);
+    }
+  });
+  if(updated) _updateQuestHUD();
+}
+
+// Called from craftAlchemyPotion() — advances craft_potion objectives.
+function questOnPotionCrafted(recipeId){
+  if(!recipeId) return;
+  let updated = false;
+  Object.keys(questState.active).forEach(qid => {
+    const q = QUEST_BY_ID[qid];
+    if(!q) return;
+    const active = questState.active[qid];
+    if(active.progress >= q.objective.count) return;
+    const obj = q.objective;
+    if(obj.type === 'craft_potion'){
+      if(obj.target === 'any' || obj.target === recipeId){
+        active.progress = Math.min(obj.count, active.progress + 1);
+        updated = true;
+        _questNotifyProgress(q, active);
+      }
+    }
+  });
+  if(updated) _updateQuestHUD();
+}
+
+// Called when an enemy drops a specific quest item. The drop roll happens
+// in spawnLoot / killEnemy chains. Progress is per-item regardless of tier.
+function questOnItemDropped(itemId){
+  if(!itemId) return;
+  let updated = false;
+  Object.keys(questState.active).forEach(qid => {
+    const q = QUEST_BY_ID[qid];
+    if(!q) return;
+    const active = questState.active[qid];
+    if(active.progress >= q.objective.count) return;
+    const obj = q.objective;
+    if(obj.type === 'collect_item' && obj.target === itemId){
+      active.progress = Math.min(obj.count, active.progress + 1);
+      updated = true;
+      _questNotifyProgress(q, active);
     }
   });
   if(updated) _updateQuestHUD();
@@ -886,6 +1065,9 @@ function _renderQuestCard(q, context){
     Object.entries(q.reward.materials).forEach(([mat, n])=>{
       html += `<span class="quest-card-reward reward-material">◈ ${n} ${mat}</span>`;
     });
+  }
+  if(q.reward.alchemyXp){
+    html += `<span class="quest-card-reward reward-material" style="color:#86efac">⚗ ${q.reward.alchemyXp} Alchemy XP</span>`;
   }
   html += '</div>';
   card.innerHTML = html;
@@ -1200,12 +1382,24 @@ function updateQuestHUDTracker(){
 // Opened when the player interacts with The Old Procession NPC in camp.
 // Shows three sections: turn-in ready, available to accept, active.
 function openProcessionDialogue(){
+  _questDialogueGiverFilter = null;   // show ALL quests (Procession = main hub)
+  const panel = document.getElementById('processionDialogue');
+  if(!panel) return;
+  panel.style.display = 'block';
+  renderProcessionDialogue();
+}
+// Open the Procession-style dialogue panel but filtered to a specific giver.
+// Used by the Alchemist NPC and future profession trainer NPCs.
+let _questDialogueGiverFilter = null;
+function openAlchemistDialogue(){
+  _questDialogueGiverFilter = 'alchemist';
   const panel = document.getElementById('processionDialogue');
   if(!panel) return;
   panel.style.display = 'block';
   renderProcessionDialogue();
 }
 function closeProcessionDialogue(){
+  _questDialogueGiverFilter = null;
   const panel = document.getElementById('processionDialogue');
   if(panel) panel.style.display = 'none';
 }
@@ -1218,9 +1412,17 @@ function renderProcessionDialogue(){
   availList.innerHTML = '';
   activeList.innerHTML = '';
 
-  const active = getActiveQuests();
-  const completed = getCompletedQuests();
-  const available = getAvailableQuests();
+  let active = getActiveQuests();
+  let completed = getCompletedQuests();
+  let available = getAvailableQuests();
+
+  // If this is a trainer dialogue (alchemist, etc.), only show their quests
+  if(_questDialogueGiverFilter){
+    const f = _questDialogueGiverFilter;
+    active = active.filter(q => q.giver === f);
+    completed = completed.filter(q => q.giver === f);
+    available = available.filter(q => q.giver === f);
+  }
 
   // Quests ready to turn in
   completed.forEach(q => turnInList.appendChild(_renderProcessionEntry(q, 'turn_in')));
@@ -1238,14 +1440,28 @@ function renderProcessionDialogue(){
   const narrEl = document.getElementById('processionNarrative');
   if(narrEl){
     let msg;
-    if(completed.length > 0){
-      msg = '"You return. You have done what we asked. Give us the proof."';
-    } else if(available.length > 0){
-      msg = '"We speak as one. We have offerings. The dead remember what must be done."';
-    } else if(active.length > 0){
-      msg = '"We see the work you carry. Finish it, and return to us."';
+    if(_questDialogueGiverFilter === 'alchemist'){
+      // Alchemist-specific voice — pragmatic, crafty, slightly impatient
+      if(completed.length > 0){
+        msg = '"You brought what I asked. Good. Now watch — this is where the real work begins."';
+      } else if(available.length > 0){
+        msg = '"I have work. It is not glamorous. It is not easy. But it pays, and it teaches. Listen."';
+      } else if(active.length > 0){
+        msg = '"You have what I asked for in your hands. Bring it back when you have enough. Not a moment sooner."';
+      } else {
+        msg = '"Nothing for you today. The world must refill before I ask again. Return in time."';
+      }
     } else {
-      msg = '"We have nothing to ask of you. Live, and come back when you are stronger."';
+      // Default Procession voice — collective, haunting, ceremonial
+      if(completed.length > 0){
+        msg = '"You return. You have done what we asked. Give us the proof."';
+      } else if(available.length > 0){
+        msg = '"We speak as one. We have offerings. The dead remember what must be done."';
+      } else if(active.length > 0){
+        msg = '"We see the work you carry. Finish it, and return to us."';
+      } else {
+        msg = '"We have nothing to ask of you. Live, and come back when you are stronger."';
+      }
     }
     narrEl.innerHTML = `<em>${_escHTML(msg)}</em>`;
   }
@@ -1279,6 +1495,9 @@ function _renderProcessionEntry(q, kind){
     Object.entries(q.reward.materials).forEach(([mat, n])=>{
       html += `<span class="quest-card-reward reward-material">◈ ${n} ${mat}</span>`;
     });
+  }
+  if(q.reward.alchemyXp){
+    html += `<span class="quest-card-reward reward-material" style="color:#86efac">⚗ ${q.reward.alchemyXp} Alchemy XP</span>`;
   }
   html += '</div>';
   row.innerHTML = html;
@@ -1460,6 +1679,7 @@ if(typeof window !== 'undefined'){
   window.closeQuests = closeQuests;
   window.switchQuestTab = switchQuestTab;
   window.openProcessionDialogue = openProcessionDialogue;
+  window.openAlchemistDialogue = openAlchemistDialogue;
   window.closeProcessionDialogue = closeProcessionDialogue;
   window.updateQuestHUDTracker = updateQuestHUDTracker;
   window.navigateToActiveQuest = navigateToActiveQuest;
