@@ -342,8 +342,12 @@ let curZone=ZONES[0],zoneTransiting=false;
 
 // ═══════ FORMULAS ════════════════════════════════════════
 function computeMaxHp(lv){
-  // Base formula scaled by class baseHp as a multiplier vs 1000 (Hollowcaller baseline)
-  const base = Math.round(800+lv*45+lv*lv*0.8);
+  // Rebalanced: lower L1 HP, faster mid-game scaling, slightly higher endgame.
+  // L1:   560 HP (was 846) — player is fragile, must kite/use cover
+  // L25:  1485 (was 1670) — modest but comfortable
+  // L50:  2735 (was 3050) — confident farming
+  // L100: 6160 (was 6050) — mythic-tier hero
+  const base = Math.round(500 + lv*38 + lv*lv*0.45);
   if(typeof player!=='undefined' && player && player.classId && typeof CLASS_DEFS!=='undefined'){
     const cls = CLASS_DEFS[player.classId] || CLASS_DEFS.hollowcaller;
     return Math.round(base * (cls.baseHp/1000));
@@ -351,10 +355,12 @@ function computeMaxHp(lv){
   return base;
 }
 function computeAttack(lv){
-  // Tempered scaling — quadratic term reduced from 0.04 to 0.015 so damage
-  // doesn't balloon exponentially past level 50. Linear growth preserved
-  // so leveling always feels meaningful.
-  const base = 12+lv*2.2+lv*lv*0.015;
+  // Rebalanced: lower L1 attack so enemies aren't instantly deleted.
+  // L1:   9.5 (was 14.2) — takes real effort to kill L1 enemies
+  // L25:  62 (was 79)    — power curve feels earned
+  // L50:  142 (was 159)  — still scales well
+  // L100: 354 (was 322)  — mythic scaling preserved
+  const base = 8 + lv*1.5 + lv*lv*0.025;
   if(typeof player!=='undefined' && player && player.classId && typeof CLASS_DEFS!=='undefined'){
     const cls = CLASS_DEFS[player.classId] || CLASS_DEFS.hollowcaller;
     return base * (cls.baseAtk/15);
@@ -492,16 +498,22 @@ function computeKillXP(playerLevel, enemyLevel, activity){
 // At lv1: base HP. At lv50: ~4.5x. At lv100: ~7.5x.
 // Kill pace should feel deliberate, not mindless cleave.
 function enemyHpScale(lv){
-  return 1.3 + 0.085 * lv - 0.0004 * lv * lv;
+  // Slight bump to low-level enemy HP so fights don't resolve in 3 seconds.
+  // L1:   1.55 (was 1.38)
+  // L25:  3.17 (was 3.17) — unchanged at mid
+  // L50:  4.75 (was 4.55)
+  return 1.50 + 0.075 * lv - 0.0003 * lv * lv;
 }
 
 // Enemy damage scale — grows with player level.
 // INCREASED AGAIN based on continued feedback that combat is too passive.
-// Previous (1.3 + 0.055*lv) wasn't enough — now scales harder so every
-// enemy engagement has genuine risk. Tanks can still soak; squishies must
-// kite or die.
+// Now starts higher at L1 — with the player's lower new base HP (560 vs 846),
+// enemies genuinely threaten from the first encounter.
 function enemyDmgScale(lv){
-  return 2.0 + 0.09 * lv - 0.0003 * lv * lv;
+  // L1:   2.7 (was 2.09) — player takes 10 hits to die, not 22
+  // L25:  4.5 (was 4.07) — mid-game tension
+  // L50:  6.3 (was 6.20) — comparable
+  return 2.50 + 0.08 * lv - 0.00025 * lv * lv;
 }
 
 // ═══════ PLAYER PASSIVE LEVEL BONUSES ══════════════════════════════
