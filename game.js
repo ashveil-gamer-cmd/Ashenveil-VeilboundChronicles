@@ -8421,8 +8421,25 @@ function update(dt,now){
     const buffSpd = typeof getActiveBuffValue === 'function' ? getActiveBuffValue('speed') : 0;
     const gearMoveSpd = typeof getGearBonus === 'function' ? getGearBonus('moveSpdPct') : 0;
     const spdMult=(1+(_tb('moveSpdPct')+gearMoveSpd)/100) * classSpdMult * levelSpdBonus * alchemySpeedBonus * (1 + buffSpd);
-    player.vx=(ix/m)*PLAYER_SPEED*spdMult;player.vy=(iy/m)*PLAYER_SPEED*spdMult;
-    player.facing=Math.atan2(iy,ix);
+    // Target velocity from input — blend toward it for a subtle accel feel.
+    // Blend factor 0.35 per frame ≈ reaches target in ~65ms at 60fps (responsive
+    // but not instant).
+    const targetVX = (ix/m) * PLAYER_SPEED * spdMult;
+    const targetVY = (iy/m) * PLAYER_SPEED * spdMult;
+    const BLEND = 0.35;
+    player.vx = player.vx + (targetVX - player.vx) * BLEND;
+    player.vy = player.vy + (targetVY - player.vy) * BLEND;
+    // Facing — angular interpolation along shortest path (not raw atan2 snap)
+    const targetFacing = Math.atan2(iy, ix);
+    if(typeof player.facing !== 'number' || !isFinite(player.facing)){
+      player.facing = targetFacing;
+    } else {
+      let delta = targetFacing - player.facing;
+      // Wrap delta into [-π, π] so we always rotate the short way
+      while(delta > Math.PI) delta -= Math.PI * 2;
+      while(delta < -Math.PI) delta += Math.PI * 2;
+      player.facing += delta * 0.5;  // 50% toward target per frame — responsive turn
+    }
     // Player touched keys — cancel any pending quest auto-walk
     if(player._questNavTarget){
       player._questNavTarget = null;
@@ -8651,15 +8668,26 @@ function update(dt,now){
     else if(state === 'reposition') spdBase = PLAYER_SPEED * 1.0;
     else                        spdBase = PLAYER_SPEED * 0.75;
     const spd = spdBase * spdMult;
-    player.vx=(mx/md)*spd; player.vy=(my/md)*spd;
-    player.facing=Math.atan2(my,mx);
-    // Only face the target while ACTIVELY ENGAGING — otherwise facing
-    // should match movement direction. This fixes the visual bug where
-    // the character walks toward waypoint but faces a distant enemy,
-    // looking like they're running sideways forever.
+    // Smoothed velocity — same blend as manual movement
+    const targetVXafk = (mx/md) * spd;
+    const targetVYafk = (my/md) * spd;
+    const BLEND_AFK = 0.35;
+    player.vx = player.vx + (targetVXafk - player.vx) * BLEND_AFK;
+    player.vy = player.vy + (targetVYafk - player.vy) * BLEND_AFK;
+    // Facing — angular interpolation along shortest path
+    let targetFacingAfk = Math.atan2(my, mx);
+    // Face the target while ACTIVELY ENGAGING — otherwise facing matches motion
     if(target && state === 'engage'){
-      const fdx=target.x-player.x, fdy=target.y-player.y;
-      player.facing=Math.atan2(fdy,fdx);
+      const fdx = target.x - player.x, fdy = target.y - player.y;
+      targetFacingAfk = Math.atan2(fdy, fdx);
+    }
+    if(typeof player.facing !== 'number' || !isFinite(player.facing)){
+      player.facing = targetFacingAfk;
+    } else {
+      let deltaAfk = targetFacingAfk - player.facing;
+      while(deltaAfk > Math.PI) deltaAfk -= Math.PI * 2;
+      while(deltaAfk < -Math.PI) deltaAfk += Math.PI * 2;
+      player.facing += deltaAfk * 0.5;
     }
     // Store current target so AFK ability logic can make smart choices
     player._afkTarget = target;
