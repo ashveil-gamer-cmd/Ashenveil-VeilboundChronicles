@@ -9429,7 +9429,7 @@ function updateHUD(now){
     document.getElementById('spFill').style.width=(sc/(player.maxBonds||MAX_SPIRITS)*100)+'%';
   }
   document.getElementById('levelBadge').textContent=`LV ${player.level}`;
-  document.getElementById('hpNum').textContent=`${Math.ceil(player.hp)}`;
+  document.getElementById('hpNum').textContent=`${Math.ceil(player.hp)} / ${player.maxHp}`;
   document.getElementById('goldLabel').textContent=`💰 ${player.gold} G`;
   // Zone label (top-right) — always reflects current zone, including camp
   const zn = document.getElementById('zoneName');
