@@ -1615,9 +1615,13 @@ let player={
   afkTimer:0,afkCommit:12000,sector:0,
   visitedSectors:new Array(9).fill(false),
   maxBonds:MAX_SPIRITS,
-  // AFK mode — OFF by default. Player toggles via HUD button or 'F' key.
-  // When OFF: player stands still when not providing input. When ON: auto-
-  // paths through the world and fights. ALWAYS OFF in camp regardless of flag.
+  // AFK mode — OFF by default. Player toggles via HUD buttons.
+  // Split into TWO independent flags so players can enable auto-movement
+  // WITHOUT auto-combat (useful for traversal-only AFK), or auto-combat
+  // WITHOUT auto-movement (stationary turret mode).
+  // Legacy `afkEnabled` field kept as computed shorthand (either flag on).
+  afkMove:false,       // auto-pathing to waypoints, looting, portal entry
+  afkCombat:false,     // auto-casting abilities, facing targets, engaging
   afkEnabled:false,};
 
 let spirits=[],enemies=[],particles=[],dmgTexts=[],groundFX=[],enemyProjectiles=[];
@@ -5963,6 +5967,8 @@ function _aiGolem(e, d, dx, dy, now, dt){
       const dmgReducePct = _tb('dmgReducePct');
       const finalDmg = dmg * (1 - Math.min(dmgReducePct + gearRes, 80)/100);
       player.hp -= finalDmg;
+      if(player.hp < 0) player.hp = 0;
+      player._lastDamageTakenAt = performance.now();
       player.iframes = 400;
       player.hitFlash = 0.2;
       spawnDmgText(player.x, player.y - 20, Math.round(finalDmg), '#ef4444', false);
@@ -6046,6 +6052,8 @@ function updateEnemyProjectiles(now, dt){
       const dmgReducePct = _tb('dmgReducePct');
       const finalDmg = p.dmg * (1 - Math.min(dmgReducePct + gearRes, 80)/100);
       player.hp -= finalDmg;
+      if(player.hp < 0) player.hp = 0;
+      player._lastDamageTakenAt = performance.now();
       player.iframes = 240;
       player.hitFlash = 0.18;
       spawnDmgText(player.x, player.y - 20, Math.round(finalDmg), p.color, false);
@@ -8936,7 +8944,11 @@ function update(dt,now){
   //   2. Not in camp (camp is always a safe pause zone)
   //   3. Player has been idle long enough
   const inCamp = curZone?.isCamp === true;
-  const isAfk = player.afkEnabled && !inCamp && (now - player.lastInput > AFK_IDLE);
+  const idleEnough = (now - player.lastInput > AFK_IDLE);
+  const isAfkMove = player.afkMove && !inCamp && idleEnough;
+  const isAfkCombat = player.afkCombat && !inCamp && idleEnough;
+  // Legacy combined flag — used by code that doesn't differentiate
+  const isAfk = isAfkMove;
   // Class-specific speed multiplier — Ironwake is slower than Hollowcaller
   const classSpdMult = (CLASS_DEFS[player.classId]||CLASS_DEFS.hollowcaller).speedMult || 1.0;
   // Level-based passive speed bonus (idle-game feel — leveling makes you faster).
@@ -9330,6 +9342,18 @@ function update(dt,now){
     player.hp = Math.min(player.maxHp, player.hp + lbRegen * dt);
   }
 
+  // ─── PASSIVE OUT-OF-COMBAT REGENERATION ────────────────────────
+  // 2% max HP per second, kicks in 4s after last damage taken. Encourages
+  // tactical retreat between fights instead of requiring constant potion use.
+  // Does NOT activate during active combat — player must disengage briefly.
+  const OOC_REGEN_DELAY_MS = 4000;
+  const OOC_REGEN_RATE = 0.02;  // 2% max HP per second
+  const lastHit = player._lastDamageTakenAt || 0;
+  const timeSinceHit = now - lastHit;
+  if(timeSinceHit > OOC_REGEN_DELAY_MS && player.hp < player.maxHp && !player.isDead){
+    player.hp = Math.min(player.maxHp, player.hp + player.maxHp * OOC_REGEN_RATE * dt);
+  }
+
   // Auto attack — uses class attack range (Hollowcaller 220, Ironwake 85)
   const classAttackRange = (CLASS_DEFS[player.classId]||CLASS_DEFS.hollowcaller).attackRange || ATTACK_RANGE;
   // Level-based attack speed bonus shortens the attack interval
@@ -9395,12 +9419,49 @@ function update(dt,now){
     }
   }
 
-  // AFK auto-cast — smart per-ability gating.
-  // Bad: fire every ability on CD (wastes Soul Nova on lone mobs).
-  // Good: each ability only fires when its context is favorable.
-  if(isAfk){
-    const afkTarget = player._afkTarget;
-    const crowd = player._afkCrowdCount || 0;
+  // AFK auto-cast — fires when AFK combat is on, independent of AFK move.
+  // If combat-only AFK (no movement), we still need to scan for a target
+  // since the movement block is the one that normally populates _afkTarget.
+  if(isAfkCombat){
+    let afkTarget = player._afkTarget;
+    let crowd = player._afkCrowdCount || 0;
+    // If AFK move is OFF, the movement block didn't populate target. Do a
+    // fresh scan using the same logic as the movement state machine so
+    // combat-only mode works from a standstill.
+    if(!isAfkMove){
+      const cls = (CLASS_DEFS[player.classId]||CLASS_DEFS.hollowcaller);
+      const attackRange = cls.attackRange || 220;
+      const MAX_DETECT = Math.max(attackRange * 2.5, 450);
+      let nearest = null, nearestDist = Infinity;
+      let localCrowd = 0;
+      enemies.forEach(e => {
+        if(e.dead) return;
+        const dx = e.x - player.x, dy = e.y - player.y;
+        const d2 = dx*dx + dy*dy;
+        if(d2 > MAX_DETECT * MAX_DETECT) return;
+        const d = Math.sqrt(d2);
+        if(d < nearestDist){ nearest = e; nearestDist = d; }
+        if(d2 < 200*200) localCrowd++;
+      });
+      afkTarget = nearest;
+      crowd = localCrowd;
+      player._afkTarget = nearest;
+      player._afkCrowdCount = localCrowd;
+      // Face the nearest target so ability cones hit — but only if close enough
+      if(nearest && nearestDist < MAX_DETECT){
+        const fdx = nearest.x - player.x, fdy = nearest.y - player.y;
+        const targetFacing = Math.atan2(fdy, fdx);
+        // Same angular interpolation as movement code for smoothness
+        if(typeof player.facing !== 'number' || !isFinite(player.facing)){
+          player.facing = targetFacing;
+        } else {
+          let delta = targetFacing - player.facing;
+          while(delta > Math.PI) delta -= Math.PI * 2;
+          while(delta < -Math.PI) delta += Math.PI * 2;
+          player.facing += delta * 0.5;
+        }
+      }
+    }
     for(let i=0; i<5; i++){
       if(now < abilityCDs[i]) continue;
       if(shouldAfkCast(i, afkTarget, crowd, now)) playerCast(i);
@@ -9687,6 +9748,8 @@ function update(dt,now){
           incomingDmg *= (player.bloodrushTakenMult || 1.5);
         }
         player.hp-=incomingDmg;
+        if(player.hp < 0) player.hp = 0;  // clamp — never show negative HP
+        player._lastDamageTakenAt = now;   // ← out-of-combat regen suppression
         // Crimson Ascendance talent — triggers when HP drops below 20%.
         // Resets all ability CDs and grants a 4s guaranteed-crit window.
         // Crimson Sovereign capstone doubles the number of triggers per fight.
@@ -10102,6 +10165,8 @@ function buildSave(){
       _testSetsGranted: player._testSetsGranted || false,
       // AFK mode toggle — persist so it survives reloads
       afkEnabled: !!player.afkEnabled,
+      afkMove: !!player.afkMove,
+      afkCombat: !!player.afkCombat,
       // Alchemy potion stacks — { 'recipe_t<tier>': count }
       potions: player.potions ? JSON.parse(JSON.stringify(player.potions)) : {},
       // Raise archetype cycle position — persists so the cycle indicator
@@ -10309,6 +10374,15 @@ function applySave(data){
   player.maxBonds=data.player?.maxBonds??MAX_SPIRITS;
   // AFK toggle persists across reloads so player's preference sticks
   player.afkEnabled = !!data.player?.afkEnabled;
+  // New split flags — fall back to legacy afkEnabled for forward-compat
+  player.afkMove = (typeof data.player?.afkMove === 'boolean')
+    ? data.player.afkMove
+    : player.afkEnabled;
+  player.afkCombat = (typeof data.player?.afkCombat === 'boolean')
+    ? data.player.afkCombat
+    : player.afkEnabled;
+  // Sync legacy flag with new flags (in case one but not both was on)
+  player.afkEnabled = !!(player.afkMove || player.afkCombat);
   // Alchemy potion stacks
   player.potions = (data.player?.potions && typeof data.player.potions === 'object')
     ? JSON.parse(JSON.stringify(data.player.potions))
@@ -10786,22 +10860,68 @@ function closeMobileMenu(){
 // Explicit player-controlled AFK. Defaults OFF. F key or UI button toggles.
 // Auto-disables when entering camp. Re-enables nothing — player must choose.
 function toggleAfkMode(){
-  // Cannot enable AFK in camp — camp is always a safe pause zone
+  // Legacy full-AFK toggle (F-key). Toggles BOTH move + combat together.
   if(curZone?.isCamp){
     if(typeof addFeed === 'function') addFeed('AFK disabled in camp', '#9ca3af');
     return;
   }
-  player.afkEnabled = !player.afkEnabled;
+  const turningOn = !(player.afkMove || player.afkCombat);
+  player.afkMove = turningOn;
+  player.afkCombat = turningOn;
+  player.afkEnabled = turningOn;   // legacy mirror
   updateAfkToggleUI();
   if(typeof addFeed === 'function'){
-    if(player.afkEnabled){
-      addFeed('⚙ AFK MODE: ON — auto-fighting enabled', '#f59e0b');
+    if(turningOn){
+      addFeed('⚙ AFK: MOVE + COMBAT ON', '#f59e0b');
+      if(typeof setAfkWaypoint === 'function') setAfkWaypoint();
+      player._afkStuckSince = 0;
     } else {
-      addFeed('⚙ AFK MODE: OFF — manual control', '#9ca3af');
-      // Clear AFK movement immediately
+      addFeed('⚙ AFK: OFF — manual control', '#9ca3af');
       player.vx = 0; player.vy = 0;
       player.afkTimer = 0;
     }
+  }
+  if(typeof writeSave === 'function') writeSave();
+}
+
+// Toggle AFK movement only — character walks between sectors, loots caches,
+// enters portals, but does NOT auto-cast abilities or auto-engage enemies.
+function toggleAfkMove(){
+  if(curZone?.isCamp){
+    if(typeof addFeed === 'function') addFeed('AFK disabled in camp', '#9ca3af');
+    return;
+  }
+  player.afkMove = !player.afkMove;
+  player.afkEnabled = !!(player.afkMove || player.afkCombat);
+  updateAfkToggleUI();
+  if(typeof addFeed === 'function'){
+    addFeed(player.afkMove ? '↯ AFK MOVE: ON' : '↯ AFK MOVE: OFF',
+            player.afkMove ? '#86efac' : '#9ca3af');
+  }
+  if(player.afkMove){
+    if(typeof setAfkWaypoint === 'function') setAfkWaypoint();
+    player._afkStuckSince = 0;
+  } else {
+    player.vx = 0; player.vy = 0;
+    player.afkTimer = 0;
+  }
+  if(typeof writeSave === 'function') writeSave();
+}
+
+// Toggle AFK combat only — character auto-casts abilities and auto-engages
+// enemies but does NOT auto-move between sectors. Useful for stationary
+// defense ("turret mode") or when player wants to steer but not aim.
+function toggleAfkCombat(){
+  if(curZone?.isCamp){
+    if(typeof addFeed === 'function') addFeed('AFK disabled in camp', '#9ca3af');
+    return;
+  }
+  player.afkCombat = !player.afkCombat;
+  player.afkEnabled = !!(player.afkMove || player.afkCombat);
+  updateAfkToggleUI();
+  if(typeof addFeed === 'function'){
+    addFeed(player.afkCombat ? '⚔ AFK COMBAT: ON' : '⚔ AFK COMBAT: OFF',
+            player.afkCombat ? '#ef4444' : '#9ca3af');
   }
   if(typeof writeSave === 'function') writeSave();
 }
@@ -11021,34 +11141,61 @@ if(typeof window !== 'undefined'){
 }
 
 function updateAfkToggleUI(){
-  const btn = document.getElementById('afkToggle');
-  const ind = document.getElementById('afkIndicator');
-  const lbl = document.getElementById('afkLabel');
-  if(!btn) return;
   const inCamp = curZone?.isCamp === true;
-  if(inCamp){
-    btn.classList.add('afk-disabled');
-    btn.classList.remove('afk-on');
-    if(ind) ind.textContent = '◯';
-    if(lbl) lbl.textContent = 'SAFE';
-    btn.title = 'AFK disabled in camp (safe zone)';
-  } else if(player.afkEnabled){
-    btn.classList.add('afk-on');
-    btn.classList.remove('afk-disabled');
-    if(ind) ind.textContent = '●';
-    if(lbl) lbl.textContent = 'AFK';
-    btn.title = 'AFK mode ON — click to disable (F)';
-  } else {
-    btn.classList.remove('afk-on');
-    btn.classList.remove('afk-disabled');
-    if(ind) ind.textContent = '◯';
-    if(lbl) lbl.textContent = 'AFK';
-    btn.title = 'AFK mode OFF — click to enable (F)';
+  // ═══ AFK MOVE BUTTON ═══
+  const moveBtn = document.getElementById('afkMoveToggle');
+  const moveInd = document.getElementById('afkMoveIndicator');
+  if(moveBtn){
+    if(inCamp){
+      moveBtn.classList.add('afk-disabled');
+      moveBtn.classList.remove('afk-on');
+      if(moveInd) moveInd.textContent = '◯';
+      moveBtn.title = 'AFK disabled in camp (safe zone)';
+    } else if(player.afkMove){
+      moveBtn.classList.add('afk-on');
+      moveBtn.classList.remove('afk-disabled');
+      if(moveInd) moveInd.textContent = '●';
+      moveBtn.title = 'AFK move ON — tap to disable';
+    } else {
+      moveBtn.classList.remove('afk-on');
+      moveBtn.classList.remove('afk-disabled');
+      if(moveInd) moveInd.textContent = '◯';
+      moveBtn.title = 'AFK move OFF — tap to enable';
+    }
+  }
+  // ═══ AFK COMBAT BUTTON ═══
+  const combatBtn = document.getElementById('afkCombatToggle');
+  const combatInd = document.getElementById('afkCombatIndicator');
+  if(combatBtn){
+    if(inCamp){
+      combatBtn.classList.add('afk-disabled');
+      combatBtn.classList.remove('afk-on');
+      if(combatInd) combatInd.textContent = '◯';
+      combatBtn.title = 'AFK disabled in camp (safe zone)';
+    } else if(player.afkCombat){
+      combatBtn.classList.add('afk-on');
+      combatBtn.classList.remove('afk-disabled');
+      if(combatInd) combatInd.textContent = '●';
+      combatBtn.title = 'AFK combat ON — tap to disable';
+    } else {
+      combatBtn.classList.remove('afk-on');
+      combatBtn.classList.remove('afk-disabled');
+      if(combatInd) combatInd.textContent = '◯';
+      combatBtn.title = 'AFK combat OFF — tap to enable';
+    }
+  }
+  // Legacy combined button — keep in sync so F-key still works
+  const btn = document.getElementById('afkToggle');
+  if(btn){
+    const on = player.afkMove || player.afkCombat;
+    btn.classList.toggle('afk-on', on);
+    btn.classList.toggle('afk-disabled', inCamp);
   }
 }
-// Call once on init + whenever zone changes — called from checkZone handler
 if(typeof window !== 'undefined'){
   window.toggleAfkMode = toggleAfkMode;
+  window.toggleAfkMove = toggleAfkMove;
+  window.toggleAfkCombat = toggleAfkCombat;
   window.updateAfkToggleUI = updateAfkToggleUI;
 }
 
