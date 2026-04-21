@@ -6854,14 +6854,44 @@ function playerCast(idx){
   _currentCastAbilityId = cls.abilities[idx]?.id || null;
   // Blood Price talent — set flag; first hit after this cast gets bonus dmg
   if(_tb('bloodPricePct') > 0) player._bloodPriceReady = true;
+  // Snapshot CD so we can tell if the cast actually fired
+  const prevCD = abilityCDs[idx];
   try {
     _playerCastDispatch(idx, now);
   } finally {
-    // Clear context AFTER cast finishes. Any follow-up damage triggered
-    // synchronously (explosions, chains, spirit hits) happens within this
-    // window and inherits the echo mods for the cast. Delayed setTimeout
-    // callbacks (Cataclysm chains) fire later; they don't inherit.
     _currentCastAbilityId = null;
+  }
+  // ═════ ABILITY CAST AURA ═════
+  // If the dispatch set a new cooldown, the cast fired — emit a visual
+  // pulse under the player so even failed target-less casts feel different
+  // from successful ones. Color tints per ability slot for quick reading.
+  if(abilityCDs[idx] > prevCD && abilityCDs[idx] > now){
+    const auraColors = [
+      '#9DC4B0',  // Q — teal (Raise / Anchor)
+      '#c084fc',  // W — purple (Veilmark / Bulwark)
+      '#f59e0b',  // E — gold (Detonate / Shatter)
+      '#ef4444',  // R — red (Wrath / Retribution)
+      '#fbbf24',  // Ult — bright gold
+    ];
+    const auraColor = auraColors[idx] || '#c084fc';
+    pushGroundFX({
+      type:'castAura',
+      x:player.x, y:player.y,
+      r:24, maxR: idx === 4 ? 160 : 80,   // ult is bigger
+      color:auraColor,
+      life:0.45, maxLife:0.45,
+    });
+    // Ult also gets a brighter inner bloom + stronger shake
+    if(idx === 4){
+      pushGroundFX({
+        type:'bloom',
+        x:player.x, y:player.y,
+        r:90, maxR:90,
+        color:auraColor,
+        life:0.5, maxLife:0.5,
+      });
+      if(typeof screenShake === 'function') screenShake(10, 260);
+    }
   }
 }
 
@@ -7882,6 +7912,66 @@ function drawGroundFX(now){
         }
       }
       ctx.restore();
+    } else if(fx.type === 'swingArc'){
+      // Melee weapon swing arc. Draws a fading crescent in front of the
+      // player in the direction they're facing. Sweeps from one side to
+      // the other over the fx lifetime.
+      const progress = 1 - (fx.life / fx.maxLife); // 0 → 1
+      const sweep = Math.PI * 1.2;                 // 216° arc
+      const halfSweep = sweep / 2;
+      const startAngle = fx.facing - halfSweep;
+      const endAngle = fx.facing + halfSweep;
+      // Sword tip traces from start to end over the lifetime
+      const tipAngle = startAngle + sweep * progress;
+      ctx.save();
+      ctx.translate(fx.x, fx.y);
+      // Arc fills in behind the sword tip
+      const visibleEndAngle = Math.min(tipAngle, endAngle);
+      ctx.globalAlpha = a * 0.65;
+      ctx.strokeStyle = fx.color;
+      ctx.lineWidth = 5;
+      ctx.lineCap = 'round';
+      ctx.shadowColor = fx.color;
+      ctx.shadowBlur = 14;
+      ctx.beginPath();
+      ctx.arc(0, 0, fx.r, startAngle, visibleEndAngle);
+      ctx.stroke();
+      // Bright leading edge — a sharper white line at the current tip
+      ctx.globalAlpha = a * 0.9;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.shadowBlur = 8;
+      const tipStart = Math.max(startAngle, tipAngle - 0.25);
+      ctx.beginPath();
+      ctx.arc(0, 0, fx.r, tipStart, tipAngle);
+      ctx.stroke();
+      ctx.restore();
+    } else if(fx.type === 'castAura'){
+      // Caster cast pulse — expanding ring under player with inner glow.
+      // Used when Hollowcaller auto-attacks or any ability fires.
+      const progress = 1 - (fx.life / fx.maxLife); // 0 → 1
+      const r = fx.r + (fx.maxR - fx.r) * progress;
+      ctx.save();
+      ctx.globalAlpha = a * 0.55;
+      // Inner glow bloom
+      const grad = ctx.createRadialGradient(fx.x, fx.y, 0, fx.x, fx.y, r);
+      grad.addColorStop(0, fx.color + 'aa');
+      grad.addColorStop(0.6, fx.color + '33');
+      grad.addColorStop(1, fx.color + '00');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(fx.x, fx.y, r, 0, Math.PI*2);
+      ctx.fill();
+      // Outer ring
+      ctx.globalAlpha = a * 0.7;
+      ctx.strokeStyle = fx.color;
+      ctx.lineWidth = 2.5;
+      ctx.shadowColor = fx.color;
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.arc(fx.x, fx.y, r, 0, Math.PI*2);
+      ctx.stroke();
+      ctx.restore();
     }
     ctx.restore();
   });
@@ -8376,11 +8466,59 @@ function update(dt,now){
   const effAtkCD = ATTACK_CD / atkSpdBonus;
   if(now-player.lastAttack>effAtkCD){
     const t=getNearestEnemy(classAttackRange);
-    if(t){player.lastAttack=now;hitEnemy(t,player.attack);SFX.hit();
-      // Attack arc particles — Ironwake red, Hollowcaller purple
-      const arcColor = player.classId==='ironwake' ? '#ef4444' : '#c084fc';
-      const dx=t.x-player.x,dy=t.y-player.y,d=Math.sqrt(dx*dx+dy*dy)||1;
-      for(let i=0;i<4;i++)particles.push({x:player.x+dx/d*(40+i*30),y:player.y+dy/d*(40+i*30),vx:(Math.random()-0.5)*60,vy:(Math.random()-0.5)*60,life:0.25,maxLife:0.25,color:arcColor,size:2+Math.random()*2});
+    if(t){
+      player.lastAttack=now;
+      hitEnemy(t,player.attack);
+      SFX.hit();
+      const dx=t.x-player.x, dy=t.y-player.y;
+      const d=Math.sqrt(dx*dx+dy*dy)||1;
+      const angle = Math.atan2(dy, dx);
+      if(player.classId === 'ironwake'){
+        // Melee — wide swing arc in facing direction
+        pushGroundFX({
+          type:'swingArc',
+          x:player.x, y:player.y,
+          r:60, facing:angle,
+          color:'#ef4444',
+          life:0.22, maxLife:0.22,
+        });
+        // Sparks at impact point
+        for(let i=0;i<5;i++){
+          const pa = angle + (Math.random()-0.5)*0.6;
+          particles.push({
+            x:t.x, y:t.y,
+            vx:Math.cos(pa)*80, vy:Math.sin(pa)*80-40,
+            life:0.3, maxLife:0.3,
+            color:'#ffd166', size:2+Math.random()*2,
+          });
+        }
+      } else {
+        // Caster — pulse ring at player + trail to target
+        pushGroundFX({
+          type:'castAura',
+          x:player.x, y:player.y,
+          r:18, maxR:50,
+          color:'#c084fc',
+          life:0.35, maxLife:0.35,
+        });
+        // Wisp trail from player to target
+        for(let i=0;i<6;i++){
+          const t01 = i/6;
+          const px = player.x + dx*t01;
+          const py = player.y + dy*t01;
+          particles.push({
+            x:px, y:py,
+            vx:(Math.random()-0.5)*40, vy:(Math.random()-0.5)*40-20,
+            life:0.25+Math.random()*0.15, maxLife:0.4,
+            color:'#c084fc', size:2+Math.random()*2,
+          });
+        }
+        // Small impact bloom at target
+        pushGroundFX({
+          type:'bloom', x:t.x, y:t.y, r:30, maxR:30,
+          color:'#c084fc', life:0.25, maxLife:0.25,
+        });
+      }
     }
   }
 
