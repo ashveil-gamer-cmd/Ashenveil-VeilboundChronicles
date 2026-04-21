@@ -867,7 +867,271 @@ let professions={
   Weaponsmith:{level:1,xp:0,xpToNext:120,materials:{scrap:0,etherDust:0,runecore:0,soulbond:0}},
   Armorer:    {level:1,xp:0,xpToNext:120,materials:{scrap:0,etherDust:0,runecore:0,soulbond:0}},
   Ritualist:  {level:1,xp:0,xpToNext:120,materials:{scrap:0,etherDust:0,runecore:0,soulbond:0}},
+  // ═════ ALCHEMY — infinite-ladder profession ═════
+  // Uses separate material pool (herbs/essences/reagents) distinct from scrap-based
+  // smithing mats. Caps at L100 instead of L20. Recipes don't expire — they UPGRADE.
+  // Every 10 levels unlocks a new quality tier for all known potions.
+  Alchemy:{
+    level:1, xp:0, xpToNext:150,
+    materials:{
+      // Tier 1-3 (common) — drop from zone props / basic enemies
+      ashroot: 0,         // basic herb
+      chippedBone: 0,     // basic reagent
+      // Tier 4-6 (uncommon) — drop from elites / uncommon world nodes
+      veilsilk: 0,        // rare herb
+      blackbone: 0,       // rare reagent
+      // Tier 7-10 (rare) — drop from bosses / Veilgate T5+
+      mythbone: 0,        // mythic reagent
+      ashenheart: 0,      // mythic essence
+    },
+    // Alchemy-specific state — quality tier per recipe (1-10+).
+    // A recipe starts at tier 1 when first learned. Rank-ups consume materials
+    // and advance the tier for that specific recipe. Higher tier = stronger potion.
+    recipeTiers: {},      // { recipeId: currentTier }
+  },
 };
+
+// Alchemy level cap is separate — the infinite-ladder profession goes higher
+const ALCHEMY_MAX_LEVEL = 100;
+
+// ═══════════════════════════════════════════════════════════════════
+// ALCHEMY RECIPE CATALOG
+// ═══════════════════════════════════════════════════════════════════
+// Each recipe is a SINGLE entry that exists from start to end of game.
+// The potion's QUALITY TIER goes up as you rank the recipe, costing materials.
+// Higher tier = stronger effect. No recipe ever becomes obsolete.
+//
+// Tier unlock: profession level / 10 + 1 (so L20 Alchemy = can upgrade to T3)
+// Effect scaling: roughly +35% per tier — T1 is the starter, T10 is endgame.
+// Cost scaling: materials needed per rank-up roughly doubles each tier.
+
+const ALCHEMY_RECIPES = [
+  {
+    id: 'healing_draught',
+    name: 'Healing Draught',
+    icon: '❤',
+    color: '#ef4444',
+    description: 'Instantly restores HP. The cornerstone of survival.',
+    // What the potion does when consumed — tier multiplies the effect
+    effect: 'heal',
+    baseValue: 80,               // HP healed at tier 1
+    scalePerTier: 1.50,          // +50% per tier — T1=80, T5=405, T10=3075
+    cost: {ashroot: 1},          // what ONE potion costs to craft (distinct from rank-up)
+  },
+  {
+    id: 'aegis_draught',
+    name: 'Aegis Draught',
+    icon: '🛡',
+    color: '#60a5fa',
+    description: 'Reduces incoming damage for 30 seconds.',
+    effect: 'buff_dr',
+    baseValue: 10,               // % damage reduction at tier 1
+    scalePerTier: 1.25,          // +25% per tier — T1=10%, T10=75%
+    duration: 30000,
+    cost: {ashroot: 2, chippedBone: 1},
+  },
+  {
+    id: 'fury_draught',
+    name: 'Fury Draught',
+    icon: '⚔',
+    color: '#f59e0b',
+    description: 'Increases attack damage for 30 seconds.',
+    effect: 'buff_dmg',
+    baseValue: 15,               // % bonus damage at tier 1
+    scalePerTier: 1.30,          // T1=15%, T10=160%
+    duration: 30000,
+    cost: {chippedBone: 2, ashroot: 1},
+  },
+  {
+    id: 'swiftness_draught',
+    name: 'Swiftness Draught',
+    icon: '↯',
+    color: '#86efac',
+    description: 'Increases movement speed for 60 seconds.',
+    effect: 'buff_speed',
+    baseValue: 15,               // % move speed at tier 1
+    scalePerTier: 1.20,          // T1=15%, T10=90%
+    duration: 60000,
+    cost: {ashroot: 2},
+  },
+];
+
+// Tier rank-up cost table. Index 0 = rank 1→2, etc. Higher tiers need
+// higher-tier materials. Missing entries default to last available.
+// Formula philosophy: tier N costs should be painful to gather but doable.
+const ALCHEMY_TIER_COSTS = [
+  null,                                                                   // tier 1 — starting tier, no cost
+  {ashroot: 20, chippedBone: 10},                                          // → T2
+  {ashroot: 40, chippedBone: 25},                                          // → T3
+  {ashroot: 80, chippedBone: 50, veilsilk: 3},                             // → T4
+  {ashroot: 150, chippedBone: 100, veilsilk: 10, blackbone: 5},            // → T5
+  {veilsilk: 30, blackbone: 20, chippedBone: 200},                         // → T6
+  {veilsilk: 60, blackbone: 40, mythbone: 5},                              // → T7
+  {veilsilk: 120, blackbone: 80, mythbone: 15, ashenheart: 2},             // → T8
+  {veilsilk: 250, blackbone: 160, mythbone: 40, ashenheart: 8},            // → T9
+  {mythbone: 100, ashenheart: 25},                                         // → T10
+];
+
+// Player-friendly material names
+const MATERIAL_NAMES = (typeof MATERIAL_LABELS !== 'undefined' ? MATERIAL_LABELS : {});
+Object.assign(MATERIAL_NAMES, {
+  ashroot: 'Ashroot',
+  chippedBone: 'Chipped Bone',
+  veilsilk: 'Veilsilk',
+  blackbone: 'Blackbone',
+  mythbone: 'Mythbone',
+  ashenheart: 'Ashenheart',
+});
+
+// Get the current quality tier of a recipe for the player.
+// Every recipe starts at tier 1 when first discovered.
+function getAlchemyRecipeTier(recipeId){
+  const p = professions.Alchemy;
+  if(!p || !p.recipeTiers) return 1;
+  return p.recipeTiers[recipeId] || 1;
+}
+
+// Max tier the player can currently upgrade a recipe to, based on profession level.
+// Prof L1-9 → tier 1 cap, L10-19 → tier 2 cap, etc.
+function getMaxAlchemyTier(){
+  const p = professions.Alchemy;
+  if(!p) return 1;
+  return Math.min(10, Math.floor(p.level / 10) + 1);
+}
+
+// Compute the effect value of a recipe at its current tier.
+// e.g. Healing Draught at tier 4 with baseValue 80, scalePerTier 1.50
+//      = 80 * 1.50^3 = 270 HP healed
+function getAlchemyEffectValue(recipeId){
+  const recipe = ALCHEMY_RECIPES.find(r => r.id === recipeId);
+  if(!recipe) return 0;
+  const tier = getAlchemyRecipeTier(recipeId);
+  return Math.floor(recipe.baseValue * Math.pow(recipe.scalePerTier, tier - 1));
+}
+
+// Check if the player has enough materials to craft ONE potion at current tier.
+function canCraftAlchemy(recipeId){
+  const recipe = ALCHEMY_RECIPES.find(r => r.id === recipeId);
+  if(!recipe) return false;
+  const mats = professions.Alchemy?.materials;
+  if(!mats) return false;
+  return Object.entries(recipe.cost).every(([m,q]) => (mats[m] || 0) >= q);
+}
+
+// Craft one potion — consumes materials, adds to inventory.
+function craftAlchemyPotion(recipeId){
+  const recipe = ALCHEMY_RECIPES.find(r => r.id === recipeId);
+  if(!recipe){
+    if(typeof addFeed === 'function') addFeed('Unknown recipe', '#ef4444');
+    return false;
+  }
+  if(!canCraftAlchemy(recipeId)){
+    if(typeof addFeed === 'function') addFeed(`Not enough materials for ${recipe.name}`, '#ef4444');
+    return false;
+  }
+  const mats = professions.Alchemy.materials;
+  Object.entries(recipe.cost).forEach(([m,q]) => {
+    mats[m] = (mats[m] || 0) - q;
+  });
+  const tier = getAlchemyRecipeTier(recipeId);
+  const value = getAlchemyEffectValue(recipeId);
+  // Add to player's potion inventory (separate from gear bag)
+  if(!player.potions) player.potions = {};
+  const key = `${recipeId}_t${tier}`;
+  player.potions[key] = (player.potions[key] || 0) + 1;
+  if(typeof addFeed === 'function'){
+    addFeed(`⚗ Crafted ${recipe.name} (Tier ${tier}, ${value} ${recipe.effect.replace('buff_','')})`, recipe.color);
+  }
+  // XP gain scales with tier (harder recipes give more)
+  addProfXP('Alchemy', 5 + tier * 3);
+  if(typeof writeSave === 'function') writeSave();
+  return true;
+}
+
+// Can the player afford to rank up this recipe to the next tier?
+function canRankUpAlchemy(recipeId){
+  const curTier = getAlchemyRecipeTier(recipeId);
+  const nextTier = curTier + 1;
+  if(nextTier > 10) return false;                        // hard tier cap
+  if(nextTier > getMaxAlchemyTier()) return false;       // need more profession levels
+  const cost = ALCHEMY_TIER_COSTS[curTier];              // cost to go from curTier → curTier+1
+  if(!cost) return false;
+  const mats = professions.Alchemy?.materials;
+  if(!mats) return false;
+  return Object.entries(cost).every(([m,q]) => (mats[m] || 0) >= q);
+}
+
+// Rank up a recipe to the next tier — consumes the rank-up cost, increments tier.
+function rankUpAlchemyRecipe(recipeId){
+  if(!canRankUpAlchemy(recipeId)){
+    if(typeof addFeed === 'function') addFeed('Cannot rank up yet', '#ef4444');
+    return false;
+  }
+  const curTier = getAlchemyRecipeTier(recipeId);
+  const cost = ALCHEMY_TIER_COSTS[curTier];
+  const mats = professions.Alchemy.materials;
+  Object.entries(cost).forEach(([m,q]) => {
+    mats[m] = (mats[m] || 0) - q;
+  });
+  if(!professions.Alchemy.recipeTiers) professions.Alchemy.recipeTiers = {};
+  professions.Alchemy.recipeTiers[recipeId] = curTier + 1;
+  const recipe = ALCHEMY_RECIPES.find(r => r.id === recipeId);
+  if(typeof addFeed === 'function'){
+    addFeed(`✦ ${recipe.name} ranked up to Tier ${curTier + 1}!`, '#fbbf24');
+  }
+  // Big XP reward for a rank-up
+  addProfXP('Alchemy', 50 * (curTier + 1));
+  if(typeof writeSave === 'function') writeSave();
+  return true;
+}
+
+// Consume a potion — applies its effect, decrements count.
+// Players trigger this from a UI button or quick-slot keybind.
+function usePotion(recipeId, tier){
+  if(!player.potions) return false;
+  const key = `${recipeId}_t${tier}`;
+  if(!player.potions[key] || player.potions[key] <= 0){
+    if(typeof addFeed === 'function') addFeed('No potions of that tier', '#ef4444');
+    return false;
+  }
+  const recipe = ALCHEMY_RECIPES.find(r => r.id === recipeId);
+  if(!recipe) return false;
+  // Use actual tier from the stack, not current recipe tier — old T1 potions
+  // still work even after you've ranked up to T5.
+  const value = Math.floor(recipe.baseValue * Math.pow(recipe.scalePerTier, tier - 1));
+  // Apply the effect
+  if(recipe.effect === 'heal'){
+    const heal = Math.min(value, player.maxHp - player.hp);
+    if(heal <= 0){
+      if(typeof addFeed === 'function') addFeed('Already at full HP', '#9ca3af');
+      return false;
+    }
+    player.hp += heal;
+    if(typeof addFeed === 'function') addFeed(`⚗ +${heal} HP (T${tier} Healing)`, recipe.color);
+  } else if(recipe.effect === 'buff_dr'){
+    // Add a time-limited damage-reduction buff
+    player._alchemyDrBuff = {
+      pct: value,
+      expiresAt: performance.now() + recipe.duration,
+    };
+    if(typeof addFeed === 'function') addFeed(`⚗ Aegis T${tier} — ${value}% DR for ${recipe.duration/1000}s`, recipe.color);
+  } else if(recipe.effect === 'buff_dmg'){
+    player._alchemyDmgBuff = {
+      pct: value,
+      expiresAt: performance.now() + recipe.duration,
+    };
+    if(typeof addFeed === 'function') addFeed(`⚗ Fury T${tier} — +${value}% damage for ${recipe.duration/1000}s`, recipe.color);
+  } else if(recipe.effect === 'buff_speed'){
+    player._alchemySpeedBuff = {
+      pct: value,
+      expiresAt: performance.now() + recipe.duration,
+    };
+    if(typeof addFeed === 'function') addFeed(`⚗ Swiftness T${tier} — +${value}% speed for ${recipe.duration/1000}s`, recipe.color);
+  }
+  player.potions[key]--;
+  if(typeof writeSave === 'function') writeSave();
+  return true;
+}
 
 // Recipes — structure:
 //   profLv: profession level required to unlock
@@ -905,9 +1169,55 @@ const RECIPES={
   ],
 };
 
+// Dev helper for testing — credits 100 of every alchemy material.
+// Will be replaced by real world gathering next turn.
+function devCreditAlchemyMats(){
+  if(!professions.Alchemy) return;
+  const mats = professions.Alchemy.materials;
+  ['ashroot','chippedBone','veilsilk','blackbone','mythbone','ashenheart'].forEach(m => {
+    mats[m] = (mats[m] || 0) + 100;
+  });
+  if(typeof addFeed === 'function'){
+    addFeed('⚗ DEV: +100 of every alchemy material', '#86efac');
+  }
+}
+
+// Expose alchemy API globally so UI + dev console can call it
+if(typeof window !== 'undefined'){
+  window.ALCHEMY_RECIPES = ALCHEMY_RECIPES;
+  window.ALCHEMY_TIER_COSTS = ALCHEMY_TIER_COSTS;
+  window.ALCHEMY_MAX_LEVEL = ALCHEMY_MAX_LEVEL;
+  window.getAlchemyRecipeTier = getAlchemyRecipeTier;
+  window.getMaxAlchemyTier = getMaxAlchemyTier;
+  window.getAlchemyEffectValue = getAlchemyEffectValue;
+  window.canCraftAlchemy = canCraftAlchemy;
+  window.craftAlchemyPotion = craftAlchemyPotion;
+  window.canRankUpAlchemy = canRankUpAlchemy;
+  window.rankUpAlchemyRecipe = rankUpAlchemyRecipe;
+  window.usePotion = usePotion;
+  window.devCreditAlchemyMats = devCreditAlchemyMats;
+}
+
 function addProfXP(n,amt){
   const p=professions[n]; if(!p)return;
   p.xp+=amt;
+  // Alchemy: infinite-ladder profession, cap 100, XP curve scales harder
+  if(n === 'Alchemy'){
+    while(p.xp >= p.xpToNext && p.level < ALCHEMY_MAX_LEVEL){
+      p.xp -= p.xpToNext;
+      p.level++;
+      // XP curve — 150 at L1, ~3000 at L50, ~12000 at L100
+      p.xpToNext = Math.floor(150 * Math.pow(1.04, p.level - 1));
+      addFeed(`⚗ Alchemy LV ${p.level}!`, '#86efac');
+      // Every 10 levels, announce the new quality tier unlock
+      if(p.level % 10 === 0){
+        const tier = Math.floor(p.level / 10) + 1;
+        addFeed(`  └ Tier ${tier} potions now craftable`, '#fbbf24');
+      }
+    }
+    return;
+  }
+  // Legacy professions: cap 20, simpler curve
   while(p.xp>=p.xpToNext && p.level<20){
     p.xp-=p.xpToNext;
     p.level++;
@@ -1239,11 +1549,115 @@ function skipMusicTrack(){
     renderSettingsPlaylist();
   }, 500);
 }
+// Alchemy panel card — distinct from the other professions because the
+// recipes UPGRADE instead of unlocking new ones. Each recipe row shows
+// current tier, craft button, and rank-up button if materials allow.
+function renderAlchemyCard(prof){
+  const card = document.createElement('div');
+  card.className = 'prof-card prof-card-alchemy';
+  const maxTier = getMaxAlchemyTier();
+  const pct = prof.xp / prof.xpToNext * 100;
+  // Materials row
+  const matOrder = ['ashroot','chippedBone','veilsilk','blackbone','mythbone','ashenheart'];
+  const matColors = {
+    ashroot: '#86efac',
+    chippedBone: '#e5e7eb',
+    veilsilk: '#c084fc',
+    blackbone: '#9ca3af',
+    mythbone: '#fbbf24',
+    ashenheart: '#ef4444',
+  };
+  const matsHtml = matOrder.map(k => {
+    const v = prof.materials[k] || 0;
+    const label = MATERIAL_NAMES[k] || k;
+    const col = matColors[k];
+    return `<span class="mat${v>0?' has':''}" style="color:${col}${v>0?'':'88'}">${label}: ${v}</span>`;
+  }).join('');
+  card.innerHTML = `
+    <div class="prof-name">⚗ Alchemy — LV ${prof.level} / ${ALCHEMY_MAX_LEVEL}</div>
+    <div class="prof-xp-row">
+      <div class="prof-xp-bg"><div class="prof-xp-fill" style="width:${pct}%;background:linear-gradient(90deg,#86efac,#fbbf24)"></div></div>
+      <span class="prof-xp-text">${prof.xp} / ${prof.xpToNext} XP</span>
+    </div>
+    <div class="alchemy-tier-header">Current max tier: <span style="color:#fbbf24">T${maxTier}</span> (unlocks every 10 levels)</div>
+    <div class="mat-row">${matsHtml}</div>
+    <div class="recipe-list alchemy-recipes"></div>
+    <div class="alchemy-dev-row">
+      <button class="alchemy-dev-btn" onclick="devCreditAlchemyMats(); renderProfPanel();">⚠ DEV: +100 mats</button>
+    </div>
+  `;
+  const list = card.querySelector('.recipe-list');
+  ALCHEMY_RECIPES.forEach(r => {
+    const curTier = getAlchemyRecipeTier(r.id);
+    const effectVal = getAlchemyEffectValue(r.id);
+    const canCraft = canCraftAlchemy(r.id);
+    const canRank = canRankUpAlchemy(r.id);
+    const nextTierCost = (curTier < 10) ? ALCHEMY_TIER_COSTS[curTier] : null;
+    // Craft cost display
+    const craftCostHtml = Object.entries(r.cost).map(([k,v]) => {
+      const have = prof.materials[k] || 0;
+      const ok = have >= v;
+      const col = matColors[k] || '#9ca3af';
+      return `<span style="color:${ok?col:'#ef4444'}">${v} ${MATERIAL_NAMES[k] || k}</span>`;
+    }).join(' · ');
+    // Rank-up cost display
+    let rankUpHtml = '';
+    if(curTier >= 10){
+      rankUpHtml = `<div class="alchemy-rank-row">MAX TIER</div>`;
+    } else if(curTier >= maxTier){
+      rankUpHtml = `<div class="alchemy-rank-row" style="color:#9ca3af">Requires Alchemy LV ${curTier * 10}</div>`;
+    } else if(nextTierCost){
+      const nextEffect = Math.floor(r.baseValue * Math.pow(r.scalePerTier, curTier));
+      const costStr = Object.entries(nextTierCost).map(([k,v]) => {
+        const have = prof.materials[k] || 0;
+        const ok = have >= v;
+        const col = matColors[k] || '#9ca3af';
+        return `<span style="color:${ok?col:'#ef4444'}">${v} ${MATERIAL_NAMES[k] || k}</span>`;
+      }).join(' · ');
+      rankUpHtml = `
+        <div class="alchemy-rank-row">
+          <span class="alchemy-rank-preview">→ T${curTier+1}: <strong style="color:${r.color}">${nextEffect}</strong></span>
+          <span class="alchemy-rank-cost">Cost: ${costStr}</span>
+          <button class="alchemy-rank-btn${canRank?'':' disabled'}" ${canRank?'':'disabled'} onclick="rankUpAlchemyRecipe('${r.id}'); renderProfPanel();">RANK UP</button>
+        </div>
+      `;
+    }
+    // Potion inventory — how many of this recipe at this tier the player has
+    const potKey = `${r.id}_t${curTier}`;
+    const owned = (player.potions && player.potions[potKey]) || 0;
+    const row = document.createElement('div');
+    row.className = 'alchemy-recipe';
+    row.style.borderLeft = `3px solid ${r.color}`;
+    row.innerHTML = `
+      <div class="recipe-head">
+        <span class="recipe-icon" style="color:${r.color}">${r.icon}</span>
+        <span class="recipe-name" style="color:${r.color}">${r.name}</span>
+        <span class="alchemy-tier-badge" style="color:${r.color};border-color:${r.color}">T${curTier}</span>
+        <span class="alchemy-owned">×${owned}</span>
+      </div>
+      <div class="recipe-desc">${r.description}</div>
+      <div class="alchemy-effect">Current: <strong style="color:${r.color}">${effectVal}</strong> ${r.effect === 'heal' ? 'HP' : r.effect === 'buff_speed' ? '% speed for '+(r.duration/1000)+'s' : r.effect === 'buff_dmg' ? '% damage for '+(r.duration/1000)+'s' : '% DR for '+(r.duration/1000)+'s'}</div>
+      <div class="alchemy-craft-row">
+        <span class="alchemy-craft-cost">Craft cost: ${craftCostHtml}</span>
+        <button class="alchemy-craft-btn${canCraft?'':' disabled'}" ${canCraft?'':'disabled'} onclick="craftAlchemyPotion('${r.id}'); renderProfPanel();">CRAFT</button>
+      </div>
+      ${rankUpHtml}
+    `;
+    list.appendChild(row);
+  });
+  return card;
+}
+
 function renderProfPanel(){
   const cards=document.getElementById('profCards');
   if(!cards)return;
   cards.innerHTML='';
   Object.entries(professions).forEach(([name,prof])=>{
+    // Alchemy uses its own custom card with tier upgrade UI
+    if(name === 'Alchemy'){
+      cards.appendChild(renderAlchemyCard(prof));
+      return;
+    }
     const card=document.createElement('div');
     card.className='prof-card';
     const pct=prof.xp/prof.xpToNext*100;
@@ -1389,11 +1803,15 @@ function computeTalentBonuses(){
 function getTalentBonus(key){return _talentBonusCache[key]||0;}
 
 // Render the talent panel UI. Called whenever it opens or a talent is learned.
+// Currently active branch tab — preserves user's branch selection across
+// re-renders (e.g. after learning a talent).
+let _activeTalentBranch = null;
+
 function renderTalentPanel(){
   const container=document.getElementById('talentTree');
   if(!container)return;
   container.innerHTML='';
-  // Points header
+  // ─── Header — point total + reset button
   const header=document.createElement('div');
   header.className='talent-header';
   header.innerHTML=`
@@ -1403,52 +1821,133 @@ function renderTalentPanel(){
   container.appendChild(header);
   const resetBtn=document.getElementById('_resetTalentsBtn');
   if(resetBtn)resetBtn.addEventListener('click',resetTalents);
-  // Branches — filter by the player's class so Hollowcaller doesn't see
-  // Ironwake trees and vice versa. Branches without a classId show for all
-  // classes (legacy/safety fallback).
-  Object.entries(TALENT_TREE).forEach(([branchName,branch])=>{
-    if(branch.classId && branch.classId !== player.classId) return;
-    const spent=pointsInBranch(branchName);
-    const branchDiv=document.createElement('div');
-    branchDiv.className='talent-branch';
-    branchDiv.style.borderLeft=`3px solid ${branch.color}`;
-    branchDiv.innerHTML=`
-      <div class="talent-branch-hdr" style="color:${branch.color}">
-        <span class="talent-branch-icon">${branch.icon}</span>
-        <span class="talent-branch-name">${branchName}</span>
-        <span class="talent-branch-spent">${spent} pts</span>
-      </div>
-      <div class="talent-grid" id="tgrid-${branchName}"></div>
+
+  // ─── Filter branches by the player's class
+  const classBranches = Object.entries(TALENT_TREE).filter(
+    ([_, b]) => !b.classId || b.classId === player.classId
+  );
+  if(classBranches.length === 0) return;
+
+  // Default active branch = first class-appropriate one (or preserve last)
+  if(!_activeTalentBranch || !classBranches.find(([n])=>n===_activeTalentBranch)){
+    _activeTalentBranch = classBranches[0][0];
+  }
+
+  // ─── Branch tabs
+  const tabsRow = document.createElement('div');
+  tabsRow.className = 'talent-tabs';
+  classBranches.forEach(([branchName, branch])=>{
+    const spent = pointsInBranch(branchName);
+    const tab = document.createElement('button');
+    tab.className = 'talent-tab';
+    if(branchName === _activeTalentBranch) tab.classList.add('active');
+    // Pulse the tab if this branch has learnable talents + the player has points
+    const hasAvailableInBranch = branch.talents.some(t => {
+      const rank = talentState.learned[t.id] || 0;
+      return spent >= t.gate && rank < t.maxRank;
+    });
+    if(hasAvailableInBranch && talentState.points > 0 && branchName !== _activeTalentBranch){
+      tab.classList.add('has-available');
+    }
+    tab.style.setProperty('--branch-color', branch.color);
+    tab.innerHTML = `
+      <span class="ttab-icon">${branch.icon}</span>
+      <span class="ttab-name">${branchName}</span>
+      <span class="ttab-spent">${spent}</span>
     `;
-    container.appendChild(branchDiv);
-    const grid=branchDiv.querySelector(`#tgrid-${branchName}`);
-    branch.talents.forEach(talent=>{
-      const rank=talentState.learned[talent.id]||0;
-      const locked=spent<talent.gate;
-      const maxed=rank>=talent.maxRank;
-      const canLearn=!locked&&!maxed&&talentState.points>0;
-      const node=document.createElement('div');
-      node.className='talent-node';
-      if(rank>0)node.classList.add('learned');
-      if(locked)node.classList.add('locked');
-      if(maxed)node.classList.add('maxed');
-      if(canLearn)node.classList.add('available');
-      const effectText=rank>0?talent.effect(rank):talent.effect(1);
-      const gateText=locked?`<div class="tn-gate">Unlocks at ${talent.gate} pts</div>`:'';
-      node.innerHTML=`
+    tab.addEventListener('click', ()=>{
+      _activeTalentBranch = branchName;
+      renderTalentPanel();
+    });
+    tabsRow.appendChild(tab);
+  });
+  container.appendChild(tabsRow);
+
+  // ─── Render active branch only
+  const active = classBranches.find(([n])=>n===_activeTalentBranch);
+  if(!active) return;
+  const [branchName, branch] = active;
+  const spent = pointsInBranch(branchName);
+
+  // Group talents by gate (tier) so the layout shows progression naturally
+  const tierMap = new Map();
+  branch.talents.forEach(talent => {
+    const tier = talent.gate;
+    if(!tierMap.has(tier)) tierMap.set(tier, []);
+    tierMap.get(tier).push(talent);
+  });
+  const tiers = Array.from(tierMap.entries()).sort((a,b)=>a[0]-b[0]);
+
+  const branchDiv = document.createElement('div');
+  branchDiv.className = 'talent-branch-view';
+  branchDiv.style.borderLeft = `3px solid ${branch.color}`;
+
+  // Branch header (shows spent + capstone progress)
+  const capstoneGate = Math.max(...branch.talents.map(t => t.gate));
+  const branchHeader = document.createElement('div');
+  branchHeader.className = 'talent-branch-header';
+  branchHeader.style.color = branch.color;
+  branchHeader.innerHTML = `
+    <div class="tbv-name">
+      <span class="tbv-icon">${branch.icon}</span>
+      ${branchName}
+    </div>
+    <div class="tbv-progress">
+      <span class="tbv-spent">${spent} / ${capstoneGate}</span>
+      <span class="tbv-progress-label">to capstone</span>
+    </div>
+  `;
+  branchDiv.appendChild(branchHeader);
+
+  // Tier rows
+  tiers.forEach(([tier, talentsAtTier]) => {
+    const tierRow = document.createElement('div');
+    tierRow.className = 'talent-tier';
+    // Gate label
+    const isUnlocked = spent >= tier;
+    const gateLabel = document.createElement('div');
+    gateLabel.className = 'talent-tier-gate' + (isUnlocked ? ' unlocked' : ' locked');
+    gateLabel.innerHTML = tier === 0
+      ? `<span class="ttg-num">START</span>`
+      : `<span class="ttg-num">${tier}</span><span class="ttg-label">pts</span>`;
+    tierRow.appendChild(gateLabel);
+    // Nodes grid
+    const nodesGrid = document.createElement('div');
+    nodesGrid.className = 'talent-tier-nodes';
+    // Is this tier the capstone tier?
+    const isCapstoneTier = tier === capstoneGate;
+    talentsAtTier.forEach(talent => {
+      const rank = talentState.learned[talent.id] || 0;
+      const locked = spent < talent.gate;
+      const maxed = rank >= talent.maxRank;
+      const canLearn = !locked && !maxed && talentState.points > 0;
+      const node = document.createElement('div');
+      node.className = 'talent-node';
+      if(isCapstoneTier) node.classList.add('capstone');
+      if(rank > 0) node.classList.add('learned');
+      if(locked) node.classList.add('locked');
+      if(maxed) node.classList.add('maxed');
+      if(canLearn) node.classList.add('available');
+      const effectText = rank > 0 ? talent.effect(rank) : talent.effect(1);
+      const gateNote = locked ? `<div class="tn-gate">Need ${talent.gate - spent} more pts</div>` : '';
+      node.innerHTML = `
         <span class="tn-icon" style="color:${branch.color}">${talent.icon}</span>
         <div class="tn-name">${talent.name}</div>
         <div class="tn-desc">${talent.desc}</div>
         <div class="tn-effect">${effectText}</div>
-        <div class="tn-rank">${rank}/${talent.maxRank}</div>
-        ${gateText}
+        <div class="tn-rank">${rank} / ${talent.maxRank}</div>
+        ${gateNote}
       `;
       if(canLearn){
-        node.addEventListener('click',()=>learnTalent(branchName,talent.id));
+        node.addEventListener('click', ()=>learnTalent(branchName, talent.id));
       }
-      grid.appendChild(node);
+      nodesGrid.appendChild(node);
     });
+    tierRow.appendChild(nodesGrid);
+    branchDiv.appendChild(tierRow);
   });
+
+  container.appendChild(branchDiv);
 }
 
 function openTalents(){
