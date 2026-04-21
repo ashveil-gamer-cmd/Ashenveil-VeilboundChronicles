@@ -260,6 +260,30 @@ function _itemPowerScore(item){
   return score + rarityBonus;
 }
 
+// ─── Salvage feed accumulator ───
+// Common-loot salvage fires many feeds per second during AFK farming. This
+// accumulator coalesces them: keep adding yields into a bucket, and every
+// 1 second flush the total as ONE feed entry.
+let _salvageAccumBucket = null;
+let _salvageAccumTimer = null;
+function _queueSalvageFeed(yields){
+  if(!_salvageAccumBucket) _salvageAccumBucket = {};
+  Object.entries(yields).forEach(([mat, qty]) => {
+    _salvageAccumBucket[mat] = (_salvageAccumBucket[mat] || 0) + qty;
+  });
+  if(_salvageAccumTimer) return;
+  _salvageAccumTimer = setTimeout(() => {
+    _salvageAccumTimer = null;
+    if(!_salvageAccumBucket) return;
+    const parts = Object.entries(_salvageAccumBucket)
+      .map(([k, v]) => `+${v} ${MATERIAL_LABELS[k] || k}`);
+    if(parts.length > 0){
+      addFeed(`• ${parts.join(' ')}`, '#6b7280');
+    }
+    _salvageAccumBucket = null;
+  }, 1000);
+}
+
 // Called by combat drop logic. Routes loot through the right pipeline.
 // - Common items: ALWAYS auto-salvage into Scrap (never clutter bag)
 // - Uncommon+: auto-equip if slot empty, otherwise go to bag
@@ -280,9 +304,8 @@ function acquireLoot(item){
     Object.entries(yields).forEach(([mat,qty])=>creditMaterial(mat,qty));
     // Small XP even from common auto-salvage
     Object.keys(professions).forEach(p=>addProfXP(p, 2));
-    const gained=Object.entries(yields).map(([k,v])=>`+${v} ${MATERIAL_LABELS[k]}`).join(' ');
-    // Quieter feed message — this happens a lot
-    addFeed(`• ${gained}`, '#6b7280');
+    // Accumulate salvage feed — multiple salvages coalesce into one message
+    _queueSalvageFeed(yields);
     if(typeof writeSave==='function')writeSave();
     return;
   }
@@ -291,24 +314,24 @@ function acquireLoot(item){
     // Slot empty — auto-equip for frictionless early game / first drops
     equipped[item.slot]=item;
     recalcStats();
-    addFeed(`${icon} [${label}] ${item.name}`,col);
-    addFeed(`  └ auto-equipped (${item.slot} was empty)`,'#5a7aa0');
+    addFeed(`${icon} [${label}] ${item.name} → equipped`, col);
     checkSetBonuses();
   } else if(autoEquipUpgrades && _itemPowerScore(item) > _itemPowerScore(current)){
     // Auto-equip upgrade — new item wins by power score. Swap in, route old to bag.
     const replaced = current;
     equipped[item.slot] = item;
     recalcStats();
-    addFeed(`${icon} [${label}] ${item.name} → auto-equipped (UPGRADE)`, col);
     checkSetBonuses();
     // Route the displaced item — prefer bag, fall back to stash
+    let routeLabel;
     if(inventory.length < INVENTORY_MAX){
       inventory.push(replaced);
-      addFeed(`  └ ${replaced.name} → bag`, '#5a7aa0');
+      routeLabel = 'bag';
     } else {
       gearStash.push(replaced);
-      addFeed(`  └ ${replaced.name} → gear stash`, '#a78bfa');
+      routeLabel = 'stash';
     }
+    addFeed(`${icon} [${label}] ${item.name} ⇪ UPGRADE (old → ${routeLabel})`, col);
     updateInventoryBadge();
   } else if(inventory.length<INVENTORY_MAX){
     // Slot filled — goes to bag for player to decide
