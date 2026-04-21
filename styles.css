@@ -3936,3 +3936,105 @@ canvas#c{display:block;position:fixed;top:0;left:0}
   box-shadow:none;
   background:linear-gradient(145deg,rgba(100,100,100,0.1),rgba(100,100,100,0.05));
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   POTION HOTBAR — 4 slots above ability bar
+   ═══════════════════════════════════════════════════════════════════ */
+#potionBar{
+  position:fixed;
+  bottom:108px;      /* sit just above the ability bar */
+  left:50%;
+  transform:translateX(-50%);
+  display:none;      /* revealed alongside abilityBar by game.js */
+  gap:6px;
+  z-index:51;
+  pointer-events:all;
+}
+.potion-slot{
+  width:44px;
+  height:44px;
+  border-radius:8px;
+  background:linear-gradient(145deg,rgba(20,25,15,0.9),rgba(10,15,10,0.9));
+  border:1px solid rgba(134,239,172,0.25);
+  position:relative;
+  cursor:pointer;
+  transition:all 0.15s ease;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  user-select:none;
+}
+.potion-slot:hover{
+  border-color:rgba(134,239,172,0.7);
+  box-shadow:0 0 8px rgba(134,239,172,0.35);
+}
+.potion-slot.empty{
+  opacity:0.3;
+  cursor:not-allowed;
+}
+.potion-slot.empty:hover{
+  box-shadow:none;
+  border-color:rgba(134,239,172,0.25);
+}
+.pot-hotkey{
+  position:absolute;
+  top:2px;
+  left:4px;
+  font-family:'Cinzel',serif;
+  font-size:8px;
+  color:#9ca3af;
+  letter-spacing:1px;
+}
+.pot-icon{
+  font-size:18px;
+  line-height:1;
+  pointer-events:none;
+}
+.pot-tier{
+  position:absolute;
+  top:2px;
+  right:4px;
+  font-family:'Cinzel',serif;
+  font-size:8px;
+  font-weight:600;
+  color:#fbbf24;
+  letter-spacing:0.5px;
+  pointer-events:none;
+}
+.pot-count{
+  position:absolute;
+  bottom:2px;
+  right:4px;
+  font-family:'Cinzel',serif;
+  font-size:10px;
+  font-weight:600;
+  color:#e9d5ff;
+  pointer-events:none;
+}
+.potion-slot.healing .pot-icon{color:#ef4444;}
+.potion-slot.aegis .pot-icon{color:#60a5fa;}
+.potion-slot.fury .pot-icon{color:#f59e0b;}
+.potion-slot.swiftness .pot-icon{color:#86efac;}
+
+/* Cooldown overlay — slight gray when slot is on CD */
+.potion-slot.oncd::after{
+  content:'';
+  position:absolute;
+  inset:0;
+  background:rgba(0,0,0,0.55);
+  border-radius:8px;
+  pointer-events:none;
+}
+
+@media (max-width:640px){
+  #potionBar{
+    bottom:100px;
+    gap:4px;
+  }
+  .potion-slot{
+    width:38px;
+    height:38px;
+  }
+  .pot-icon{font-size:16px;}
+}
