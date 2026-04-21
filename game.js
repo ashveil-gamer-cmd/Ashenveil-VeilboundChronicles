@@ -9109,6 +9109,8 @@ function updateHUD(now){
   const isIronwake = player.classId === 'ironwake';
   document.getElementById('hpFill').style.width=(player.hp/player.maxHp*100)+'%';
   document.getElementById('xpFill').style.width=(player.xp/player.xpToNext*100)+'%';
+  // Sync potion bar slots with current stacks + tiers
+  if(typeof updatePotionBar === 'function') updatePotionBar();
   // Class name + portrait icon update
   const nameEl=document.getElementById('hudClassName');
   const portraitEl=document.getElementById('hudPortrait');
@@ -9224,6 +9226,8 @@ function buildSave(){
       _testSetsGranted: player._testSetsGranted || false,
       // AFK mode toggle — persist so it survives reloads
       afkEnabled: !!player.afkEnabled,
+      // Alchemy potion stacks — { 'recipe_t<tier>': count }
+      potions: player.potions ? JSON.parse(JSON.stringify(player.potions)) : {},
     },
     stats:{kills},
     zoneId:curZone?.id||1,
@@ -9426,6 +9430,10 @@ function applySave(data){
   player.maxBonds=data.player?.maxBonds??MAX_SPIRITS;
   // AFK toggle persists across reloads so player's preference sticks
   player.afkEnabled = !!data.player?.afkEnabled;
+  // Alchemy potion stacks
+  player.potions = (data.player?.potions && typeof data.player.potions === 'object')
+    ? JSON.parse(JSON.stringify(data.player.potions))
+    : {};
   // Test gear state — can be true | 'removed' | false. Preserve string.
   const rawTestFlag = data.player?._testSetsGranted;
   player._testSetsGranted = (rawTestFlag === 'removed') ? 'removed' : !!rawTestFlag;
@@ -9643,7 +9651,7 @@ function exitToCharacterSelect(){
   // Stop the game loop + clear world state
   stopGame();
   // Hide all in-game UI
-  ['hud','abilityBar','feedLog','spiritPanel','menuBar','zoneLabel','minimap'].forEach(id=>{
+  ['hud','abilityBar','feedLog','spiritPanel','menuBar','zoneLabel','minimap','potionBar'].forEach(id=>{
     const el = document.getElementById(id);
     if(el) el.style.display='none';
   });
@@ -9666,10 +9674,10 @@ function startGame(continueFromSave=false){
     preloadPlayerSprites(player.classId);
   }
   document.getElementById('titleScreen').style.display='none';
-  ['hud','abilityBar','feedLog','spiritPanel','menuBar','zoneLabel','minimap'].forEach(id=>{
+  ['hud','abilityBar','feedLog','spiritPanel','menuBar','zoneLabel','minimap','potionBar'].forEach(id=>{
 
     document.getElementById(id).style.display=
-      (id==='abilityBar'||id==='menuBar')?'flex':'block';
+      (id==='abilityBar'||id==='menuBar'||id==='potionBar')?'flex':'block';
   });
   // Apply saved state BEFORE baseline init so baseline doesn't overwrite it
   if(continueFromSave){
@@ -9800,6 +9808,16 @@ document.addEventListener('keydown',e=>{
       }
     }
   }
+  // Potion hotkeys 1-4 — drink the best tier of each draught
+  if(!wasPressed && ['1','2','3','4'].includes(e.key)){
+    const active = document.activeElement;
+    if(active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+      // allow typing numbers into inputs
+    } else {
+      const slotIdx = parseInt(e.key, 10) - 1;
+      if(typeof usePotionSlot === 'function') usePotionSlot(slotIdx);
+    }
+  }
   // F key toggles AFK mode (edge-triggered). Not usable in camp (camp disables AFK).
   if(!wasPressed && (e.key === 'f' || e.key === 'F')){
     // Skip if user is typing in an input field
@@ -9906,6 +9924,103 @@ function toggleAfkMode(){
   }
   if(typeof writeSave === 'function') writeSave();
 }
+
+// ═══════ POTION BAR ═══════════════════════════════════════════════
+// Renders player's potion stacks into 4 slots. Picks the highest-tier
+// version of each recipe available. Hotkeys 1-4 fire usePotionSlot.
+let _potionGlobalCDUntil = 0;
+const POTION_GCD_MS = 2500;
+
+// For each of the 4 recipes, find the highest-tier potion the player owns.
+// Returns { recipeId, tier, count } or null if none owned.
+function _getBestPotionForRecipe(recipeId){
+  if(!player.potions) return null;
+  let bestTier = 0, bestCount = 0;
+  for(const key in player.potions){
+    if(!key.startsWith(recipeId + '_t')) continue;
+    const tier = parseInt(key.split('_t')[1], 10);
+    if(isNaN(tier)) continue;
+    if(tier > bestTier && player.potions[key] > 0){
+      bestTier = tier;
+      bestCount = player.potions[key];
+    }
+  }
+  return bestTier > 0 ? { recipeId, tier:bestTier, count:bestCount } : null;
+}
+
+function updatePotionBar(){
+  if(typeof ALCHEMY_RECIPES === 'undefined') return;
+  const now = performance.now();
+  const onCD = now < _potionGlobalCDUntil;
+  const recipeSlots = ['healing_draught','aegis_draught','fury_draught','swiftness_draught'];
+  const slotClasses = ['healing','aegis','fury','swiftness'];
+  recipeSlots.forEach((rid, i) => {
+    const slot = document.getElementById(`potSlot${i}`);
+    const tierEl = document.getElementById(`potTier${i}`);
+    const countEl = document.getElementById(`potCount${i}`);
+    if(!slot) return;
+    // Ensure class tag (once per slot)
+    if(!slot.classList.contains(slotClasses[i])){
+      slot.classList.add(slotClasses[i]);
+    }
+    const best = _getBestPotionForRecipe(rid);
+    if(best){
+      slot.classList.remove('empty');
+      if(tierEl) tierEl.textContent = `T${best.tier}`;
+      if(countEl) countEl.textContent = best.count;
+    } else {
+      slot.classList.add('empty');
+      if(tierEl) tierEl.textContent = '';
+      if(countEl) countEl.textContent = '0';
+    }
+    // Cooldown visual
+    if(onCD){
+      slot.classList.add('oncd');
+    } else {
+      slot.classList.remove('oncd');
+    }
+  });
+}
+
+function usePotionSlot(slotIdx){
+  if(typeof ALCHEMY_RECIPES === 'undefined') return;
+  const now = performance.now();
+  if(now < _potionGlobalCDUntil){
+    if(typeof addFeed === 'function') addFeed('Potion on cooldown', '#9ca3af');
+    return;
+  }
+  const recipeSlots = ['healing_draught','aegis_draught','fury_draught','swiftness_draught'];
+  const rid = recipeSlots[slotIdx];
+  if(!rid) return;
+  const best = _getBestPotionForRecipe(rid);
+  if(!best){
+    if(typeof addFeed === 'function') addFeed('No potions of that type', '#9ca3af');
+    return;
+  }
+  const ok = typeof usePotion === 'function' ? usePotion(rid, best.tier) : false;
+  if(ok){
+    _potionGlobalCDUntil = now + POTION_GCD_MS;
+    updatePotionBar();
+  }
+}
+
+// Reveal potion bar when ability bar is visible (i.e. in-game, not title)
+function showPotionBar(){
+  const bar = document.getElementById('potionBar');
+  if(bar) bar.style.display = 'flex';
+}
+function hidePotionBar(){
+  const bar = document.getElementById('potionBar');
+  if(bar) bar.style.display = 'none';
+}
+
+if(typeof window !== 'undefined'){
+  window.usePotionSlot = usePotionSlot;
+  window.updatePotionBar = updatePotionBar;
+  window.showPotionBar = showPotionBar;
+  window.hidePotionBar = hidePotionBar;
+}
+
 function updateAfkToggleUI(){
   const btn = document.getElementById('afkToggle');
   const ind = document.getElementById('afkIndicator');
