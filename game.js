@@ -7117,8 +7117,13 @@ function castHollowcallerBase(idx, now){
         });
       }
     } else if(atCap){
-      // All spirits already at rank 3 — tell the player
-      addFeed('All spirits at max rank', '#9ca3af');
+      // All spirits already at rank 3 — set a cooldown so AFK doesn't
+      // retry every frame, and silence the feed if we're in AFK mode to
+      // avoid log spam. Manual casters still see the message once.
+      abilityCDs[0] = now + 3000;  // 3s backoff before trying again
+      if(!player.afkEnabled){
+        addFeed('All spirits at max rank', '#9ca3af');
+      }
     }
   } else if(idx===1){
     // Veilmark — apply stacks to nearest enemy (up to 950u range)
@@ -8219,7 +8224,83 @@ function spawnDmgText(wx, wy, val, color, isCrit, opts){
   }
 }
 function screenShake(amt,ms){shakeAmt=Math.max(shakeAmt,amt);shakeTimer=Math.max(shakeTimer,ms);}
-function addFeed(msg,color='#9DC4B0'){const l=document.getElementById('feedLog');const el=document.createElement('div');el.className='feed';el.style.color=color;el.textContent=msg;l.prepend(el);setTimeout(()=>el.remove(),3800);}
+// ═══════ FEED LOG — triaged, grouped, tiered ═══════════════════════
+//
+// Design:
+// - Messages with the same color + similar text within 2.5s merge into one
+//   with a ×N multiplier instead of flooding the log
+// - Each feed entry has a tier (inferred from color + symbol) that controls
+//   visual weight — rare events (level up, boss drops) stand out visibly
+//   while frequent events (gold pickup) stay muted
+// - Max 8 entries visible at once; oldest drop off
+// - Loot/gold/common events decay faster (2.5s); rare events linger (5s)
+// ════════════════════════════════════════════════════════════════════
+const _feedRecent = [];   // {el, msg, color, at, count, tier}
+const FEED_MAX_VISIBLE = 8;
+
+function _inferFeedTier(msg, color){
+  // Tier 0 = muted chaff (gold, salvage, small gains)
+  // Tier 1 = standard (quest progress, crafting, loot found)
+  // Tier 2 = important (level up, rare drops, quest complete)
+  // Tier 3 = epic (mythic loot, boss kill, ultimate cast, unique unlock)
+  if(/LEVEL UP|★|✪|MYTHIC|LEGENDARY/i.test(msg)) return 3;
+  if(/QUEST COMPLETE|EPIC|RANK UP|UNLOCKED|BOSS/i.test(msg)) return 2;
+  if(/^\+\d+\s+(gold|scrap|coin)|•\s+/i.test(msg)) return 0;     // gold pickup, muted
+  if(color === '#6b7280' || color === '#9ca3af') return 0;        // gray = chatter
+  return 1;
+}
+
+function _shouldMergeFeed(msg, color){
+  if(_feedRecent.length === 0) return null;
+  const last = _feedRecent[0];
+  if(!last || !last.el.isConnected) return null;
+  const now = performance.now();
+  if(now - last.at > 2500) return null;
+  if(last.color !== color) return null;
+  // Merge if same first 8 chars or identical message prefix
+  const msgKey = msg.replace(/×\d+$/,'').trim();
+  const lastKey = last.msg.replace(/×\d+$/,'').trim();
+  if(msgKey === lastKey) return last;
+  return null;
+}
+
+function addFeed(msg, color='#9DC4B0'){
+  const l = document.getElementById('feedLog');
+  if(!l) return;
+  const tier = _inferFeedTier(msg, color);
+  // Try to merge with the most recent matching message
+  const mergeTarget = _shouldMergeFeed(msg, color);
+  if(mergeTarget){
+    mergeTarget.count++;
+    mergeTarget.at = performance.now();
+    mergeTarget.el.textContent = `${msg} ×${mergeTarget.count}`;
+    // Pulse on merge so the update is visible
+    mergeTarget.el.classList.remove('feed-pulse');
+    void mergeTarget.el.offsetWidth;   // reflow
+    mergeTarget.el.classList.add('feed-pulse');
+    return;
+  }
+  // Build new entry
+  const el = document.createElement('div');
+  el.className = `feed feed-t${tier}`;
+  el.style.color = color;
+  el.textContent = msg;
+  l.prepend(el);
+  const entry = { el, msg, color, at: performance.now(), count: 1, tier };
+  _feedRecent.unshift(entry);
+  // Cap visible entries — remove tail
+  while(_feedRecent.length > FEED_MAX_VISIBLE){
+    const old = _feedRecent.pop();
+    if(old && old.el && old.el.isConnected) old.el.remove();
+  }
+  // Tier-based lifetime
+  const lifetime = tier === 0 ? 2500 : tier >= 2 ? 5500 : 3800;
+  setTimeout(() => {
+    if(el.isConnected) el.remove();
+    const i = _feedRecent.indexOf(entry);
+    if(i >= 0) _feedRecent.splice(i, 1);
+  }, lifetime);
+}
 function showLevelUp(){
   const unlocks={3:'Shop Unlocked',5:'Talents + Dungeons',8:'Soul Fissure',10:'Echoing Dirge',15:'Pale Eruption',20:'Veil Rupture'};
   document.getElementById('lvlUpTxt').textContent=`LEVEL ${player.level}`;
@@ -9286,6 +9367,8 @@ function updateHUD(now){
   document.getElementById('xpFill').style.width=(player.xp/player.xpToNext*100)+'%';
   // Sync potion bar slots with current stacks + tiers
   if(typeof updatePotionBar === 'function') updatePotionBar();
+  // Sync active-buff HUD
+  if(typeof updateBuffHud === 'function') updateBuffHud();
   // Class name + portrait icon update
   const nameEl=document.getElementById('hudClassName');
   const portraitEl=document.getElementById('hudPortrait');
@@ -9831,7 +9914,7 @@ function exitToCharacterSelect(){
   // Stop the game loop + clear world state
   stopGame();
   // Hide all in-game UI
-  ['hud','abilityBar','feedLog','spiritPanel','menuBar','zoneLabel','minimap','potionBar'].forEach(id=>{
+  ['hud','abilityBar','feedLog','spiritPanel','menuBar','zoneLabel','minimap','potionBar','buffHud'].forEach(id=>{
     const el = document.getElementById(id);
     if(el) el.style.display='none';
   });
@@ -10192,6 +10275,124 @@ function showPotionBar(){
 function hidePotionBar(){
   const bar = document.getElementById('potionBar');
   if(bar) bar.style.display = 'none';
+}
+
+// ═══════ ACTIVE BUFF HUD ═══════════════════════════════════════════
+// Unified row of buff chips showing every active positive effect on the
+// player. Reads from both the player._alchemy* potion buffs AND the
+// activeBuffs altar-shrine system. Each chip ticks its countdown every
+// frame. Dead-simple DOM rebuild — no memoization, ~5 chips max.
+
+const _buffHudDefs = {
+  aegis:  { icon:'🛡', label:'aegis',  cls:'buff-aegis' },
+  fury:   { icon:'⚔', label:'fury',   cls:'buff-fury' },
+  speed:  { icon:'↯', label:'speed',  cls:'buff-speed' },
+  damage: { icon:'✦', label:'damage', cls:'buff-damage' },
+  crit:   { icon:'★', label:'crit',   cls:'buff-crit' },
+  regen:  { icon:'❦', label:'regen',  cls:'buff-regen' },
+};
+
+function _collectActiveBuffs(now){
+  const out = [];
+  // Alchemy DR (Aegis)
+  if(player._alchemyDrBuff && now < player._alchemyDrBuff.expiresAt){
+    out.push({
+      kind: 'aegis',
+      expiresAt: player._alchemyDrBuff.expiresAt,
+      duration: 30000,                        // aegis duration
+      label: `${player._alchemyDrBuff.pct}%`,
+    });
+  }
+  // Alchemy damage (Fury)
+  if(player._alchemyDmgBuff && now < player._alchemyDmgBuff.expiresAt){
+    out.push({
+      kind: 'fury',
+      expiresAt: player._alchemyDmgBuff.expiresAt,
+      duration: 30000,
+      label: `+${player._alchemyDmgBuff.pct}%`,
+    });
+  }
+  // Alchemy speed (Swiftness)
+  if(player._alchemySpeedBuff && now < player._alchemySpeedBuff.expiresAt){
+    out.push({
+      kind: 'speed',
+      expiresAt: player._alchemySpeedBuff.expiresAt,
+      duration: 60000,                        // swiftness duration
+      label: `+${player._alchemySpeedBuff.pct}%`,
+    });
+  }
+  // Altar shrine buffs — damage, crit, speed, regen
+  if(typeof activeBuffs !== 'undefined' && Array.isArray(activeBuffs)){
+    activeBuffs.forEach(b => {
+      if(b.expires <= now) return;
+      // Only show types we have icons for
+      if(!_buffHudDefs[b.type]) return;
+      // Avoid duplicate if alchemy speed + altar speed both active —
+      // show them both; they stack, so player should see both countdowns.
+      out.push({
+        kind: b.type,
+        expiresAt: b.expires,
+        duration: (b.duration || 30000),
+        label: b.type === 'regen' ? '' : `+${Math.round(b.value * 100)}%`,
+      });
+    });
+  }
+  return out;
+}
+
+function updateBuffHud(){
+  const hud = document.getElementById('buffHud');
+  if(!hud) return;
+  const now = performance.now();
+  const buffs = _collectActiveBuffs(now);
+  if(buffs.length === 0){
+    if(hud.style.display !== 'none') hud.style.display = 'none';
+    hud._last = '';
+    return;
+  }
+  // Layout identifier — avoid rebuilding DOM if the set of active buffs hasn't changed
+  const layoutKey = buffs.map(b => `${b.kind}:${Math.round(b.expiresAt/500)}`).join('|');
+  if(hud._last !== layoutKey){
+    hud._last = layoutKey;
+    hud.innerHTML = '';
+    buffs.forEach(b => {
+      const def = _buffHudDefs[b.kind];
+      if(!def) return;
+      const chip = document.createElement('div');
+      chip.className = `buff-chip ${def.cls}`;
+      chip.dataset.kind = b.kind;
+      chip.innerHTML = `
+        <div class="buff-chip-icon">${def.icon}</div>
+        <div class="buff-chip-timer"></div>
+        <div class="buff-chip-bar"><div class="buff-chip-bar-fill"></div></div>
+      `;
+      hud.appendChild(chip);
+    });
+    hud.style.display = 'flex';
+  }
+  // Tick timers + bars
+  const chips = hud.children;
+  for(let i = 0; i < buffs.length && i < chips.length; i++){
+    const b = buffs[i];
+    const chip = chips[i];
+    const remMs = Math.max(0, b.expiresAt - now);
+    const remSec = Math.ceil(remMs / 1000);
+    const pct = Math.max(0, Math.min(100, (remMs / b.duration) * 100));
+    const timerEl = chip.querySelector('.buff-chip-timer');
+    const barEl = chip.querySelector('.buff-chip-bar-fill');
+    if(timerEl) timerEl.textContent = `${remSec}s`;
+    if(barEl) barEl.style.width = `${pct}%`;
+    // Pulse when under 5s
+    if(remMs < 5000){
+      if(!chip.classList.contains('expiring')) chip.classList.add('expiring');
+    } else {
+      if(chip.classList.contains('expiring')) chip.classList.remove('expiring');
+    }
+  }
+}
+
+if(typeof window !== 'undefined'){
+  window.updateBuffHud = updateBuffHud;
 }
 
 if(typeof window !== 'undefined'){
