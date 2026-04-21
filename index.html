@@ -73,7 +73,22 @@
 <div id="buffHud"></div>
 
 <!-- AFK TOGGLE — explicit player control over AFK mode. Disabled in camp. -->
-<div id="afkToggle" onclick="toggleAfkMode()" title="Toggle AFK auto-fight (F)">
+<!-- AFK MOVE — auto-pathing toggle -->
+<div id="afkMoveToggle" onclick="toggleAfkMove()" title="Toggle AFK auto-movement">
+  <span id="afkMoveIndicator" class="afk-ind">◯</span>
+  <span class="afk-ico-move">↯</span>
+  <span class="afk-label">MOVE</span>
+</div>
+
+<!-- AFK COMBAT — auto-cast toggle -->
+<div id="afkCombatToggle" onclick="toggleAfkCombat()" title="Toggle AFK auto-combat">
+  <span id="afkCombatIndicator" class="afk-ind">◯</span>
+  <span class="afk-ico-atk">⚔</span>
+  <span class="afk-label">FIGHT</span>
+</div>
+
+<!-- Legacy combined AFK toggle (kept for F-key compat, hidden) -->
+<div id="afkToggle" onclick="toggleAfkMode()" title="Toggle AFK auto-fight (F)" style="display:none">
   <span id="afkIndicator">◯</span>
   <span id="afkLabel">AFK</span>
 </div>
