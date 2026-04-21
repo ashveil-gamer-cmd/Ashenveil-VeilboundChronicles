@@ -3621,3 +3621,182 @@ canvas#c{display:block;position:fixed;top:0;left:0}
   #zoneNpcDialogue{inset:10px;padding:12px 14px;}
   .znpc-section-label{font-size:10px;}
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   TALENT TREE REBUILD — branch tabs + tier-grouped nodes
+   Replaces the legacy 72-at-once flat grid with a focused single-branch
+   view grouped by point-gate tier. Capstone gets visual prominence.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ─── Branch tabs (top of panel) ─── */
+.talent-tabs{
+  display:flex;
+  gap:6px;
+  padding:10px clamp(12px,1.5vw,20px);
+  border-bottom:1px solid rgba(255,255,255,0.08);
+  flex-wrap:wrap;
+}
+.talent-tab{
+  --branch-color:#9DC4B0;
+  flex:1;
+  min-width:100px;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:10px 14px;
+  background:rgba(255,255,255,0.03);
+  border:1px solid rgba(255,255,255,0.1);
+  border-radius:8px;
+  color:#b4a6c8;
+  cursor:pointer;
+  font-family:'Cinzel',serif;
+  font-size:12px;
+  letter-spacing:1.5px;
+  transition:all 0.2s;
+}
+.talent-tab:hover{
+  background:rgba(255,255,255,0.06);
+  border-color:var(--branch-color);
+  color:#e4d6f8;
+}
+.talent-tab.active{
+  background:rgba(255,255,255,0.08);
+  border-color:var(--branch-color);
+  color:#fff;
+  box-shadow:0 0 12px color-mix(in srgb, var(--branch-color) 30%, transparent);
+}
+/* Pulse un-selected tabs that have spendable talents waiting */
+.talent-tab.has-available{
+  animation:talentTabPulse 1.8s ease-in-out infinite;
+}
+@keyframes talentTabPulse{
+  0%,100%{border-color:rgba(255,255,255,0.1);}
+  50%{border-color:rgba(251,191,36,0.6);}
+}
+.ttab-icon{font-size:16px;color:var(--branch-color);}
+.ttab-name{flex:1;font-weight:600;}
+.ttab-spent{
+  background:rgba(0,0,0,0.4);
+  border:1px solid rgba(255,255,255,0.1);
+  border-radius:4px;
+  padding:2px 7px;
+  font-size:10px;
+  color:#d4c4e8;
+  min-width:24px;
+  text-align:center;
+}
+
+/* ─── Branch view (single branch) ─── */
+.talent-branch-view{
+  margin:clamp(10px,1.5vw,20px);
+  border:1px solid rgba(255,255,255,0.07);
+  border-radius:10px;
+  background:rgba(255,255,255,0.02);
+  overflow:hidden;
+}
+.talent-branch-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:clamp(10px,1.2vw,16px) clamp(14px,1.5vw,20px);
+  background:rgba(0,0,0,0.35);
+  border-bottom:1px solid rgba(255,255,255,0.06);
+  font-family:'Cinzel',serif;
+  letter-spacing:3px;
+}
+.tbv-name{
+  display:flex;align-items:center;gap:10px;
+  font-size:clamp(14px,1.5vw,18px);
+  font-weight:700;
+  text-transform:uppercase;
+}
+.tbv-icon{font-size:clamp(18px,1.8vw,22px);}
+.tbv-progress{
+  display:flex;flex-direction:column;align-items:flex-end;gap:2px;
+}
+.tbv-spent{
+  font-size:clamp(13px,1.3vw,16px);
+  font-weight:700;
+}
+.tbv-progress-label{
+  font-size:9px;
+  letter-spacing:1.5px;
+  color:rgba(255,255,255,0.5);
+  text-transform:uppercase;
+}
+
+/* ─── Tier rows (each gate level) ─── */
+.talent-tier{
+  display:grid;
+  grid-template-columns:70px 1fr;
+  gap:clamp(10px,1vw,16px);
+  padding:clamp(10px,1vw,16px);
+  border-bottom:1px dashed rgba(255,255,255,0.05);
+}
+.talent-tier:last-child{border-bottom:none;}
+.talent-tier-gate{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  padding:10px 8px;
+  background:rgba(0,0,0,0.4);
+  border-radius:8px;
+  border:1px solid rgba(255,255,255,0.1);
+  font-family:'Cinzel',serif;
+}
+.talent-tier-gate.unlocked{
+  border-color:rgba(251,191,36,0.45);
+  background:linear-gradient(135deg,rgba(40,30,0,0.55),rgba(30,18,0,0.55));
+}
+.talent-tier-gate.locked{
+  opacity:0.5;
+}
+.ttg-num{
+  font-size:clamp(16px,1.6vw,22px);
+  font-weight:700;
+  color:#fbbf24;
+  letter-spacing:1px;
+}
+.ttg-label{
+  font-size:9px;
+  letter-spacing:2px;
+  text-transform:uppercase;
+  color:rgba(255,255,255,0.5);
+}
+.talent-tier-gate.locked .ttg-num{color:#7a7088;}
+.talent-tier-nodes{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+  gap:clamp(6px,0.8vw,12px);
+}
+/* Capstone — make it obviously the culmination */
+.talent-node.capstone{
+  background:linear-gradient(135deg,rgba(50,35,5,0.55),rgba(30,20,0,0.55));
+  border:2px solid rgba(251,191,36,0.45);
+  box-shadow:0 0 20px rgba(251,191,36,0.18) inset;
+}
+.talent-node.capstone .tn-name{
+  color:#fde68a;
+  text-shadow:0 0 8px rgba(251,191,36,0.4);
+}
+.talent-node.capstone.available{
+  animation:capstonePulse 2s ease-in-out infinite;
+}
+@keyframes capstonePulse{
+  0%,100%{box-shadow:0 0 20px rgba(251,191,36,0.18) inset;}
+  50%{box-shadow:0 0 30px rgba(251,191,36,0.4) inset, 0 0 20px rgba(251,191,36,0.3);}
+}
+
+/* ─── Mobile overrides — single-column tiers ─── */
+@media (max-width:640px){
+  .talent-tabs{padding:8px 10px;gap:4px;}
+  .talent-tab{padding:7px 8px;font-size:10px;letter-spacing:1px;min-width:70px;}
+  .ttab-icon{font-size:13px;}
+  .talent-tier{grid-template-columns:56px 1fr;gap:8px;padding:8px;}
+  .talent-tier-gate{padding:6px 4px;}
+  .ttg-num{font-size:14px;}
+  .talent-tier-nodes{grid-template-columns:1fr;gap:6px;}
+  .tbv-name{font-size:12px;letter-spacing:2px;}
+  .tbv-spent{font-size:12px;}
+}
