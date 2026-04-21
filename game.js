@@ -2667,6 +2667,23 @@ function drawEnvironment(now){
   // Draw the zone landmark FIRST so other props render in front of it
   // (the landmark is meant to be a distant anchor, not foreground clutter)
   drawActiveLandmark(now, vl, vr, vt, vb);
+  // ═══ SHADOW PASS ═══
+  // Before props are drawn, lay down soft ellipse shadows beneath the
+  // collidable ones. This grounds everything — props stop feeling pasted
+  // onto a flat plane. Only collidable props (trees, rocks, pillars) get
+  // shadows; ground clutter (grass, mushrooms) doesn't need them.
+  ctx.save();
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.32)';
+  envProps.forEach(p => {
+    if(!p || p.x<=vl || p.x>=vr || p.y<=vt || p.y>=vb) return;
+    if(!p.collRadius || p.collRadius < 8) return;  // only for solid props
+    const sw = p.collRadius * 1.15;
+    const sh = p.collRadius * 0.35;
+    ctx.beginPath();
+    ctx.ellipse(p.x, p.y + p.collRadius * 0.15, sw, sh, 0, 0, Math.PI*2);
+    ctx.fill();
+  });
+  ctx.restore();
   envProps.forEach(p=>{if(p.x>vl&&p.x<vr&&p.y>vt&&p.y<vb)drawProp(p,now);});
   // Interactables render AFTER props so they're always visible
   drawWorldChests(now, vl, vr, vt, vb);
@@ -5217,6 +5234,72 @@ function generateTerrainFeatures(){
   }
 }
 
+// ═══════ PROCEDURAL GROUND TEXTURE ═══════════════════════════════════
+// Generates a noise tile per zone (cached). The tile is repeated as a
+// pattern across the ground, making it feel grainy/textured instead of
+// a flat color wash. Size 128×128 balances visual detail vs memory.
+
+let _groundTextureCache = {};   // zone.id → CanvasPattern
+
+function _getGroundTexture(zone){
+  if(!zone) return null;
+  const key = zone.id || '_unknown';
+  if(_groundTextureCache[key]) return _groundTextureCache[key];
+  const size = 128;
+  const off = document.createElement('canvas');
+  off.width = size; off.height = size;
+  const octx = off.getContext('2d');
+  if(!octx){ _groundTextureCache[key] = null; return null; }
+  // Zone-appropriate accent hues — colors to scatter as "detail specks"
+  // Each zone has TWO accent colors: one darker for grain, one brighter for highlight
+  const accents = {
+    ashen:  ['rgba(30, 22, 45, 0.5)',   'rgba(80, 65, 110, 0.4)'],   // cold purple
+    crypts: ['rgba(28, 20, 8, 0.55)',   'rgba(120, 88, 50, 0.38)'],  // bone/amber
+    mire:   ['rgba(8, 22, 12, 0.55)',   'rgba(50, 100, 60, 0.4)'],   // swamp green
+    spire:  ['rgba(30, 8, 4, 0.55)',    'rgba(180, 60, 25, 0.35)'],  // ember red
+  };
+  const [darkAccent, brightAccent] = accents[key] || ['rgba(0,0,0,0.35)', 'rgba(255,255,255,0.1)'];
+  // Fill transparent — the groundBase underneath shows through
+  octx.clearRect(0, 0, size, size);
+  // Dense scatter of dark specks (shadowy pits/dirt)
+  octx.fillStyle = darkAccent;
+  for(let i = 0; i < 180; i++){
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const r = 0.6 + Math.random() * 1.4;
+    octx.beginPath();
+    octx.arc(x, y, r, 0, Math.PI*2);
+    octx.fill();
+  }
+  // Sparser scatter of bright specks (highlights / pebbles)
+  octx.fillStyle = brightAccent;
+  for(let i = 0; i < 60; i++){
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const r = 0.4 + Math.random() * 1.0;
+    octx.beginPath();
+    octx.arc(x, y, r, 0, Math.PI*2);
+    octx.fill();
+  }
+  // A few very faint swirl marks — bigger soft ellipses for "terrain variation"
+  octx.globalAlpha = 0.18;
+  for(let i = 0; i < 4; i++){
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const rx = 14 + Math.random() * 22;
+    const ry = 8 + Math.random() * 14;
+    const rot = Math.random() * Math.PI * 2;
+    octx.fillStyle = darkAccent;
+    octx.beginPath();
+    octx.ellipse(x, y, rx, ry, rot, 0, Math.PI*2);
+    octx.fill();
+  }
+  octx.globalAlpha = 1;
+  const pattern = ctx.createPattern(off, 'repeat');
+  _groundTextureCache[key] = pattern;
+  return pattern;
+}
+
 function drawWorld(now){
   const z=getActiveTheme();
   // Zone-specific sky gradient (background behind everything)
@@ -5231,6 +5314,19 @@ function drawWorld(now){
   ctx.translate(-camX, -camY);
   // Ground base — solid fill in the theme's ground color
   ctx.fillStyle=z.groundBase;ctx.fillRect(0,0,WORLD_W,WORLD_H);
+
+  // ─── GROUND TEXTURE OVERLAY ───
+  // A procedural noise pattern painted over the groundBase at low alpha.
+  // Breaks up the flat color so ground feels like terrain instead of a wash.
+  // The pattern itself is computed once (cached by zone), repeated as a tile.
+  const texPattern = _getGroundTexture(z);
+  if(texPattern){
+    ctx.save();
+    ctx.globalAlpha = 0.45;
+    ctx.fillStyle = texPattern;
+    ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+    ctx.restore();
+  }
 
   // Visible culling bounds — only draw what's near the camera for performance.
   // Expand the visible rect by 1/zoom because fewer world-units are visible
@@ -9394,8 +9490,24 @@ function update(dt,now){
   if(typeof updateProjectiles === 'function') updateProjectiles(dt, now);
   if(shakeTimer>0)shakeTimer-=dt*1000;else shakeAmt*=0.75;
 
-  camX+=(player.x-camX)*Math.min(1,dt*5.5);
-  camY+=(player.y-camY)*Math.min(1,dt*5.5);
+  // ═══ CAMERA FOLLOW ═══
+  // Base lerp toward player with look-ahead in movement direction.
+  // Look-ahead makes the camera lead the character by ~35 units in the
+  // direction they're moving — classic ARPG feel, lets you see what's coming.
+  const speed = Math.sqrt(player.vx*player.vx + player.vy*player.vy);
+  let lookX = 0, lookY = 0;
+  if(speed > 10){
+    const inv = 1 / speed;
+    lookX = player.vx * inv * 35;
+    lookY = player.vy * inv * 35;
+  }
+  // Subtle idle breathing sway — barely perceptible, gives the world "life"
+  const swayX = Math.sin(now * 0.0006) * 2;
+  const swayY = Math.cos(now * 0.0005) * 1.5;
+  const targetCamX = player.x + lookX + swayX;
+  const targetCamY = player.y + lookY + swayY;
+  camX += (targetCamX - camX) * Math.min(1, dt*5.5);
+  camY += (targetCamY - camY) * Math.min(1, dt*5.5);
 
   // Periodic autosave — cheap, skip during death screen
   if(!player.isDead)maybeAutoSave(now);
@@ -9464,6 +9576,19 @@ function render(now){
   if(!curZone?.isCamp && !dungeonState.active && typeof drawZoneNPCs === 'function'){
     drawZoneNPCs(now);
   }
+
+  // Enemy shadow pass — soft ellipses beneath each enemy to ground them
+  ctx.save();
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.38)';
+  enemies.forEach(e => {
+    if(e.dead) return;
+    const sw = e.size * 0.9;
+    const sh = e.size * 0.28;
+    ctx.beginPath();
+    ctx.ellipse(e.x, e.y + e.size * 0.55, sw, sh, 0, 0, Math.PI*2);
+    ctx.fill();
+  });
+  ctx.restore();
 
   // Enemies
   enemies.forEach(e=>{
