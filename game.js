@@ -1548,10 +1548,16 @@ const CLASS_DEFS = {
     description: 'Melee juggernaut. Walks into enemies and absorbs blows. Builds Wrath from damage taken, unleashes devastating armored strikes.',
     baseHp: 2000,          // 2x Hollowcaller
     baseAtk: 20,           // 1.3x Hollowcaller
-    speedMult: 0.75,       // slower movement
+    // Speed: previous 0.75 made Ironwake painfully slow to close gaps in AFK,
+    // especially vs ranged wraiths that kite. Bumped to 0.85 — still slower
+    // than Hollowcaller's 1.0 but closes fights in reasonable time.
+    speedMult: 0.85,
     resourceName: 'Wrath',
     resourceColor: '#ef4444',
-    attackRange: 85,       // melee range — much shorter
+    // Attack range: was 85 which required touching the enemy sprite. Bumped
+    // to 110 so Ironwake can reach enemies during approach, not just AFTER
+    // collision. Still firmly melee (Hollowcaller is 220).
+    attackRange: 110,
     abilities: [
       {id:'anchor',       name:'Anchor Strike',    cd:1500,  icon:'anchor'},
       {id:'bulwark',      name:'Bulwark',          cd:4000,  icon:'bulwark'},
@@ -7067,6 +7073,18 @@ function castIronwake(idx, now){
       hits++;
     });
     abilityCDs[0] = now + effectiveCD(0) * echoCdr;
+    // ═════ WRATH GENERATION ON HIT ═════
+    // Previously Ironwake only built Wrath from damage TAKEN. That made the
+    // kit feel passive — you just stood there waiting to be hit. Now Anchor
+    // Strike grants +4 Wrath per enemy hit, rewarding aggression and giving
+    // a clear feedback loop: swing → wrath → bigger swing.
+    if(hits > 0){
+      const wrathGain = hits * 4;
+      player.wrath = Math.min(player.wrathMax || 100, (player.wrath || 0) + wrathGain);
+      if(typeof spawnDmgText === 'function'){
+        spawnDmgText(player.x, player.y - 48, `+${wrathGain} WRATH`, '#ef4444', false);
+      }
+    }
     const tint = mods?.elementTint || '#ef4444';
     pushGroundFX({type:'ring', x:player.x, y:player.y, maxR:range, r:30, color:tint, life:0.4, maxLife:0.4, expand:true});
     pushGroundFX({type:'bloom', x:player.x+Math.cos(dir)*60, y:player.y+Math.sin(dir)*60, r:90*echoRadius, maxR:90*echoRadius, color:tint, life:0.35, maxLife:0.35});
@@ -7982,7 +8000,10 @@ function update(dt,now){
     player.vx=(ix/m)*PLAYER_SPEED*spdMult;player.vy=(iy/m)*PLAYER_SPEED*spdMult;
     player.facing=Math.atan2(iy,ix);
     // Player touched keys — cancel any pending quest auto-walk
-    if(player._questNavTarget) player._questNavTarget = null;
+    if(player._questNavTarget){
+      player._questNavTarget = null;
+      player._questNavTargetIsZone = false;
+    }
   } else if(inCamp && player._questNavTarget && typeof CAMP_NPCS !== 'undefined'){
     // ═══ CAMP AUTO-WALK (quest navigation) ═══
     // Walk toward the target NPC. On arrival, fire their interaction handler.
@@ -8001,6 +8022,34 @@ function update(dt,now){
         player._questNavTarget = null;
         if(typeof executeNpcInteraction === 'function') executeNpcInteraction(npc);
         else if(typeof addFeed === 'function') addFeed(`Reached ${npc.name}`, '#c4b5fd');
+      } else {
+        const gearMoveSpd2 = typeof getGearBonus === 'function' ? getGearBonus('moveSpdPct') : 0;
+        const spdMult2 = (1+(_tb('moveSpdPct')+gearMoveSpd2)/100) * classSpdMult * levelSpdBonus;
+        const spd = PLAYER_SPEED * 0.8 * spdMult2;
+        player.vx = (dx/d) * spd;
+        player.vy = (dy/d) * spd;
+        player.facing = Math.atan2(dy, dx);
+      }
+    }
+  } else if(!inCamp && player._questNavTarget && player._questNavTargetIsZone && typeof ZONE_NPCS !== 'undefined'){
+    // ═══ ZONE NPC AUTO-WALK ═══
+    // Walk toward a zone quest-giver NPC in the current zone. Open their
+    // dialogue on arrival. Cancels if player touches movement input.
+    const znpc = ZONE_NPCS.find(n => n.id === player._questNavTarget);
+    if(!znpc || znpc.zoneId !== curZone?.id){
+      // Wrong zone or NPC unknown — clear
+      player._questNavTarget = null;
+      player._questNavTargetIsZone = false;
+    } else {
+      const dx = znpc.x - player.x, dy = znpc.y - player.y;
+      const d = Math.sqrt(dx*dx + dy*dy);
+      if(d < 60){
+        // Arrived — open their dialogue
+        player.vx = 0; player.vy = 0;
+        player._questNavTarget = null;
+        player._questNavTargetIsZone = false;
+        if(typeof openZoneNpcDialogue === 'function') openZoneNpcDialogue(znpc);
+        else if(typeof addFeed === 'function') addFeed(`Reached ${znpc.name}`, '#c4b5fd');
       } else {
         const gearMoveSpd2 = typeof getGearBonus === 'function' ? getGearBonus('moveSpdPct') : 0;
         const spdMult2 = (1+(_tb('moveSpdPct')+gearMoveSpd2)/100) * classSpdMult * levelSpdBonus;
@@ -8706,6 +8755,10 @@ function render(now){
   ctx.globalAlpha=1;ctx.shadowBlur=0;
 
   ctx.restore();
+
+  // Off-screen directional markers for zone NPCs with quests — drawn in
+  // screen space so must come after the world-transform restore.
+  if(typeof drawZoneNpcOffscreenMarkers === 'function') drawZoneNpcOffscreenMarkers();
 
   // ── Boss bar update ──
   if(bossTarget&&!bossTarget.dead){
@@ -9468,58 +9521,25 @@ document.addEventListener('click', (e) => {
 // Continue-from-save goes straight into the game with the saved class.
 // ─── VOLUME CONTROL HANDLERS ───────────────────────────────
 // Global functions called by inline onclick handlers in index.html.
-// masterVolume and setMasterVolume are defined in audio.js.
+// Volume panel was removed — settings menu now handles audio.
+// Keeping empty stubs so any stray references don't throw.
 let _preMuteVolume = 0.6;
-function toggleVolumePanel(){
-  const panel = document.getElementById('volumePanel');
-  if(!panel) return;
-  panel.style.display = (panel.style.display === 'none') ? 'flex' : 'none';
-  // Sync slider to current value when opening
-  if(panel.style.display === 'flex'){
-    const slider = document.getElementById('volumeSlider');
-    if(slider) slider.value = Math.round(getMasterVolume() * 100);
-    const val = document.getElementById('volumeValue');
-    if(val) val.textContent = Math.round(getMasterVolume() * 100) + '%';
-  }
-}
+function toggleVolumePanel(){ /* deprecated — audio lives in settings */ }
 function handleVolumeChange(v){
+  // Still callable from settings menu flows if they reach here.
   const num = parseFloat(v);
-  setMasterVolume(num / 100);
-  const val = document.getElementById('volumeValue');
-  if(val) val.textContent = Math.round(num) + '%';
-  // Update button icon based on level
-  const btn = document.getElementById('volumeBtn');
-  if(btn){
-    btn.textContent = num <= 0 ? '🔇' : (num < 33 ? '🔈' : (num < 66 ? '🔉' : '🔊'));
-  }
-  const muteBtn = document.querySelector('.vol-mute-btn');
-  if(muteBtn) muteBtn.classList.toggle('muted', num <= 0);
+  if(typeof setMasterVolume === 'function') setMasterVolume(num / 100);
 }
 function handleMuteToggle(){
+  if(typeof getMasterVolume !== 'function' || typeof setMasterVolume !== 'function') return;
   const cur = getMasterVolume();
   if(cur > 0){
     _preMuteVolume = cur;
     setMasterVolume(0);
-    handleVolumeChange(0);
-    const slider = document.getElementById('volumeSlider');
-    if(slider) slider.value = 0;
   } else {
-    const restore = _preMuteVolume > 0 ? _preMuteVolume : 0.6;
-    setMasterVolume(restore);
-    handleVolumeChange(restore * 100);
-    const slider = document.getElementById('volumeSlider');
-    if(slider) slider.value = restore * 100;
+    setMasterVolume(_preMuteVolume > 0 ? _preMuteVolume : 0.6);
   }
 }
-// Initialize slider with saved volume on load
-(function initVolumeUI(){
-  const slider = document.getElementById('volumeSlider');
-  if(slider){
-    const v = Math.round((typeof getMasterVolume === 'function' ? getMasterVolume() : 0.6) * 100);
-    slider.value = v;
-    handleVolumeChange(v);
-  }
-})();
 
 // ─── MOBILE MENU TOGGLE ────────────────────────────────────────────
 // Phone portrait hides the menu bar by default. The ☰ toggle button shows/
@@ -10570,6 +10590,84 @@ function drawZoneNPCs(now){
     }
   });
   ctx.textAlign = 'start';
+}
+
+// Draw off-screen directional indicators at screen edges pointing toward
+// zone NPCs that have quests for the player. Called AFTER ctx.restore()
+// because these draw in screen space, not world space.
+function drawZoneNpcOffscreenMarkers(){
+  if(curZone?.isCamp || dungeonState.active) return;
+  const npcs = _getActiveZoneNpcs();
+  if(!npcs.length) return;
+  const halfVW = W/(2*WORLD_ZOOM), halfVH = H/(2*WORLD_ZOOM);
+  const margin = 50; // keep marker inside the viewport by this much
+  npcs.forEach(npc => {
+    const pos = _zoneNpcWorldPos(npc);
+    // Skip if on-screen — the in-world indicator already shows them
+    if(pos.x >= camX - halfVW && pos.x <= camX + halfVW &&
+       pos.y >= camY - halfVH && pos.y <= camY + halfVH) return;
+    // Only show if they have work for the player
+    const hasWork = (typeof questGiverHasWork === 'function') ? questGiverHasWork(npc.id) : null;
+    if(!hasWork || (hasWork.available === 0 && hasWork.turnIn === 0)) return;
+    // Direction from player to NPC in world space
+    const dxW = pos.x - player.x, dyW = pos.y - player.y;
+    const angle = Math.atan2(dyW, dxW);
+    // Screen center
+    const scx = W/2, scy = H/2;
+    // Push outward from center until we hit the edge (minus margin)
+    const bx = scx, by = scy;
+    // Intersection distance with viewport rectangle
+    const cos = Math.cos(angle), sin = Math.sin(angle);
+    const dxEdge = (W/2 - margin) / Math.abs(cos);
+    const dyEdge = (H/2 - margin) / Math.abs(sin);
+    const edgeDist = Math.min(dxEdge, dyEdge);
+    const mx = bx + cos * edgeDist;
+    const my = by + sin * edgeDist;
+    // Draw marker
+    const color = hasWork.turnIn > 0 ? '#fbbf24' : '#c4b5fd';
+    const char = hasWork.turnIn > 0 ? '?' : '!';
+    ctx.save();
+    // Background circle
+    ctx.fillStyle = 'rgba(12,8,24,0.88)';
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 12;
+    ctx.beginPath();
+    ctx.arc(mx, my, 18, 0, Math.PI*2);
+    ctx.fill();
+    ctx.stroke();
+    // Character
+    ctx.shadowBlur = 4;
+    ctx.font = 'bold 20px "Cinzel", serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = color;
+    ctx.fillText(char, mx, my + 1);
+    // Direction arrow (small chevron pointing outward from the circle)
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    const arrowDist = 28;
+    const ax = mx + cos * arrowDist;
+    const ay = my + sin * arrowDist;
+    const perpX = -sin, perpY = cos;
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(ax - cos*10 + perpX*6, ay - sin*10 + perpY*6);
+    ctx.lineTo(ax - cos*10 - perpX*6, ay - sin*10 - perpY*6);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+    // NPC name label below the marker
+    ctx.font = '600 9px Cinzel, serif';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = '#d4c8e8';
+    ctx.shadowColor = 'rgba(0,0,0,0.9)';
+    ctx.shadowBlur = 3;
+    ctx.fillText(npc.name, mx, my + 22);
+    ctx.restore();
+  });
+  ctx.textAlign = 'start';
+  ctx.textBaseline = 'alphabetic';
 }
 
 // E keypress handler — opens zone NPC dialogue when nearby.
