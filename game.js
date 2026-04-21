@@ -7941,6 +7941,143 @@ function pushGroundFX(opts){
   },opts));
 }
 
+// ═══════ VIGNETTE, ZONE TINT, ATMOSPHERIC PARTICLES ═════════════════
+// All three render in SCREEN SPACE (not world space) — they sit above the
+// gameplay world and create mood. Called from render() AFTER the world
+// transform is restored.
+
+// Cache per-zone particle arrays. We want particles to persist visually
+// (drift slowly) across frames rather than respawn every frame.
+let _atmosParticles = [];
+let _atmosZoneKey = '';
+
+// Per-zone atmospheric recipe — what KIND of particle drifts through.
+// Quantity is modest — we want mood, not a sandstorm.
+const ATMOS_RECIPES = {
+  ashen: {
+    color: 'rgba(168, 154, 188, 0.35)',   // pale ash
+    count: 40,
+    sizeMin: 0.8, sizeMax: 2.2,
+    vxMin: -0.15, vxMax: 0.25,
+    vyMin: -0.08, vyMax: 0.05,             // slight drift both ways
+    kind: 'dust',
+  },
+  crypts: {
+    color: 'rgba(212, 160, 74, 0.3)',      // dim amber motes
+    count: 30,
+    sizeMin: 0.6, sizeMax: 1.6,
+    vxMin: -0.1, vxMax: 0.1,
+    vyMin: -0.25, vyMax: -0.1,             // floats upward
+    kind: 'motes',
+  },
+  mire: {
+    color: 'rgba(78, 201, 110, 0.28)',    // swamp spores
+    count: 50,
+    sizeMin: 1.0, sizeMax: 2.5,
+    vxMin: -0.2, vxMax: 0.2,
+    vyMin: -0.15, vyMax: -0.05,
+    kind: 'spores',
+  },
+  spire: {
+    color: 'rgba(255, 107, 44, 0.4)',     // burning embers
+    count: 45,
+    sizeMin: 0.7, sizeMax: 1.9,
+    vxMin: -0.15, vxMax: 0.15,
+    vyMin: -0.4, vyMax: -0.15,            // rises fast (embers)
+    kind: 'embers',
+  },
+};
+
+function _ensureAtmosParticles(){
+  if(!curZone) return;
+  const key = curZone.id || '';
+  if(_atmosZoneKey === key && _atmosParticles.length > 0) return;
+  _atmosZoneKey = key;
+  _atmosParticles = [];
+  const recipe = ATMOS_RECIPES[key];
+  if(!recipe) return;
+  for(let i = 0; i < recipe.count; i++){
+    _atmosParticles.push({
+      x: Math.random() * W,
+      y: Math.random() * H,
+      vx: recipe.vxMin + Math.random() * (recipe.vxMax - recipe.vxMin),
+      vy: recipe.vyMin + Math.random() * (recipe.vyMax - recipe.vyMin),
+      size: recipe.sizeMin + Math.random() * (recipe.sizeMax - recipe.sizeMin),
+      phase: Math.random() * Math.PI * 2,
+    });
+  }
+}
+
+function drawAtmosphericParticles(now){
+  _ensureAtmosParticles();
+  if(!curZone || _atmosParticles.length === 0) return;
+  const recipe = ATMOS_RECIPES[curZone.id];
+  if(!recipe) return;
+  ctx.save();
+  ctx.fillStyle = recipe.color;
+  // Ember particles get an additive glow
+  if(recipe.kind === 'embers'){
+    ctx.shadowColor = '#ff6b2c';
+    ctx.shadowBlur = 6;
+  }
+  _atmosParticles.forEach(p => {
+    // Drift
+    p.x += p.vx;
+    p.y += p.vy;
+    // Wrap at edges
+    if(p.x < -10) p.x = W + 10;
+    if(p.x > W + 10) p.x = -10;
+    if(p.y < -10) p.y = H + 10;
+    if(p.y > H + 10) p.y = -10;
+    // Subtle pulse for embers / spores (size throbs slightly)
+    let drawSize = p.size;
+    if(recipe.kind === 'embers' || recipe.kind === 'spores'){
+      drawSize = p.size * (0.85 + 0.15 * Math.sin(now * 0.003 + p.phase));
+    }
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, drawSize, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.restore();
+}
+
+// Per-zone vignette color — tints the dark edges a distinctive hue so
+// each zone has its own atmospheric signature. Values chosen to complement
+// the ambColor but be darker (this is the OUTSIDE edge of the vignette).
+const ZONE_TINT_EDGE = {
+  ashen:  'rgba(20, 15, 30, 0.85)',       // cold purple-black
+  crypts: 'rgba(18, 10, 5, 0.85)',         // bone-brown black
+  mire:   'rgba(5, 18, 10, 0.85)',         // deep swamp green
+  spire:  'rgba(30, 8, 3, 0.85)',          // ember-red shadow
+};
+
+function drawVignetteAndTint(now){
+  if(!curZone) return;
+  // Vignette — radial gradient from transparent at player to dark at edges
+  // Player screen position (after camera offset):
+  const px = W / 2;
+  const py = H / 2;
+  const radius = Math.max(W, H) * 0.8;
+  const innerR = Math.min(W, H) * 0.22;     // clear center
+  const edgeColor = ZONE_TINT_EDGE[curZone.id] || 'rgba(0, 0, 0, 0.85)';
+  const grad = ctx.createRadialGradient(px, py, innerR, px, py, radius);
+  grad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+  grad.addColorStop(0.5, edgeColor.replace(/[\d.]+\)$/, '0.35)'));  // mid-falloff
+  grad.addColorStop(1, edgeColor);
+  ctx.save();
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  // Subtle overall color wash — multiplies the scene with ambient zone color
+  // at very low alpha. Gives every zone a unified hue.
+  if(curZone.ambColor){
+    ctx.globalAlpha = 0.08;
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.fillStyle = curZone.ambColor;
+    ctx.fillRect(0, 0, W, H);
+  }
+  ctx.restore();
+}
+
 // Updates ground FX each frame. Called from update().
 function updateGroundFX(dt,now){
   for(let i=groundFX.length-1;i>=0;i--){
@@ -9379,6 +9516,19 @@ function render(now){
   ctx.globalAlpha=1;ctx.shadowBlur=0;
 
   ctx.restore();
+
+  // ═════ VIGNETTE + ZONE TINT ═════
+  // Dark edges + bright center around player + zone-atmospheric tint.
+  // Single biggest visual mood upgrade — makes the world feel cinematic.
+  // Skipped in camp (full bright, inviting hub feel).
+  if(typeof drawVignetteAndTint === 'function' && curZone && !curZone.isCamp){
+    drawVignetteAndTint(now);
+  }
+
+  // Atmospheric particles — per-zone drifting particles (dust, embers, fog)
+  if(typeof drawAtmosphericParticles === 'function' && curZone && !curZone.isCamp){
+    drawAtmosphericParticles(now);
+  }
 
   // Off-screen directional markers for zone NPCs with quests — drawn in
   // screen space so must come after the world-transform restore.
