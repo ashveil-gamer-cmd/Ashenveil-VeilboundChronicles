@@ -1182,6 +1182,244 @@ function devCreditAlchemyMats(){
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// GATHERING NODES — world props you walk up to and harvest
+// ═══════════════════════════════════════════════════════════════════
+// Each zone has a tier-appropriate material distribution. Walking within
+// GATHER_RADIUS of a node triggers auto-harvest. Node goes on cooldown,
+// respawns after NODE_RESPAWN_MS.
+
+const GATHER_NODE_TYPES = {
+  ashroot: {
+    material: 'ashroot',
+    color: '#86efac',
+    displayName: 'Ashroot',
+    size: 14,
+    quantity: 1,              // how many mats per harvest
+    harvestXp: 3,             // Alchemy XP per harvest
+    description: 'A pale green weed that grows from ash. Smells of burnt sage.',
+  },
+  chippedBone: {
+    material: 'chippedBone',
+    color: '#e5e7eb',
+    displayName: 'Chipped Bone',
+    size: 12,
+    quantity: 1,
+    harvestXp: 3,
+    description: 'Bone fragments with traces of old marrow. Useful in alchemy.',
+  },
+  veilsilk: {
+    material: 'veilsilk',
+    color: '#c084fc',
+    displayName: 'Veilsilk',
+    size: 16,
+    quantity: 1,
+    harvestXp: 8,
+    description: 'Ghostly silk gathered where the Veil is thin. Rare.',
+  },
+  blackbone: {
+    material: 'blackbone',
+    color: '#9ca3af',
+    displayName: 'Blackbone',
+    size: 14,
+    quantity: 1,
+    harvestXp: 8,
+    description: 'Bone darkened by the Veil itself. Hard as iron.',
+  },
+  mythbone: {
+    material: 'mythbone',
+    color: '#fbbf24',
+    displayName: 'Mythbone',
+    size: 18,
+    quantity: 1,
+    harvestXp: 20,
+    description: 'Bone of something that was never truly alive. Extremely rare.',
+  },
+  ashenheart: {
+    material: 'ashenheart',
+    color: '#ef4444',
+    displayName: 'Ashenheart',
+    size: 18,
+    quantity: 1,
+    harvestXp: 20,
+    description: 'A still-burning ember, cold to the touch. Extremely rare.',
+  },
+};
+
+// Per-zone node distribution. Weights control spawn probability.
+// Early zones get mostly common mats; late zones get rare.
+const ZONE_GATHER_DISTRIBUTIONS = {
+  ashen:  {ashroot: 60, chippedBone: 40},                                               // Starter zone — all commons
+  crypts: {ashroot: 30, chippedBone: 40, veilsilk: 15, blackbone: 15},                  // Mid — mix of common + rare
+  mire:   {veilsilk: 35, blackbone: 30, chippedBone: 20, mythbone: 10, ashroot: 5},     // Late — mostly rare
+  spire:  {veilsilk: 25, blackbone: 25, mythbone: 30, ashenheart: 20},                  // Endgame — mostly mythic
+};
+
+// Spawn tuning
+const GATHER_NODES_PER_ZONE = 24;
+const GATHER_RADIUS = 55;
+const NODE_RESPAWN_MS = 60000;        // 1 minute respawn per node
+
+// Generate gather nodes for the current zone. Called after environment gen.
+// Skips dungeon zones — gathering only in the open world.
+function generateGatherNodes(){
+  if(typeof gatherNodes === 'undefined') return;
+  gatherNodes.length = 0;
+  const zone = (typeof curZone !== 'undefined') ? curZone : null;
+  if(!zone) return;
+  if(zone.isCamp) return;                                      // no gathering in camp
+  if(typeof dungeonState !== 'undefined' && dungeonState.active) return;  // skip dungeons
+  const dist = ZONE_GATHER_DISTRIBUTIONS[zone.id];
+  if(!dist) return;
+  // Build weighted type pool from distribution
+  const pool = [];
+  Object.entries(dist).forEach(([type, weight]) => {
+    for(let i = 0; i < weight; i++) pool.push(type);
+  });
+  if(pool.length === 0) return;
+  // Scatter nodes across the world. Avoid props + paths slightly.
+  for(let i = 0; i < GATHER_NODES_PER_ZONE; i++){
+    const type = pool[Math.floor(Math.random() * pool.length)];
+    const nodeData = GATHER_NODE_TYPES[type];
+    if(!nodeData) continue;
+    // Find a clear position — try up to 20 times
+    let x, y, placed = false;
+    for(let tries = 0; tries < 20; tries++){
+      x = 200 + Math.random() * (WORLD_W - 400);
+      y = 200 + Math.random() * (WORLD_H - 400);
+      if(typeof getPropCollisionAt === 'function' && !getPropCollisionAt(x, y, 30)){
+        placed = true;
+        break;
+      }
+    }
+    if(!placed) continue;
+    gatherNodes.push({
+      x, y,
+      type,
+      nodeData,
+      harvested: false,
+      respawnAt: 0,
+      bobPhase: Math.random() * Math.PI * 2,    // for gentle animation
+    });
+  }
+}
+
+// Called each frame. Check proximity, auto-harvest, handle respawns.
+function updateGatherNodes(now){
+  if(!gatherNodes || gatherNodes.length === 0) return;
+  for(let i = 0; i < gatherNodes.length; i++){
+    const n = gatherNodes[i];
+    // Respawn check
+    if(n.harvested && now >= n.respawnAt){
+      n.harvested = false;
+    }
+    if(n.harvested) continue;
+    // Proximity check
+    const dx = player.x - n.x, dy = player.y - n.y;
+    if(dx*dx + dy*dy < GATHER_RADIUS*GATHER_RADIUS){
+      harvestNode(n, now);
+    }
+  }
+}
+
+function harvestNode(node, now){
+  node.harvested = true;
+  node.respawnAt = now + NODE_RESPAWN_MS;
+  // Credit the material
+  if(professions.Alchemy && professions.Alchemy.materials){
+    const mats = professions.Alchemy.materials;
+    const qty = node.nodeData.quantity || 1;
+    mats[node.type] = (mats[node.type] || 0) + qty;
+  }
+  // Grant Alchemy XP
+  if(typeof addProfXP === 'function'){
+    addProfXP('Alchemy', node.nodeData.harvestXp || 3);
+  }
+  // Feed message
+  if(typeof addFeed === 'function'){
+    addFeed(`⚗ +${node.nodeData.quantity} ${node.nodeData.displayName}`, node.nodeData.color);
+  }
+  // Visual pop
+  if(typeof pushGroundFX === 'function'){
+    pushGroundFX({
+      type:'ring', x:node.x, y:node.y, maxR:60, r:10,
+      color:node.nodeData.color, life:0.4, maxLife:0.4, expand:true,
+    });
+    pushGroundFX({
+      type:'bloom', x:node.x, y:node.y, r:30, maxR:30,
+      color:node.nodeData.color, life:0.3, maxLife:0.3,
+    });
+  }
+  if(typeof SFX !== 'undefined' && SFX.goldPickup) SFX.goldPickup();
+  if(typeof writeSave === 'function') writeSave();
+}
+
+// Render pass — draw nodes on the ground. Simple shape with color
+// from node type. Gentle bobbing animation so they read as "alive."
+function drawGatherNodes(now){
+  if(!gatherNodes || gatherNodes.length === 0) return;
+  gatherNodes.forEach(n => {
+    if(n.harvested) return;
+    // Cull offscreen with some margin
+    if(typeof camX !== 'undefined'){
+      const halfVW = typeof W !== 'undefined' ? W/(2*(typeof WORLD_ZOOM !== 'undefined' ? WORLD_ZOOM : 1)) : 600;
+      const halfVH = typeof H !== 'undefined' ? H/(2*(typeof WORLD_ZOOM !== 'undefined' ? WORLD_ZOOM : 1)) : 400;
+      if(n.x < camX - halfVW - 100 || n.x > camX + halfVW + 100) return;
+      if(n.y < camY - halfVH - 100 || n.y > camY + halfVH + 100) return;
+    }
+    const bob = Math.sin(now * 0.002 + n.bobPhase) * 2;
+    const size = n.nodeData.size;
+    const color = n.nodeData.color;
+    ctx.save();
+    // Soft aura beneath the node — makes it findable in cluttered zones
+    ctx.globalAlpha = 0.5;
+    const grad = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, size * 2.5);
+    grad.addColorStop(0, color + 'aa');
+    grad.addColorStop(1, color + '00');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, size * 2.5, 0, Math.PI*2);
+    ctx.fill();
+    // The node itself — a glowing bulb. Leaves/sticks extending upward.
+    ctx.globalAlpha = 0.95;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 14;
+    // Rounded bulb
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.ellipse(n.x, n.y + bob, size * 0.65, size * 0.85, 0, 0, Math.PI*2);
+    ctx.fill();
+    // Inner highlight
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#ffffff';
+    ctx.globalAlpha = 0.55;
+    ctx.beginPath();
+    ctx.ellipse(n.x - size*0.15, n.y + bob - size*0.25, size*0.18, size*0.25, 0, 0, Math.PI*2);
+    ctx.fill();
+    // Leaves — 3 small petals fanning upward
+    ctx.globalAlpha = 0.82;
+    ctx.fillStyle = color;
+    for(let p = -1; p <= 1; p++){
+      const a = -Math.PI/2 + p * 0.4;
+      const lx = n.x + Math.cos(a) * size * 0.4;
+      const ly = n.y + bob + Math.sin(a) * size * 0.4;
+      ctx.beginPath();
+      ctx.ellipse(lx, ly - 4, 3, 6, a + Math.PI/2, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.restore();
+  });
+}
+
+// Expose gather functions globally
+if(typeof window !== 'undefined'){
+  window.GATHER_NODE_TYPES = GATHER_NODE_TYPES;
+  window.ZONE_GATHER_DISTRIBUTIONS = ZONE_GATHER_DISTRIBUTIONS;
+  window.generateGatherNodes = generateGatherNodes;
+  window.updateGatherNodes = updateGatherNodes;
+  window.drawGatherNodes = drawGatherNodes;
+}
+
 // Expose alchemy API globally so UI + dev console can call it
 if(typeof window !== 'undefined'){
   window.ALCHEMY_RECIPES = ALCHEMY_RECIPES;
