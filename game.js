@@ -6391,6 +6391,16 @@ function updatePortal(dt,now){
   // Check player proximity — show/hide the confirmation prompt instead of auto-channeling
   const dx=player.x-p.x, dy=player.y-p.y, d=Math.sqrt(dx*dx+dy*dy);
   const nearPortal=d<PORTAL_ENTRY_RADIUS*1.8; // slightly bigger radius for prompt visibility
+
+  // AFK AUTO-ENTER — when AFK mode is active and player wanders near a
+  // portal, enter immediately. AFK players can't tap prompts, so this
+  // lets them actually participate in dungeon content.
+  if(nearPortal && player.afkEnabled && !dungeonState.active){
+    addFeed(`⚑ AFK — entering ${p.def.name}`, p.def.color);
+    confirmPortalEntry();
+    return;
+  }
+
   const promptEl=document.getElementById('portalPrompt');
   if(promptEl){
     if(nearPortal){
