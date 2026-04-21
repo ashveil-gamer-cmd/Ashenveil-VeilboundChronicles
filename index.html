@@ -79,6 +79,33 @@
 <div id="musicLabel" id="musicLabel">♪ —</div>
 
 <!-- ABILITY BAR -->
+<div id="potionBar">
+  <div class="potion-slot" id="potSlot0" data-recipe="healing_draught" onclick="usePotionSlot(0)">
+    <span class="pot-hotkey">1</span>
+    <span class="pot-icon" id="potIcon0">❤</span>
+    <span class="pot-tier" id="potTier0"></span>
+    <span class="pot-count" id="potCount0">0</span>
+  </div>
+  <div class="potion-slot" id="potSlot1" data-recipe="aegis_draught" onclick="usePotionSlot(1)">
+    <span class="pot-hotkey">2</span>
+    <span class="pot-icon" id="potIcon1">🛡</span>
+    <span class="pot-tier" id="potTier1"></span>
+    <span class="pot-count" id="potCount1">0</span>
+  </div>
+  <div class="potion-slot" id="potSlot2" data-recipe="fury_draught" onclick="usePotionSlot(2)">
+    <span class="pot-hotkey">3</span>
+    <span class="pot-icon" id="potIcon2">⚔</span>
+    <span class="pot-tier" id="potTier2"></span>
+    <span class="pot-count" id="potCount2">0</span>
+  </div>
+  <div class="potion-slot" id="potSlot3" data-recipe="swiftness_draught" onclick="usePotionSlot(3)">
+    <span class="pot-hotkey">4</span>
+    <span class="pot-icon" id="potIcon3">↯</span>
+    <span class="pot-tier" id="potTier3"></span>
+    <span class="pot-count" id="potCount3">0</span>
+  </div>
+</div>
+
 <div id="abilityBar">
   <div class="ab ready" id="ab0" onclick="playerCast(0)">
     <span class="ab-hotkey">Q</span>
