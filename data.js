@@ -156,6 +156,18 @@ const CAMP_NPCS = [
     // Conditional visibility — only render when veilgate is unlocked
     unlockCondition:'veilgate',
   },
+  {
+    // The Veiled Alchemist — profession trainer for Alchemy.
+    // Gives the Alchemy quest chain. Introduced in the Alchemy profession
+    // launch. Positioned in the east of camp, away from the quest hub.
+    id:'alchemist', name:'The Veiled Alchemist', role:'questgiver',
+    x:360, y:-40,                            // east of center
+    color:'#86efac', accent:'#bbf7d0',
+    description:'Her fingers are stained with ash and sap. Bottles hang from her belt — some glow, others weep.',
+    flavor:'"Alchemy is the art of making the dead useful again. That is all of it."',
+    onInteract:'openAlchemistDialogue',
+    npcType:'ghost-alchemist',
+  },
 ];
 
 // Special world position: where the central campfire sits
