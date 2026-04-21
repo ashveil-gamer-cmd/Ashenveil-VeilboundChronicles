@@ -10372,6 +10372,15 @@ function executeNpcInteraction(npc){
         addFeed(`"You are not ready for what lies beyond."`, '#fbbf24');
       }
     },
+    // Alchemist — The Veiled Alchemist. Opens a trainer dialogue filtered
+    // to only her Alchemy profession quests.
+    openAlchemistDialogue: ()=>{
+      if(typeof openAlchemistDialogue === 'function'){
+        openAlchemistDialogue();
+      } else if(typeof addFeed === 'function'){
+        addFeed(`"Alchemy is the art of making the dead useful again."`, '#86efac');
+      }
+    },
   };
   const fn = handlers[npc.onInteract];
   if(fn){ fn(); return true; }
@@ -10571,6 +10580,9 @@ function drawCampNpcFigure(npc, pos, now){
     // The Veilwarden — tall, imposing, crowned presence.
     // Stocky like a warrior but TALLER, signaling elevated status.
     bodyW = 17; bodyTop = 12; bodyHeight = 42; headR = 8; headY = -26;
+  } else if(npcType === 'ghost-alchemist'){
+    // The Veiled Alchemist — slight, slightly hunched. Workbench posture.
+    bodyW = 13; bodyTop = 11; bodyHeight = 32; headR = 7; headY = -19;
   }
 
   // ─── SHADOW ───
@@ -10808,6 +10820,47 @@ function drawCampNpcFigure(npc, pos, now){
     ctx.restore();
     ctx.globalAlpha = 1;
     ctx.shadowBlur = 0;
+  } else if(npc.role === 'questgiver' && npc.id === 'alchemist'){
+    // The Veiled Alchemist — three floating potion vials drifting around her,
+    // each a different color. Small green bubbles rise from her hands.
+    const spin = now * 0.0008;
+    const vialColors = ['#ef4444', '#60a5fa', '#86efac']; // healing/aegis/swiftness
+    for(let i = 0; i < 3; i++){
+      const a = spin + (i * Math.PI * 2 / 3);
+      const vx = Math.cos(a) * 20;
+      const vy = Math.sin(a * 1.5) * 6 - 14;
+      ctx.save();
+      ctx.translate(vx, vy);
+      // Vial body
+      ctx.shadowColor = vialColors[i];
+      ctx.shadowBlur = 8;
+      ctx.fillStyle = vialColors[i];
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 2.5, 3.5, 0, 0, Math.PI*2);
+      ctx.fill();
+      // Stopper
+      ctx.fillStyle = '#3a2a18';
+      ctx.shadowBlur = 0;
+      ctx.fillRect(-1, -5, 2, 2);
+      ctx.restore();
+    }
+    // Bubbles rising from her hands — green wisps
+    const bubbleCount = 3;
+    for(let b = 0; b < bubbleCount; b++){
+      const bt = ((now * 0.0015) + b * 0.33) % 1;           // 0 → 1 over ~660ms
+      const bx = -6 + Math.sin(now * 0.003 + b) * 3;
+      const by = 5 - bt * 18;                                // rises from waist up
+      ctx.save();
+      ctx.globalAlpha = (1 - bt) * 0.75;
+      ctx.fillStyle = '#86efac';
+      ctx.shadowColor = '#86efac';
+      ctx.shadowBlur = 6;
+      ctx.beginPath();
+      ctx.arc(bx, by, 1.4, 0, Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+    }
   }
   ctx.restore();
 
