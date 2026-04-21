@@ -6890,7 +6890,16 @@ function shouldAfkCast(idx, target, crowdCount, now){
   // Hollowcaller ability logic
   if(cls === 'hollowcaller'){
     if(idx === 0){
-      // Raise Spirit — always good to cast if we have spirit room
+      // Raise Spirit — skip if we're at spirit cap AND every spirit is
+      // already rank 3 (nothing left to promote, nothing to spawn).
+      // This prevents the AFK loop from hammering Raise every frame with
+      // no effect, which paralyzed the character and spammed the feed log.
+      const perms = spirits.filter(s => !s.isTemp && !s.dead);
+      const cap = player.maxBonds || MAX_SPIRITS;
+      if(perms.length >= cap){
+        const allMax = perms.every(sp => (sp.rank || 1) >= 3);
+        if(allMax) return false;
+      }
       return true;
     }
     if(idx === 1){
